@@ -325,6 +325,7 @@ Everything in §1–8 still holds. These are additions; every one must be valida
 | camera | `"to": "<size>"`, `"toOn": [...]` | for `push-in` / `pull-out`: the move ends at that size's framing (of `toOn`, default `on`). |
 | camera | `"zoomTo": k` | the move ends at k × the start zoom. |
 | camera | `"moveAt"`, `"moveDur"` | the move happens between these seconds of the shot (eased); before/after it the camera holds. |
+| shot | `"time"`, `"grade"`, `"gradeTo"` | a shot may override the scene's time of day (a name or `{ "from", "to" }`, blended across the shot) and grade; `gradeTo` blends from `grade` to another grade (`"none"` = no special grade) across the shot. Example (a time-lapse): `"time": { "from": "night", "to": "dawn" }, "grade": "memory", "gradeTo": "none"`. |
 | scene | `"overlays": ["name" \| { "name", "params" }]` | persistent drawings for the whole scene. Built-in fx names keep working; any other name is looked up in `custom.mjs` `overlays` (below). |
 | scene | `"rim": { "dir", "color", "strength", "start", "rise", "width" }` | a rim light on every visible actor, drawn **after the grade** so night doesn't kill it: the actor's silhouette edge that faces `dir` (`left`, `right`, `top`, `upper-left`, `upper-right`) glows `color` (screen blend) at `strength` 0..1, `width` screen px (default 3, at least 2). `start` is a mark name or seconds from scene start; strength eases in over `rise` s. |
 | sfx beat | names | validated against `SFX_NAMES`/`SFX_ALIASES` from `engine/audio/sfx.mjs` plus `custom.mjs` `sounds`; unknown names are problems. |

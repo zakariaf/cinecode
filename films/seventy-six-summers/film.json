@@ -71,7 +71,7 @@
             { "do": "pose", "who": "young_nell", "pose": "sit-ground", "dur": 0.4 },
             { "sfx": "hum", "caption": "[hums]", "params": { "notes": "G4:1 E4:0.5 G4:0.5 A4:2 C5:3", "tempo": 100, "voice": "child" } }, { "wait": 4.6, "with": "prev" }
           ], "hold": 0.2 },
-        { "id": "1.6", "camera": { "size": "establishing", "on": ["stone_front"] },
+        { "id": "1.6", "camera": { "size": "establishing", "on": ["stone_front"] }, "time": { "from": "night", "to": "dawn" }, "grade": "memory", "gradeTo": "none",
           "beats": [
             { "do": "custom", "name": "timelapse", "dur": 4.0, "at": 0 },
             { "do": "fade", "who": "young_nell", "to": 0, "dur": 1.2, "at": 0.2 },
