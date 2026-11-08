@@ -27,7 +27,7 @@ engine/cast/<kind>.mjs      one file per rig                       (owner: rigs;
 engine/set/set.mjs          makeSet(), anchors, props, routing     (owner: sets)
 engine/set/kits/<kit>.mjs   one file per location kit              (owner: sets)
 engine/film/*.mjs           load, validate, compile, camera, frame (owner: film)
-engine/audio/wav.mjs        WAV read/write, resample               (owner: voice)
+engine/audio/wav.mjs        WAV read/write, resample               (done; read-only)
 engine/audio/voice.mjs      Gemini TTS + cache + QA + lip envelope (owner: voice)
 engine/audio/synth.mjs      DSP building blocks                    (owner: music)
 engine/audio/music.mjs      procedural score                       (owner: music)
@@ -254,7 +254,7 @@ frameInfo(plan, t);                                        // geometry for lint/
 
 All audio is 48 kHz. Internal buffers are `Float32Array`s (mono) or `{ L, R }`.
 
-- **`wav.mjs`** (owner: voice): `readWav(path) → { sampleRate, channels: Float32Array[] }`, `writeWav(path, channels, sampleRate, bits = 16)`, `resample(f32, from, to)`, `rms(f32, sampleRate, fps) → number[]`.
+- **`wav.mjs`** (already written; shared, read-only): `readWav(path)`, `parseWav(buf) → { sampleRate, channels: Float32Array[] }`, `writeWav(path, channels, sampleRate, bits = 16)`, `encodeWav(channels, sampleRate, bits)`, `resample(f32, from, to)`, `rms(f32, sampleRate, fps) → number[]`, `dbToGain`, `gainToDb`, `SAMPLE_RATE` (48000).
 - **`voice.mjs`** (owner: voice): `voiceLines(film, plan, { cacheDir, model = 'gemini-3.8-flash-lite-tts', qaModel = 'gemini-3.8-flash', apiKey = process.env.GEMINI_API_KEY, concurrency = 2, onProgress }) → Map lineId → { wav, dur, env, qa: { wer, transcript } }`.
   - Request format: text = `"[<cast voice tone>, <line tone>] <text>"` (the bracketed direction is not spoken), `generationConfig.responseModalities = ["AUDIO"]`, `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName`. No system instruction (the lite model rejects it). The response is base64 WAV (24 kHz, 16-bit mono) in `candidates[0].content.parts[0].inlineData.data`.
   - **Cache:** `cacheDir/<id>.wav` + `<id>.json` (meta + qa + env). Cache hit → no network. Cached files are committed, so renders are reproducible without a key.
