@@ -6,6 +6,6 @@
   "type": "module",
   "bin": { "cinecode": "bin/cinecode.mjs" },
   "engines": { "node": ">=20" },
-  "scripts": { "test": "node --test test/" },
+  "scripts": { "test": "node --test test/*.test.mjs" },
   "dependencies": { "@napi-rs/canvas": "1.1.0" }
 }

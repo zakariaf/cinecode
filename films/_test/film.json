@@ -1,0 +1,553 @@
+{
+  "title": "The Morning Race",
+  "logline": "A boastful hare, a patient tortoise, a curious child and an old fox share one long day.",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "captions": "all"
+  },
+  "titles": {
+    "open": {
+      "title": "The Morning Race",
+      "subtitle": "a cinecode test film",
+      "dur": 3.5
+    },
+    "end": {
+      "lines": [
+        "The End",
+        "made entirely in code"
+      ],
+      "dur": 3.5
+    }
+  },
+  "voices": {
+    "narrator": {
+      "voice": "Sulafat",
+      "tone": "warm, gentle storyteller"
+    },
+    "hare": {
+      "voice": "Puck",
+      "tone": "bright, cocky, quick"
+    },
+    "tortoise": {
+      "voice": "Algenib",
+      "tone": "slow, kind, a little gravelly"
+    },
+    "pip": {
+      "voice": "Leda",
+      "tone": "small, curious child"
+    },
+    "fox": {
+      "voice": "Algieba",
+      "tone": "smooth, sly, amused"
+    }
+  },
+  "cast": {
+    "hare": {
+      "rig": "hare",
+      "name": "Hare",
+      "voice": "hare"
+    },
+    "tortoise": {
+      "rig": "tortoise",
+      "name": "Tortoise",
+      "voice": "tortoise",
+      "scale": 1.3
+    },
+    "fox": {
+      "rig": "fox",
+      "name": "Old Fox",
+      "voice": "fox"
+    },
+    "pip": {
+      "rig": "human",
+      "name": "Pip",
+      "voice": "pip",
+      "params": {
+        "age": "child",
+        "hair": "#3a2a20",
+        "shirt": "#e0703a"
+      }
+    },
+    "owl": {
+      "rig": "owl",
+      "name": "Owl"
+    },
+    "wren": {
+      "rig": "songbird",
+      "name": "Wren"
+    }
+  },
+  "sets": {
+    "meadow": {
+      "kit": "meadow"
+    },
+    "stream": {
+      "kit": "stream"
+    }
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "set": "meadow",
+      "time": "morning",
+      "music": {
+        "mood": "pastoral",
+        "intensity": 0.4
+      },
+      "ambience": "auto",
+      "overlays": [
+        "motes"
+      ],
+      "actors": {
+        "tortoise": {
+          "at": "x:1420",
+          "face": "right"
+        },
+        "hare": {
+          "at": "stump_top",
+          "face": "left",
+          "pose": "sit"
+        },
+        "owl": {
+          "at": "owl_hollow",
+          "pose": "sleep"
+        },
+        "wren": {
+          "at": "branch_tip",
+          "face": "left"
+        },
+        "pip": {
+          "offstage": "left"
+        }
+      },
+      "shots": [
+        {
+          "id": "s01-01",
+          "camera": {
+            "size": "establishing",
+            "move": "push-in"
+          },
+          "beats": [
+            {
+              "say": "narrator",
+              "text": "One bright morning, the meadow woke up.",
+              "tone": "softly",
+              "at": 0.3
+            },
+            {
+              "do": "walk",
+              "who": "tortoise",
+              "to": "x:1520",
+              "speed": 2,
+              "with": "prev"
+            }
+          ],
+          "hold": 0.2
+        },
+        {
+          "id": "s01-02",
+          "camera": {
+            "size": "wide",
+            "on": [
+              "hare",
+              "tortoise"
+            ]
+          },
+          "beats": [
+            {
+              "do": "hop",
+              "who": "hare",
+              "to": "near:tortoise"
+            },
+            {
+              "say": "hare",
+              "text": "Morning, slowcoach!",
+              "tone": "teasing",
+              "expr": "smug"
+            }
+          ],
+          "hold": 0.2
+        },
+        {
+          "id": "s01-03",
+          "camera": {
+            "size": "medium",
+            "on": [
+              "tortoise",
+              "hare"
+            ],
+            "angle": "low"
+          },
+          "beats": [
+            {
+              "do": "look",
+              "who": "tortoise",
+              "at": "hare"
+            },
+            {
+              "say": "tortoise",
+              "text": "Slow and steady, friend.",
+              "tone": "calm"
+            },
+            {
+              "do": "gesture",
+              "who": "hare",
+              "name": "laugh"
+            },
+            {
+              "sfx": "chime",
+              "with": "prev",
+              "gain": 0.4,
+              "caption": "[a bell rings]"
+            }
+          ],
+          "hold": 0.1
+        },
+        {
+          "id": "s01-04",
+          "camera": {
+            "size": "close",
+            "on": [
+              "hare"
+            ],
+            "move": "handheld"
+          },
+          "beats": [
+            {
+              "say": "hare",
+              "text": "I could run to the pond and back!",
+              "tone": "boastful",
+              "expr": "happy"
+            }
+          ],
+          "hold": 0.2
+        },
+        {
+          "id": "s01-05",
+          "camera": {
+            "size": "full",
+            "on": [
+              "hare"
+            ],
+            "move": "track"
+          },
+          "beats": [
+            {
+              "do": "run",
+              "who": "hare",
+              "to": "pond_edge"
+            },
+            {
+              "music": "sting",
+              "name": "surprise",
+              "with": "prev"
+            },
+            {
+              "do": "run",
+              "who": "hare",
+              "to": "right-of:tortoise"
+            },
+            {
+              "do": "turn",
+              "who": "hare",
+              "face": "left"
+            }
+          ],
+          "hold": 0.1
+        },
+        {
+          "id": "s01-06",
+          "camera": {
+            "size": "wide",
+            "on": [
+              "pip",
+              "tortoise"
+            ],
+            "angle": "high"
+          },
+          "beats": [
+            {
+              "do": "enter",
+              "who": "pip",
+              "from": "left",
+              "to": "left-of:tortoise",
+              "run": true
+            },
+            {
+              "say": "pip",
+              "text": "Hello, Mister Tortoise!",
+              "tone": "delighted",
+              "expr": "happy"
+            },
+            {
+              "do": "gesture",
+              "who": "pip",
+              "name": "wave",
+              "with": "prev"
+            }
+          ],
+          "hold": 0.1
+        },
+        {
+          "id": "s01-07",
+          "camera": {
+            "size": "extreme-close",
+            "on": [
+              "tortoise"
+            ],
+            "move": "push-in"
+          },
+          "beats": [
+            {
+              "do": "emote",
+              "who": "tortoise",
+              "expr": "happy"
+            },
+            {
+              "do": "turn",
+              "who": "tortoise",
+              "face": "left"
+            },
+            {
+              "say": "tortoise",
+              "text": "Hello, little one.",
+              "tone": "warm"
+            },
+            {
+              "do": "blink",
+              "who": "tortoise"
+            }
+          ],
+          "hold": 0.3
+        },
+        {
+          "id": "s01-08",
+          "camera": {
+            "size": "full",
+            "on": [
+              "owl"
+            ],
+            "move": "tilt-up"
+          },
+          "beats": [
+            {
+              "do": "wake",
+              "who": "owl",
+              "at": 0.4
+            },
+            {
+              "sfx": "owl-hoot",
+              "with": "prev",
+              "on": "owl"
+            },
+            {
+              "do": "fly",
+              "who": "wren",
+              "to": "stump_top",
+              "with": "prev",
+              "speed": 2.4
+            },
+            {
+              "fx": "sparkle",
+              "on": "owl",
+              "with": "prev"
+            },
+            {
+              "do": "custom",
+              "name": "sunbeam",
+              "dur": 1.4,
+              "with": "prev",
+              "after": 0.6
+            }
+          ],
+          "hold": 0.2
+        }
+      ]
+    },
+    {
+      "id": "s02",
+      "set": "stream",
+      "time": {
+        "from": "golden",
+        "to": "twilight"
+      },
+      "music": {
+        "mood": "tender",
+        "intensity": 0.3
+      },
+      "ambience": "auto",
+      "overlays": [
+        "fireflies"
+      ],
+      "actors": {
+        "hare": {
+          "at": "bank_left",
+          "face": "right"
+        },
+        "tortoise": {
+          "at": "x:820",
+          "face": "right"
+        },
+        "fox": {
+          "at": "x:1960",
+          "face": "left",
+          "pose": "sit"
+        }
+      },
+      "shots": [
+        {
+          "id": "s02-01",
+          "camera": {
+            "size": "establishing",
+            "move": "tilt-down"
+          },
+          "beats": [
+            {
+              "say": "narrator",
+              "text": "By evening, they came to the stream.",
+              "tone": "softly",
+              "at": 0.3
+            }
+          ],
+          "hold": 0.2
+        },
+        {
+          "id": "s02-02",
+          "camera": {
+            "size": "full",
+            "on": [
+              "hare"
+            ],
+            "move": "track"
+          },
+          "beats": [
+            {
+              "do": "hop",
+              "who": "hare",
+              "to": "near:fox",
+              "speed": 1.6
+            },
+            {
+              "do": "stand",
+              "who": "fox",
+              "after": 0.2
+            }
+          ],
+          "hold": 0.1
+        },
+        {
+          "id": "s02-03",
+          "camera": {
+            "size": "close",
+            "on": [
+              "fox"
+            ]
+          },
+          "beats": [
+            {
+              "say": "fox",
+              "text": "Evening, friends. Mind the water.",
+              "tone": "amused",
+              "expr": "smug"
+            },
+            {
+              "do": "gesture",
+              "who": "fox",
+              "name": "bow",
+              "with": "prev",
+              "after": 0.4
+            }
+          ],
+          "hold": 0.1
+        },
+        {
+          "id": "s02-04",
+          "camera": {
+            "size": "medium",
+            "on": [
+              "hare",
+              "fox"
+            ],
+            "move": "pull-out"
+          },
+          "beats": [
+            {
+              "do": "gesture",
+              "who": "hare",
+              "name": "yawn"
+            },
+            {
+              "do": "sit",
+              "who": "fox",
+              "with": "prev"
+            },
+            {
+              "do": "lie",
+              "who": "hare"
+            },
+            {
+              "do": "sleep",
+              "who": "hare"
+            },
+            {
+              "music": {
+                "mood": "night",
+                "intensity": 0.25
+              },
+              "with": "prev"
+            },
+            {
+              "wait": 0.4
+            }
+          ],
+          "hold": 0.1
+        },
+        {
+          "id": "s02-05",
+          "camera": {
+            "size": "wide",
+            "on": [
+              "tortoise",
+              "fox"
+            ],
+            "move": "pan"
+          },
+          "beats": [
+            {
+              "do": "pose",
+              "who": "tortoise",
+              "pose": "sit",
+              "dur": 0.5
+            },
+            {
+              "say": "narrator",
+              "text": "And the tortoise kept watch.",
+              "tone": "softly, ending"
+            },
+            {
+              "fx": "fireflies",
+              "dur": 4,
+              "with": "prev"
+            },
+            {
+              "do": "exit",
+              "who": "fox",
+              "to": "right",
+              "with": "prev",
+              "after": 0.6
+            },
+            {
+              "do": "wake",
+              "who": "hare",
+              "with": "prev",
+              "after": 1.4
+            }
+          ],
+          "hold": 0.5
+        }
+      ]
+    }
+  ]
+}

@@ -13,8 +13,14 @@ export function rng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+const NOISE_TABLES = new Map();   // seed → 256-entry table; building it was the hottest path in rig drawing
 export function noise1(seed) {
-  const r = rng(seed * 9973 + 17), T = Array.from({ length: 256 }, r);
+  let T = NOISE_TABLES.get(seed);
+  if (!T) {
+    const r = rng(seed * 9973 + 17); T = Float64Array.from({ length: 256 }, r);
+    if (NOISE_TABLES.size > 8192) NOISE_TABLES.clear();
+    NOISE_TABLES.set(seed, T);
+  }
   return x => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return T[i & 255] * (1 - u) + T[(i + 1) & 255] * u; };
 }
 export const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
