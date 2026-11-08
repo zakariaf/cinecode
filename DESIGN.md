@@ -307,3 +307,61 @@ render [--jobs=N]   final film → out/<slug>.mp4 + out/<slug>.srt
 cast-sheet [kinds]  every rig in every pose/expression → out/cast-sheet.jpg
 set-sheet [kits]    every kit with anchors, colliders and walk regions drawn → out/set-sheet.jpg
 ```
+
+## 9. Round 2 extensions (all generic; first used by `films/seventy-six-summers`)
+
+Everything in §1–8 still holds. These are additions; every one must be validated by `validate.mjs`, documented in the module header, and tested.
+
+### 9.1 Storyboard additions (owner: film)
+
+| where | field | meaning |
+|---|---|---|
+| say beat | `tts` | what the voice actually says; `text` stays the caption. Example: `{ "say": "nell", "text": "[laughs]", "tts": "Hahaha!" }`. Plan lines get `speak` (= `tts ?? text`); the line id hashes `speak`. A line whose `text` starts with `[` is **non-verbal** (`line.nonverbal = true`). |
+| say beat | `trimEnd` | seconds cut off the end of the spoken audio (a line interrupted mid-word). The line's duration and lip sync use the trimmed audio. |
+| beat | `{ "mark": "bloom" }` | a named instant (0 s long, timed like any beat). `plan.marks = { bloom: <film time> }`. Names are unique per film. |
+| hop / place | `"to": "on:<actor>"` | **riding**: the actor sits on the other actor's mount point (see 9.2 `mount`). Scene actors may start mounted: `"fidget": { "on": "pebble", "pose": "sit" }`. A rider moves with its carrier, is drawn just in front of it (depth key + 0.01), casts no shadow, has contact kind `mount`, and keeps its own face/pose/gestures/speech. A rider can't walk/run; it hops off with an ordinary `hop` to a target. |
+| walk / run beat | `"wade": true`, `"depth"` | the route may cross water. While the contact point is inside a water polygon the actor **sinks**: `sink` grows with the distance travelled into the water (0.6 px per px) up to `depth` units × s (default: 1.1 × rig height, i.e. fully under). The actor is drawn shifted down by `sink` and clipped above the waterline (the un-sunk contact y), with a ripple ring at the waterline. Riders share the carrier's shift and waterline clip. It rises again the same way on the far side. |
+| look beat | `"to": "up" \| "sky" \| "down"` (plus existing targets) | sets `st.tilt` to +1 (up/sky) or −1 (down), blended over `rig.lookTime ?? 0.3` s. Use `to` for the target so `at` stays a time pin. |
+| camera | `"to": "<size>"`, `"toOn": [...]` | for `push-in` / `pull-out`: the move ends at that size's framing (of `toOn`, default `on`). |
+| camera | `"zoomTo": k` | the move ends at k × the start zoom. |
+| camera | `"moveAt"`, `"moveDur"` | the move happens between these seconds of the shot (eased); before/after it the camera holds. |
+| scene | `"overlays": ["name" \| { "name", "params" }]` | persistent drawings for the whole scene. Built-in fx names keep working; any other name is looked up in `custom.mjs` `overlays` (below). |
+| scene | `"rim": { "dir", "color", "strength", "start", "rise", "width" }` | a rim light on every visible actor, drawn **after the grade** so night doesn't kill it: the actor's silhouette edge that faces `dir` (`left`, `right`, `top`, `upper-left`, `upper-right`) glows `color` (screen blend) at `strength` 0..1, `width` screen px (default 3, at least 2). `start` is a mark name or seconds from scene start; strength eases in over `rise` s. |
+| sfx beat | names | validated against `SFX_NAMES`/`SFX_ALIASES` from `engine/audio/sfx.mjs` plus `custom.mjs` `sounds`; unknown names are problems. |
+| music | stings / moods | validated against `MOOD_NAMES` and `STING_NAMES` exported by `engine/audio/music.mjs` (one source of truth). Music cues also accept `motif`, `motifVoice`, `hold`, `downbeat`, `tempo` (see 9.4). |
+| top level | `"score": { "key": "C", "motif": "G4:1 E4:0.5 G4:0.5 A4:2 C5:3" }` | the film's melodic motif as `note:beats` tokens (see 9.4). |
+
+`custom.mjs` may also export:
+
+```js
+export const overlays = {
+  comet: { layer: 'sky', draw(ctx, api) {} },   // layers: 'sky' (screen space, after the sky, before back layers)
+};                                              // 'back' (world, after back layers, before props/actors)
+                                                // 'world' (world, after actors and world fx), 'front' (world, after front layers)
+                                                // 'grade' (screen, after the grade, before glow fx), 'screen' (screen, last before titles)
+export const sounds = { 'tiny-bell': ({ seed, dur, params }) => new Float32Array(48000) };   // 48 kHz mono
+```
+
+Overlay and custom-beat `api`: `{ t, st /* s since scene start */, su /* 0..1 scene progress */, lt /* s since shot start */, scene, shot, set, cam, W, H, plan, marks, params, seed, actor(id), anchor(name), toScreen([x, y]) → [sx, sy], toWorld([sx, sy]) → [x, y] }` (custom beats keep their `u` argument and also get these). The `world` transform is already applied for world layers; `toScreen` works in every layer.
+
+**Fixes owed (film):** the dissolve draws the *outgoing* scene with the *incoming* scene's actors (`picture()` must take the actors of the shot's own scene at t); the camera composes a subject's head from the highest head over the whole shot (use the resting head; ignore transient jump/gesture apexes); the validator must accept `touch` and `contact` on beats (lint reads them); `frameInfo` must apply `a.squash`.
+
+### 9.2 Rig additions (owners: rigs, human)
+
+- `st.tilt` −1..1: head pitch (+1 = look up as far as the species can, −1 = down). Rigs that can't pitch ignore it. Optional `rig.lookTime` (s) for slow lookers (tortoise ≈ 1.0).
+- `rig.mount(pose, params) → [ux, uy]`: the riding point in units relative to the contact point at face = 1, scale 1 (the film mirrors x by face and multiplies by s). Required for `tortoise`; optional elsewhere (e.g. deer, badger may add one).
+- Tortoise params: `star` (opacity 0..1 of a pale five-point natural marking, off-centre on a rear scute; 0 = none), `starCol`, `moss` (colour or `null`: moss patches on the shell top), `seam` (scute seam colour), `lids` (0..1 resting lid closure for an old animal), `wet` (0..1: darker, glossier shell and skin with a few falling drips animated by `st.t`), `iris`.
+- Squirrel params: `tail` (tail size multiplier, 0.4..1.8; < 0.7 also flattens it like a wet paintbrush).
+- Owl: an expression `one-eye` (one eye open, one shut).
+- Human (`human.mjs`): `hairStyle: 'braids'`; `glasses` may be a frame colour (true = default) and gets one small glint highlight on the near lens; `tear` param 0..1 (one extra wet highlight on the lower lid); `build: 'slight'`; `draw()` must accept `ctx = null` (bounds only, like the animal rigs); `jump-for-joy` must set `pose.lift`; `st.tilt`.
+
+### 9.3 Audio additions (owners: voice, sfx, music)
+
+- `voice.mjs`: speak `line.speak ?? line.text`; non-verbal lines (`line.nonverbal`) skip the WER gate (QA still transcribes; pass unless the take is empty or the direction is audible); `trimEnd` is applied after the cache (the cache stores the full take): cut, 2-frame fade-out, env recomputed — so `dur`/`env` returned are the trimmed ones.
+- `sfx.mjs` new generators (all deterministic, levels in the table, tested): `hum` (closed-mouth "mm" voice singing `params.notes` = `"G4:1 E4:0.5 …"` at `params.tempo` bpm, `params.voice` = `child | adult | elder`, vibrato and breath), `music-box` (comb-tine tones playing `params.notes`, `params.slow` 0..1 ritardando), `gasp`, `sniff`, `snore` (low reedy contrabassoon-like snore), `breath` (`params.heavy`), `slosh`, `bubbles`, `wind-swell` (a rising gust, `dur`), `drip`; alias `gate-creak` → `door-creak`, `laugh` is **not** synthesized (laughs are TTS lines).
+- `mix.mjs`: custom sounds from `plan.sounds` (compile copies `custom.mjs` `sounds` there); sfx `dur` and `params` passed through; `cinecode music`, `mix` and `animatic` must produce audio for `films/_test` even with no voices cached (missing lines are skipped with a warning).
+- `music.mjs`: `STING_NAMES` export; new stings `plunk` (pizzicato pluck), `stab` (timpani + brass hit), `swell`. **Motif:** `scoreFilm` reads `plan.score` (`{ key, motif }`, parsed `note:beats` tokens); a cue with `motif: n` states the first n notes on `motifVoice` (`bassoon | flute | cello | horn | celesta | violin | strings | music-box | tutti`) starting at the cue's first bar, at the cue's `tempo` (or the mood's); with `hold: true` the last stated note sustains to the cue's end (a held pedal). `downbeat: true` puts bar 1 exactly at the cue's `t0` (no fade-in lead; the previous cue is cut there) — used to land a chord on a mark. `music: "none"` fades the score out over 0.3 s at the scene start and keeps silence.
+
+### 9.4 Lint additions (owner: lint)
+
+Riders (`contact.kind === 'mount'`) are not floating and don't collide with their carrier; wading actors are allowed in water; scale/size rules divide by cast `scale`; riders and sunk actors use their visible (clipped) box for offscreen/size checks.
