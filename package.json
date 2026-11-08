@@ -1,0 +1,11 @@
+{
+  "name": "cinecode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Animated films from a storyboard, painted, animated, scored and mixed entirely by code. Only the voices come from a TTS model.",
+  "type": "module",
+  "bin": { "cinecode": "bin/cinecode.mjs" },
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test test/" },
+  "dependencies": { "@napi-rs/canvas": "1.1.0" }
+}
