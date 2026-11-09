@@ -6,20 +6,20 @@ All from the repo root. Scratch images go in `films/<slug>/out/` (or `out/` at t
 
 ```bash
 # every shot, middle frame (films/<slug>/out/sheet.jpg; big films make a huge grid, so prefer per-scene sheets)
-node bin/cinecode.mjs sheet films/<slug>
+cinecode sheet films/<slug>
 # one scene, bigger tiles: shot ids with --shots (NOT --t: --t=2.2 means 2.2 seconds)
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/s02.jpg --shots=2.1,2.2,2.3,2.4 --cols=2 --tile=640
+cinecode sheet films/<slug> --shots=2.1,2.2,2.3,2.4 --cols=2 --tile=640 -o films/<slug>/out/s02.jpg
 # debug overlay: actor boxes (yellow = speaking), head boxes (magenta), contact dots (green ground, orange air,
 # yellow anchor or mount), solid footprints (red), caption box (dashed), camera zoom and centre
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/s02-debug.jpg --shots=2.2,2.4 --debug --cols=2
+cinecode sheet films/<slug> --shots=2.2,2.4 --debug --cols=2 -o films/<slug>/out/s02-debug.jpg
 # a motion strip: one shot at several points (u = 0..1 of the shot), or explicit seconds with --t
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/strip-2.7.jpg --shots=2.7@0.05,2.7@0.25,2.7@0.45,2.7@0.65,2.7@0.85 --cols=5 --tile=384
+cinecode sheet films/<slug> --shots=2.7@0.05,2.7@0.25,2.7@0.45,2.7@0.65,2.7@0.85 --cols=5 --tile=384 -o films/<slug>/out/strip-2.7.jpg
 # a moment keyed to a mark (a flash, a landing): its film time is on the last line of timeline.mjs; pass it to --t
-node .claude/skills/cinecode/scripts/timeline.mjs films/<slug> 2.7
+node <skill>/scripts/timeline.mjs films/<slug> 2.7
 # full-resolution single stills (eyes, small characters): writes out.jpg, or out-0.jpg, out-1.jpg… for several
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/still.jpg --frame --shots=9.3@0.7
+cinecode sheet films/<slug> --frame --shots=9.3@0.7 -o films/<slug>/out/still.jpg
 # a set with every anchor, footprint, walk region and water drawn (stage from this)
-node bin/cinecode.mjs set-sheet meadow -o films/<slug>/out/set-meadow.jpg
+cinecode set-sheet meadow -o films/<slug>/out/set-meadow.jpg
 ```
 
 Middle frames lie about shots with movement: for any shot with a walk, a hop, an entrance, a camera move or a pose change, look at a strip (start, middle, end, and the moment of the action).
@@ -42,7 +42,7 @@ Fix, re-render only the shots you touched (and their neighbours, for continuity)
 
 ## Lint
 
-`node bin/cinecode.mjs lint films/<slug>` writes `out/lint.json` and `out/lint.jpg` (the offending frames with boxes, then a table of every rule with how to fix it) and exits 1 on errors. It is slow (about a minute for a 3½-minute film at `--step=0.5`, three times that at the default 1/6 s): run it in the background, and use `--step=0.5` while iterating. Fix every error. Judge each warning: some are intended (a cut-jump into an end title over the same sky). For `edge-cut`, `tangent` and `halo` the message ends with a change lint tried on the recompiled film (a camera `offset`, `size`, `zoom` or `angle`, or "stage <actor> about N px …": move where it stands as the shot starts and where it goes in it); it is printed only when it clears the fault without a new one, else the message says to re-block.
+`cinecode lint films/<slug>` writes `out/lint.json` and `out/lint.jpg` (the offending frames with boxes, then a table of every rule with how to fix it) and exits 1 on errors. It is slow (about a minute for a 3½-minute film at `--step=0.5`, three times that at the default 1/6 s): run it in the background, and use `--step=0.5` while iterating. Fix every error. Judge each warning: some are intended (a cut-jump into an end title over the same sky). For `edge-cut`, `tangent` and `halo` the message ends with a change lint tried on the recompiled film (a camera `offset`, `size`, `zoom` or `angle`, or "stage <actor> about N px …": move where it stands as the shot starts and where it goes in it); it is printed only when it clears the fault without a new one, else the message says to re-block.
 
 | rule | means | usual fix |
 |---|---|---|
@@ -63,7 +63,7 @@ Fix, re-render only the shots you touched (and their neighbours, for continuity)
 | scale | actor scale off the set's perspective | wrong y for the anchor depth; use the anchor |
 | timing | overlapping dialogue, shots < 1.2 s or seen on their own < 1.2 s after a dissolve or fade, captions faster than 20 chars/s | add `after`, lengthen the shot (the message gives the `dur`), split the line |
 
-Also run `node .claude/skills/cinecode/scripts/warnings.mjs films/<slug>`: compile warnings ("they stand too far apart for a full two-shot", "shows frog at 11% of the size it would get alone; pebble sets the framing", blocked routes, perch on a rig that can't) and misspelled fields, which `check` accepts silently. "no warnings" says little about framing: only lint and the sheets show the rest.
+Also run `node <skill>/scripts/warnings.mjs films/<slug>`: compile warnings ("they stand too far apart for a full two-shot", "shows frog at 11% of the size it would get alone; pebble sets the framing", blocked routes, perch on a rig that can't) and misspelled fields, which `check` accepts silently. "no warnings" says little about framing: only lint and the sheets show the rest.
 
 ## Parallel reviewers (big films)
 

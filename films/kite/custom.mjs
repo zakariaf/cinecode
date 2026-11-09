@@ -7,7 +7,7 @@
 //   "snag"  it is caught in the hawthorn: tilted, string slack, a puff of leaves, leaves over its edges.
 // Deterministic and stateless: everything comes from api.t, api.marks and the actors' draw state.
 
-import { rng } from '../../engine/core/lib.mjs';
+import { rng } from 'cinecode/lib';
 
 const INK = '#2b2320';
 const RED = '#c8443a', YEL = '#f2c94c', RED_D = '#9c2f28', YEL_D = '#d9a12e';

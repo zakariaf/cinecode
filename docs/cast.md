@@ -301,16 +301,19 @@ branch) with its legs and tail hanging. Change params mid-scene with a `set` bea
 
 ## Adding a rig
 
-A film can bring its own rigs in `films/<slug>/custom.mjs`: export them as `rigs` and use their `kind` in the cast.
-The easy way to write one is `makeRig` from `engine/cast/rig.mjs`, which turns a `paint()` function into the full rig
-contract: drawing at any position, scale and facing, the ground shadow, bounds for framing and lint, facial
-expressions, blinks, talking and head pitch. This example is a complete, working rig:
+A film can bring its own rigs: one file per rig, `films/<slug>/rigs/<kind>.mjs`, that default-exports it (for every
+film of a project, `cinecode/rigs/<kind>.mjs` at the project root; `custom.mjs` may also export a list as `rigs`).
+Use its `kind` in the cast. The easy way to write one is `makeRig` from `cinecode/rig`, which turns a `paint()`
+function into the full rig contract: drawing at any position, scale and facing, the ground shadow, bounds for framing
+and lint, facial expressions, blinks, talking and head pitch. This example is a complete, working rig that passes the
+gate, `cinecode verify-rig films/<slug>/rigs/pebblet.mjs` (the `build-rig` skill walks through a new rig from its
+starter, a small biped with planted feet):
 
 ```js
-// films/<slug>/custom.mjs
-import { makeRig, mixPose } from '../../engine/cast/rig.mjs';
-import { cel, eye, line } from '../../engine/core/style.mjs';
-import { ell } from '../../engine/core/lib.mjs';
+// films/<slug>/rigs/pebblet.mjs
+import { makeRig, mixPose } from 'cinecode/rig';
+import { cel, eye, line } from 'cinecode/style';
+import { ell } from 'cinecode/lib';
 
 // Pose fields are plain numbers that paint() reads: here a body drop `by` and a lean `ln` (radians).
 const stand = { by: 0, ln: 0 };
@@ -326,8 +329,8 @@ const pebblet = makeRig({
   gestures: { nod: { dur: 0.8, at: (u, base) => mixPose(base, { ...base, ln: 0.25 }, Math.sin(Math.PI * u)) } },
   // local units: origin = the contact point, +x = forward, y up is negative, the ground is y = 0
   paint(T, p, F, o) {
-    T.save(); T.translate(0, p.by); T.rotate(p.ln);
-    cel(T, ell(0, -18, 19, 18 - p.by / 2, 7, 0.5), o.P.body, 1.6, 1, 7);            // body, cel-shaded and inked
+    T.save(); T.translate(0, p.by - 18); T.rotate(p.ln); T.translate(0, 18);     // drop by `by`, lean about the middle
+    cel(T, ell(0, -18 - p.by / 2, 19, 18 - p.by / 2, 7, 0.5), o.P.body, 1.6, 1, 7);  // body, squashed onto the ground
     eye(T, 8, -24, 3, 3.6, F.eye, o.P.eye, F.look * 0.3, F.lid, F.tilt);            // expression, blinks, looks
     const m = 2 + 4 * F.open;                                                      // F.open: talk / expression
     line(T, [[6, -13], [10, -13 + m * 0.5 - F.smile * 1.5], [14, -13]], 0.8, { seed: 9 });
@@ -335,7 +338,7 @@ const pebblet = makeRig({
     T.restore();
   },
 });
-export const rigs = [pebblet];
+export default pebblet;
 ```
 
 ```json
@@ -357,13 +360,13 @@ How it fits together:
 - `F` is the face for this frame, from the expression, blink and lip sync: `F.eye` (`open`, `wide`, `happy`),
   `F.lid` (0..1), `F.open` (mouth, 0..1; it follows the voice while talking), `F.smile` (−1..1), `F.browY`,
   `F.browT`, `F.tilt`, `F.look` (−1..1 head turn), `F.pitch` (−1..1 head tilt). `eye()`, `brow()`, `cel()` and
-  `line()` in `engine/core/style.mjs` draw them in the house style. The helpers, all in local units and taking `T`
+  `line()` in `cinecode/style` draw them in the house style. The helpers, all in local units and taking `T`
   first: `cel(T, pts, colour, shade = 2.2, ink = 1.15, seed)` fills a closed outline, shades the side away from the
   light by `shade` units and inks it (`ink` 0: no outline); `line(T, pts, width, { seed, taper, color, closed })` an
   inked stroke; `fillP(T, pts, colour)` a flat fill; `dot(T, x, y, r, colour)`; `smoothPts(T, pts, { closed, px,
   corner })` rounds a polygon into a smooth outline; `eye(T, x, y, rx, ry, F.eye, iris, look, F.lid, F.tilt)` and
   `brow(T, x, y, w, F.browY, F.browT)`; `darken(hex, f)`, `lighten(hex, f)`, `rgba(hex, a)`. From
-  `engine/core/lib.mjs`: `ell(cx, cy, rx, ry, seed, wobble = 1.5, rot)` a hand-drawn ellipse as points, `rpoly(pts,
+  `cinecode/lib`: `ell(cx, cy, rx, ry, seed, wobble = 1.5, rot)` a hand-drawn ellipse as points, `rpoly(pts,
   r, { seed })` a rounded polygon, `rng(seed)` a seeded generator.
 - A prop is a rig too (a strawberry that splits and is eaten): no gaits or gestures to speak of (`gaits: { walk: () =>
   stand }`, `speeds: { walk: 1 }`), a pose per state (`split`) and params for the rest (`left: 1` → 0 as a half is
@@ -380,6 +383,8 @@ How it fits together:
 
 A rig written without `makeRig` must provide the contract in DESIGN.md §2 (`kind`, `draw(ctx, x, y, s, face, st)`
 returning `{ head, mouth, bounds }` and accepting `ctx = null`, `bbox`, `poses`, `gaits`, `gestures`, `expressions`).
-Check the result with `node bin/cinecode.mjs cast-sheet films/<slug> <kind>`. A rig used by more than one film
-belongs in `engine/cast/<kind>.mjs` (every file there is registered automatically) with a test in
-`test/rigs.test.mjs`.
+Check the result with `node bin/cinecode.mjs verify-rig <file>`: contract, size, bounds, ground, flip, determinism,
+face and motion, plus two images to look at (every pose, gait phase, gesture key and expression; a line-up beside the
+hare, the child and the mouse), then `node bin/cinecode.mjs cast-sheet films/<slug> <kind>`. A rig used by more than
+one film of a project goes in its `cinecode/rigs/`; one that becomes part of the engine in `engine/cast/<kind>.mjs`
+(every file there is registered automatically) with a test in `test/rigs.test.mjs`.

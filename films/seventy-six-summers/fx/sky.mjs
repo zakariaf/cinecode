@@ -54,10 +54,10 @@
 //                        it ends: the beat cuts on the empty land, never on a fading ghost).
 // Heavy fields (comet body, mist, masks) are painted at half resolution and scaled up (the clouds' lining, a thin line,
 // at full resolution over the clouds' box only). Everything is seeded.
-import { rng, clamp, lerp, smooth, easeInOut, canvas, blob } from '../../../engine/core/lib.mjs';
-import { paper } from '../../../engine/paint/atmos.mjs';
-import { getRig } from '../../../engine/cast/index.mjs';
-import { grade, mixGrade } from '../../../engine/film/grade.mjs';
+import { rng, clamp, lerp, smooth, easeInOut, canvas, blob } from 'cinecode/lib';
+import { paper } from 'cinecode/paint/atmos';
+import { getRig } from 'cinecode/engine/cast/index.mjs';
+import { grade, mixGrade } from 'cinecode/engine/film/grade.mjs';
 
 const TAU = Math.PI * 2;
 const easeOut = u => 1 - (1 - clamp(u)) ** 3;

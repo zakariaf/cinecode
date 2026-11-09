@@ -1,8 +1,20 @@
-// loadFilm: read films/<slug>/film.json (or take a parsed object), load custom.mjs (rigs, kits, custom beats,
-// overlays, sounds), resolve rigs and set kits, validate everything and either return the resolved film or throw
-// a ValidationError listing every problem.
-import { readFileSync, existsSync, statSync } from 'node:fs';
-import { join, resolve, basename, dirname } from 'node:path';
+// loadFilm: read films/<slug>/film.json (or take a parsed object), load the film's own code (project and film
+// extensions, then custom.mjs: rigs, kits, custom beats, overlays, sounds), resolve rigs and set kits, validate
+// everything and either return the resolved film or throw a ValidationError listing every problem.
+//
+// Film code reaches the engine as `cinecode/<name>` (package.json "exports": cinecode/lib, cinecode/rig, …) from
+// wherever the film lives: importFilmCode() resolves that specifier as if it were imported from inside this
+// package, so a film in another project shares the engine's module instances (one rig registry, one kit registry).
+//
+// Extensions (loadExtensions): a film folder and a project folder may hold rigs, kits and effects that load like
+// the built-ins: `films/<slug>/{rigs,kits,effects}/*.mjs`, and `<project>/cinecode/{rigs,kits,effects}/*.mjs` for
+// everything a project's films share (<project> = the nearest folder above the film with a cinecode/ folder holding
+// one of those, searched up to the first folder with a .git). rigs/*.mjs default-export a rig (registered by its
+// kind), kits/*.mjs a kit function (registered under the file name, like engine/set/kits/), effects/*.mjs any of
+// custom.mjs's `custom`, `overlays` and `sounds`. Load order: project, film folder, custom.mjs; a later name wins.
+import module from 'node:module';
+import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { join, resolve, basename, dirname, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { getRig, register, listRigs } from '../cast/index.mjs';
 import { getKit, listKits, registerKit } from '../set/kits/index.mjs';
@@ -16,6 +28,61 @@ export class ValidationError extends Error {
     this.problems = problems;
     this.warnings = warnings;
   }
+}
+
+const PKG_URL = new URL('../../package.json', import.meta.url).href;
+const ownSpecifier = s => s === 'cinecode' || s.startsWith('cinecode/');
+let hooked = false;
+/** Import a film's own module (custom.mjs, an extension), with `cinecode/…` resolving to this engine. */
+export async function importFilmCode(file) {
+  if (!hooked) {
+    hooked = true;
+    if (typeof module.registerHooks === 'function') module.registerHooks({ resolve: (s, c, next) => next(s, ownSpecifier(s) ? { ...c, parentURL: PKG_URL } : c) });
+    else module.register(`data:text/javascript,${encodeURIComponent(`export const resolve = (s, c, next) => next(s, s === 'cinecode' || s.startsWith('cinecode/') ? { ...c, parentURL: ${JSON.stringify(PKG_URL)} } : c);`)}`);
+  }
+  return import(pathToFileURL(file).href);
+}
+
+/** The project extensions folder (<project>/cinecode) for a film or working directory, or null. */
+export function projectExtDir(from) {
+  for (let d = resolve(from); ; d = dirname(d)) {
+    const c = join(d, 'cinecode');
+    if (['rigs', 'kits', 'effects'].some(k => existsSync(join(c, k)))) return c;
+    if (existsSync(join(d, '.git')) || dirname(d) === d) return null;
+  }
+}
+
+/**
+ * Load and register the extensions for a film folder (and its project), or for a working directory (the project's
+ * only). → { rigs, kits, custom, overlays, sounds, files: [paths relative to `dir`], problems }
+ */
+export async function loadExtensions(dir, { film = true } = {}) {
+  const out = { rigs: [], kits: {}, custom: {}, overlays: {}, sounds: {}, files: [], problems: [] };
+  const roots = [projectExtDir(film ? dirname(resolve(dir)) : dir), film ? resolve(dir) : null].filter(Boolean);
+  for (const root of [...new Set(roots)]) {
+    for (const kind of ['rigs', 'kits', 'effects']) {
+      const d = join(root, kind);
+      if (!existsSync(d) || !statSync(d).isDirectory()) continue;
+      for (const f of readdirSync(d).filter(f => f.endsWith('.mjs') && !f.startsWith('_')).sort()) {
+        const file = join(d, f), name = relative(root === resolve(dir) ? root : dirname(root), file);   // rigs/x.mjs, cinecode/rigs/x.mjs
+        out.files.push(name);
+        try {
+          const m = await importFilmCode(file);
+          if (kind === 'rigs') {
+            const r = m.default;
+            if (!r || typeof r.kind !== 'string' || typeof r.draw !== 'function') throw new Error('the default export must be a rig (a kind and a draw(); see makeRig in cinecode/rig)');
+            register(r); out.rigs.push(r);
+          } else if (kind === 'kits') {
+            registerKit(basename(f, '.mjs'), m.default); out.kits[basename(f, '.mjs')] = m.default;
+          } else {
+            if (!m.custom && !m.overlays && !m.sounds) throw new Error('an effect file exports custom, overlays or sounds (like custom.mjs)');
+            for (const k of ['custom', 'overlays', 'sounds']) Object.assign(out[k], m[k] || {});
+          }
+        } catch (e) { out.problems.push({ path: name, message: `${name}: ${e.message}` }); }
+      }
+    }
+  }
+  return out;
 }
 
 // Line and column of a JSON.parse error (Node reports "at position N" or "line L column C").
@@ -54,22 +121,27 @@ export async function loadFilm(src, opts = {}) {
     json = structuredClone(src);
   } else throw new ValidationError([{ path: 'film', message: 'loadFilm: expected a film directory, a film.json path or a film object' }]);
 
-  // custom.mjs: extra rigs, kits, custom beats, overlays (scene-long drawings) and sounds
-  const problems = [], custom = { rigs: [], kits: {}, custom: {}, overlays: {}, sounds: {} };
+  // extensions (project, then film folder), then custom.mjs: extra rigs, kits, custom beats, overlays (scene-long
+  // drawings) and sounds
+  const ext = dir ? await loadExtensions(dir) : { rigs: [], kits: {}, custom: {}, overlays: {}, sounds: {}, files: [], problems: [] };
+  const problems = [...ext.problems], custom = { rigs: [], kits: {}, custom: {}, overlays: {}, sounds: {}, files: ext.files };
   const customPath = opts.custom ?? (dir ? join(dir, 'custom.mjs') : null);
   if (customPath && existsSync(customPath)) {
     try {
-      const m = await import(pathToFileURL(customPath).href);
+      const m = await importFilmCode(customPath);
       custom.rigs = Array.isArray(m.rigs) ? m.rigs : [];
       custom.kits = m.kits && typeof m.kits === 'object' ? m.kits : {};
       custom.custom = m.custom && typeof m.custom === 'object' ? m.custom : {};
       custom.overlays = m.overlays && typeof m.overlays === 'object' ? m.overlays : {};
       custom.sounds = m.sounds && typeof m.sounds === 'object' ? m.sounds : {};
       custom.module = m;
+      custom.files = [...ext.files, 'custom.mjs'];
     } catch (e) { problems.push({ path: 'custom.mjs', message: `custom.mjs: failed to load: ${e.message}` }); }
   }
   custom.rigs.forEach((r, i) => { try { register(r); } catch (e) { problems.push({ path: `custom.mjs rigs[${i}]`, message: `custom.mjs rigs[${i}]: ${e.message}` }); } });
   for (const [name, fn] of Object.entries(custom.kits)) { try { registerKit(name, fn); } catch (e) { problems.push({ path: `custom.mjs kits.${name}`, message: `custom.mjs kits.${name}: ${e.message}` }); } }
+  custom.rigs = [...ext.rigs, ...custom.rigs]; custom.kits = { ...ext.kits, ...custom.kits };
+  for (const k of ['custom', 'overlays', 'sounds']) custom[k] = { ...ext[k], ...custom[k] };
 
   // set instances (validation needs their anchors and sky names)
   const kits = new Set(listKits()), sets = {};

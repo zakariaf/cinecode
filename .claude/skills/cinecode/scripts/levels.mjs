@@ -2,7 +2,7 @@
 // but almost nothing sounds (a cue that starts on a cut without "downbeat" can open with a near-silent lead-in; the
 // last cue's final chord can die before the end card does). A mean over a whole shot hides a 1.5 s hole: this doesn't.
 // Reads out/music.wav (or out/mix.wav), so run `cinecode music` (or `mix`) first. No ffmpeg, no network.
-//   node .claude/skills/cinecode/scripts/levels.mjs films/<slug> [music|mix] [--win=0.5] [--quiet=-40]
+//   node <skill>/scripts/levels.mjs films/<slug> [music|mix] [--win=0.5] [--quiet=-40]
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,13 +10,13 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const args = process.argv.slice(2), opt = k => args.find(a => a.startsWith(`--${k}=`))?.split('=')[1];
 const [film, which = 'music'] = args.filter(a => !a.startsWith('--'));
-if (!film || !['music', 'mix'].includes(which)) { console.error('usage: node .claude/skills/cinecode/scripts/levels.mjs films/<slug> [music|mix] [--win=0.5] [--quiet=-40]'); process.exit(2); }
+if (!film || !['music', 'mix'].includes(which)) { console.error('usage: node <skill>/scripts/levels.mjs films/<slug> [music|mix] [--win=0.5] [--quiet=-40]'); process.exit(2); }
 const WIN = Number(opt('win') ?? 0.5), QUIET = Number(opt('quiet') ?? -40), END_FADE = 1.2;
 const { loadPlan, resolveFilmDir } = await import(join(ROOT, 'engine/render/film-source.mjs'));
 const { readWav } = await import(join(ROOT, 'engine/audio/wav.mjs'));
 const { plan, paths } = await loadPlan(resolveFilmDir(film));
 const file = paths[which];
-if (!existsSync(file)) { console.error(`no ${file}: run \`node bin/cinecode.mjs ${which} ${film}\` first`); process.exit(1); }
+if (!existsSync(file)) { console.error(`no ${file}: run \`cinecode ${which} ${film}\` first`); process.exit(1); }
 if (statSync(file).mtimeMs < statSync(paths.json).mtimeMs) console.log(`(${which}.wav is older than film.json: run \`${which}\` again for current levels)`);
 
 const { sampleRate: sr, channels: ch } = readWav(file);

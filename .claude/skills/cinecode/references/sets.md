@@ -1,6 +1,6 @@
 # Set reference (kits)
 
-Generated from the kit registry by `node .claude/skills/cinecode/scripts/inventory.mjs sets` (add `films/<slug>` to include custom kits); the notes at the end are by hand. Rerun it when the engine changes. `node bin/cinecode.mjs set-sheet <kits> -o out/<name>.jpg` draws each kit with its anchors, solid footprints, walk region and water: look at it before you stage a scene.
+Generated from the kit registry by `node <skill>/scripts/inventory.mjs sets` (add `films/<slug>` to include custom kits); the notes at the end are by hand. Rerun it when the engine changes. `cinecode set-sheet <kits> -o out/<name>.jpg` draws each kit with its anchors, solid footprints, walk region and water: look at it before you stage a scene.
 
 Anchor types: ground (stand here), surface (stand on a prop top: walk there and the actor jumps up), perch (branch; perch rigs only), hollow (an opening in a prop: the actor jumps in and is drawn clipped to it, in front of a dark hole), view (a far landmark to frame or look at, not to stand on). s = actor scale there.
 

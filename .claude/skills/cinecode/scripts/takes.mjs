@@ -1,6 +1,6 @@
 // Audit a film's cached voice takes: for every line, what was asked, what the QA transcription heard, and the flags
 // that mean "regenerate this take". Reads only the cache (no network, no API key).
-//   node .claude/skills/cinecode/scripts/takes.mjs films/<slug> [--all]
+//   node <skill>/scripts/takes.mjs films/<slug> [--all]
 // Flags: MISSING (not voiced yet), FAIL (QA never passed), WER (word error > 0.2), DIRECTION (the bracketed tone was
 // read aloud), LEADING (words inserted before the line, e.g. "Huh, then…"), TONE-CUT (earlier tries read the tone
 // aloud, so the take kept was sent with less of it, or none: its words pass, but its delivery may not be the one asked
@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const args = process.argv.slice(2), all = args.includes('--all'), arg = args.find(a => !a.startsWith('--'));
-if (!arg) { console.error('usage: node .claude/skills/cinecode/scripts/takes.mjs films/<slug> [--all]'); process.exit(2); }
+if (!arg) { console.error('usage: node <skill>/scripts/takes.mjs films/<slug> [--all]'); process.exit(2); }
 const { loadPlan, resolveFilmDir } = await import(join(ROOT, 'engine/render/film-source.mjs'));
 const { estimateLine } = await import(join(ROOT, 'engine/film/compile.mjs'));
 // pauses inside a take: runs of 20 ms frames more than 30 dB under its loudest, between its first and last sound

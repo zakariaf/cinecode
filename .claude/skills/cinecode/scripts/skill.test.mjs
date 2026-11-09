@@ -12,7 +12,8 @@ import { fileURLToPath } from 'node:url';
 const SKILL = fileURLToPath(new URL('../', import.meta.url));
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const run = (script, ...args) => spawnSync(process.execPath, [join(SKILL, 'scripts', script), ...args], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, GEMINI_API_KEY: '' } });
-const docs = () => [join(SKILL, 'SKILL.md'), ...readdirSync(join(SKILL, 'references')).map(f => join(SKILL, 'references', f))]
+const BUILD = ['build-rig', 'build-kit', 'build-effect'];
+const docs = () => [join(SKILL, 'SKILL.md'), ...readdirSync(join(SKILL, 'references')).map(f => join(SKILL, 'references', f)), ...BUILD.map(b => join(SKILL, '..', b, 'SKILL.md'))]
   .map(p => ({ p, text: readFileSync(p, 'utf8') }));
 
 test('SKILL.md has the frontmatter that makes it trigger, and stays short', () => {
@@ -22,6 +23,20 @@ test('SKILL.md has the frontmatter that makes it trigger, and stays short', () =
   assert.match(fm[1], /^name: cinecode$/m);
   assert.match(fm[1], /^description: .*animated film/m);
   assert.ok(s.split('\n').length < 350, 'under ~350 lines');
+});
+
+test('each build skill triggers, has its starter, and sends the work through its gate', () => {
+  for (const [b, gate] of [['build-rig', 'verify-rig'], ['build-kit', 'verify-kit'], ['build-effect', 'verify-effect']]) {
+    const s = readFileSync(join(SKILL, '..', b, 'SKILL.md'), 'utf8'), fm = /^---\n([\s\S]*?)\n---\n/.exec(s);
+    assert.ok(fm, `${b}: frontmatter`);
+    assert.match(fm[1], new RegExp(`^name: ${b}$`, 'm'));
+    assert.match(fm[1], /^description: .{80,}/m);
+    assert.ok(existsSync(join(SKILL, '..', b, 'starter.mjs')), `${b}: starter.mjs`);
+    assert.match(s, new RegExp(`\`cinecode ${gate} `), `${b}: documents its gate`);
+    assert.match(s, /starter\.mjs/, `${b}: points at its starter`);
+  }
+  const main = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+  for (const b of BUILD) assert.ok(main.includes(b), `the main skill hands off to ${b}`);
 });
 
 test('inventory lists every registered rig and kit, and the references cover them', async () => {
@@ -86,7 +101,9 @@ test('every documented cinecode command line names a real command with valid opt
   const { COMMANDS, parseArgs } = await import(join(ROOT, 'engine/render/cli.mjs'));
   let n = 0;
   for (const { p, text } of docs()) {
-    for (const m of text.matchAll(/node bin\/cinecode\.mjs ([a-z-]+)((?: +[^\s`#|)]+)*)/g)) {
+    // command lines in code: fenced blocks and inline spans, as `cinecode <cmd>` (the plugin's PATH) or `node bin/cinecode.mjs <cmd>`
+    const code = [...text.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].flatMap(b => b[1].split('\n')).concat([...text.replace(/```[\s\S]*?```/g, '').matchAll(/`([^`\n]+)`/g)].map(m => m[1]));
+    for (const m of code.flatMap(l => [...l.matchAll(/^(?:node bin\/cinecode\.mjs|cinecode) ([a-z-]+)((?: +[^\s`#|)]+)*)/g)])) {
       const [cmd, rest] = [m[1], m[2].trim().split(/\s+/).filter(Boolean).filter(a => !/^[<…]/.test(a))];
       assert.ok(COMMANDS[cmd], `${p}: unknown command "${cmd}" in "${m[0]}"`);
       assert.doesNotThrow(() => parseArgs(rest, COMMANDS[cmd].options), `${p}: bad options in "${m[0]}"`);
@@ -102,7 +119,7 @@ test('every documented sheet.mjs option and helper script exists', () => {
     for (const m of text.matchAll(/node engine\/film\/sheet\.mjs[^\n`]*/g)) {
       for (const o of m[0].matchAll(/--([a-z]+)/g)) assert.match(src, new RegExp(`opt\\.${o[1]}\\b`), `${p}: sheet.mjs has no --${o[1]}`);
     }
-    for (const m of text.matchAll(/\.claude\/skills\/cinecode\/scripts\/([\w.-]+\.mjs)/g)) assert.ok(existsSync(join(SKILL, 'scripts', m[1])), `${p}: no script ${m[1]}`);
+    for (const m of text.matchAll(/(?:\.claude\/skills\/cinecode|\$\{CLAUDE_SKILL_DIR\}|<skill>)\/scripts\/([\w.-]+\.mjs)/g)) assert.ok(existsSync(join(SKILL, 'scripts', m[1])), `${p}: no script ${m[1]}`);
   }
 });
 

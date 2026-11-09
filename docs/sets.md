@@ -282,45 +282,46 @@ A great old tree beside the path, a long low branch reaching left over a shady n
 
 ## Adding a kit
 
-A film can bring its own locations in `custom.mjs`: export `kits` as `{ name: (params) => set }` and use the name as a
-set's `kit`. `makeSet` from `engine/set/set.mjs` builds the set from a description. This example is a complete,
-working kit: a meadow glade with far hills and one boulder you can stand on.
+A film can bring its own locations: one file per kit, `films/<slug>/kits/<name>.mjs`, that default-exports
+`(params) => set` (for every film of a project, `cinecode/kits/<name>.mjs` at the project root; `custom.mjs` may also
+export `kits` as `{ name: (params) => set }`). Use the name as a set's `kit`. `makeSet` from `cinecode/set` builds the
+set from a description. This example is a complete, working kit that passes the gate, `cinecode verify-kit
+films/<slug>/kits/glade.mjs`: a meadow glade with far hills and one boulder you can stand on (the `build-kit` skill's
+starter is a fuller one, painted with the house helpers).
 
 ```js
-// films/<slug>/custom.mjs
-import { makeSet } from '../../engine/set/set.mjs';
+// films/<slug>/kits/glade.mjs: the kit takes its name from the file
+import { makeSet } from 'cinecode/set';
 
 const ground = x => 1000 + 12 * Math.sin(x / 300);    // the lane where actors stand by default (y at x)
 
-export const kits = {
-  glade: () => makeSet({
-    id: 'glade', W: 2400, H: 1400, refX: 1200, refY: 800,
-    area: { x0: -300, x1: 2700, y0: -300, y1: 1600 },  // the painted world: no frame shows past it
-    view: { x0: 700, x1: 1700, y0: 350, y1: 1200 },      // where the camera centre may go
-    horizon: 700, laneY: 1000, baseS: 1.3, lane: ground,  // scale = baseS × (y − horizon) / (laneY − horizon)
-    layers: [
-      { k: 0.5, paint(x, r, S, E) {                       // far hills: parallax 0.5
-        x.fillStyle = '#9fb8a6'; x.beginPath(); x.moveTo(E.x0, 760);
-        for (let px = E.x0; px <= E.x1; px += 40) x.lineTo(px, 690 - 40 * Math.sin(px / 260));
-        x.lineTo(E.x1, 760); x.lineTo(E.x1, E.y1); x.lineTo(E.x0, E.y1); x.closePath(); x.fill();
-      } },
-      { k: 1, paint(x, r, S, E) {                         // the ground the actors stand on
-        x.fillStyle = '#7da35a'; x.fillRect(E.x0, 720, E.x1 - E.x0, E.y1 - 720);
-        for (let i = 0; i < 900; i++) { x.fillStyle = r() < 0.5 ? '#6f9550' : '#8db068'; x.fillRect(E.x0 + r() * (E.x1 - E.x0), 730 + r() * 900, 14, 4); }
-      } },
-    ],
-    props: [{
-      id: 'boulder', x: 1500, y: 1030, solid: { rx: 70, ry: 20 }, bounds: [1420, 950, 1580, 1040],
-      paint(x) { x.fillStyle = '#8a8478'; x.beginPath(); x.ellipse(1500, 1030, 80, 70, 0, Math.PI, 0); x.fill(); },
-      anchors: { boulder_top: { x: 1500, y: 962, type: 'surface' } },
-    }],
-    anchors: {
-      west: { x: 900, y: 1000 }, east: { x: 1750, y: 1010 },
-      centre: { x: 1200, y: 1020 }, front: { x: 1250, y: 1180 },
-    },
-    ambience: { day: 'meadow-day', night: 'meadow-night' },
-  }),
-};
+export default () => makeSet({
+  id: 'glade', W: 2400, H: 1400, refX: 1200, refY: 800,
+  area: { x0: -300, x1: 2900, y0: -300, y1: 1600 },  // the painted world: at least 3200 × 1800
+  view: { x0: 700, x1: 1700, y0: 350, y1: 1200 },      // where the camera centre may go
+  horizon: 700, laneY: 1000, baseS: 1.3, lane: ground,  // scale = baseS × (y − horizon) / (laneY − horizon)
+  layers: [
+    { k: 0.5, paint(x, r, S, E) {                       // far hills: parallax 0.5
+      x.fillStyle = '#9fb8a6'; x.beginPath(); x.moveTo(E.x0, 760);
+      for (let px = E.x0; px <= E.x1; px += 40) x.lineTo(px, 690 - 40 * Math.sin(px / 260));
+      x.lineTo(E.x1, 760); x.lineTo(E.x1, E.y1); x.lineTo(E.x0, E.y1); x.closePath(); x.fill();
+    } },
+    { k: 1, paint(x, r, S, E) {                         // the ground the actors stand on
+      x.fillStyle = '#7da35a'; x.fillRect(E.x0, 720, E.x1 - E.x0, E.y1 - 720);
+      for (let i = 0; i < 900; i++) { x.fillStyle = r() < 0.5 ? '#6f9550' : '#8db068'; x.fillRect(E.x0 + r() * (E.x1 - E.x0), 730 + r() * 900, 14, 4); }
+    } },
+  ],
+  props: [{
+    id: 'boulder', x: 1500, y: 1030, solid: { rx: 70, ry: 20 }, bounds: [1420, 950, 1580, 1040],
+    paint(x) { x.fillStyle = '#8a8478'; x.beginPath(); x.ellipse(1500, 1030, 80, 70, 0, Math.PI, 0); x.fill(); },
+    anchors: { boulder_top: { x: 1500, y: 962, type: 'surface' } },
+  }],
+  anchors: {
+    west: { x: 900, y: 1000 }, east: { x: 1750, y: 1010 },
+    centre: { x: 1200, y: 1020 }, front: { x: 1250, y: 1180 },
+  },
+  ambience: { day: 'meadow-day', night: 'meadow-night' },
+});
 ```
 
 ```json

@@ -5,6 +5,15 @@
   "description": "Animated films from a storyboard, painted, animated, scored and mixed entirely by code. Only the voices come from a TTS model.",
   "type": "module",
   "bin": { "cinecode": "bin/cinecode.mjs" },
+  "exports": {
+    "./lib": "./engine/core/lib.mjs",
+    "./style": "./engine/core/style.mjs",
+    "./rig": "./engine/cast/rig.mjs",
+    "./set": "./engine/set/set.mjs",
+    "./paint/*": "./engine/paint/*.mjs",
+    "./engine/*": "./engine/*",
+    "./package.json": "./package.json"
+  },
   "engines": { "node": ">=20" },
   "scripts": { "test": "node --test test/*.test.mjs" },
   "dependencies": { "@napi-rs/canvas": "1.1.0" }

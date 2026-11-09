@@ -51,7 +51,9 @@ TTS); they are checked and cached on disk, so a voiced film re-renders the same 
 - **Parallel render.** The frames are split between worker processes (by default one fewer than the CPU cores),
   each with its own x264 encoder, and the parts are joined without re-encoding.
   [docs/rendering.md](docs/rendering.md)
-- **Your own code.** A film's `custom.mjs` adds custom drawing beats, scene overlays, sounds, rigs and kits.
+- **Your own code.** A film's `custom.mjs` adds custom drawing beats, scene overlays, sounds, rigs and kits; its
+  `rigs/`, `kits/` and `effects/` folders (or a project's `cinecode/` folder, shared by its films) hold them as files
+  of their own, each with a gate (`verify-rig`, `verify-kit`, `verify-effect`) that checks it and draws review images.
   [docs/effects.md](docs/effects.md)
 
 ## Requirements
@@ -96,6 +98,23 @@ node bin/cinecode.mjs render films/seventy-six-summers
 | ![The village at sunset](docs/images/village.jpg) | ![Nell at night under the comet](docs/images/nell.jpg) |
 | ![The tortoise and Nell meet at the standing stone](docs/images/reunion.jpg) | ![The last shot: the hill under the comet, fireflies](docs/images/ending.jpg) |
 
+## Install as a Claude Code plugin
+
+The repository is a Claude Code plugin and its own marketplace. In Claude Code:
+
+```
+/plugin marketplace add zakariaf/cinecode
+/plugin install cinecode@cinecode
+```
+
+(or, on Claude Code 2.1.275 or later, in one step: `/plugin install cinecode --marketplace zakariaf/cinecode`).
+Installing copies the plugin and its one npm dependency, `@napi-rs/canvas`. It brings four skills (`cinecode`: idea or
+screenplay → film; `build-rig`, `build-kit`, `build-effect`: a character, place or effect the engine doesn't have,
+each through its gate) and puts the `cinecode` command on Claude's PATH. Open Claude Code in any folder and ask for a
+film; the first run checks Node 20+, ffmpeg and the drawing library (`cinecode setup` installs it if it is missing).
+Films go in `films/<slug>/` of that folder, and rigs, kits and effects shared by its films in `cinecode/`. Voicing
+needs `GEMINI_API_KEY`; everything else runs offline.
+
 ## Make a film with Claude Code
 
 The repository includes a Claude Code skill, [.claude/skills/cinecode/SKILL.md](.claude/skills/cinecode/SKILL.md), with
@@ -110,7 +129,7 @@ with its length and pauses (`takes.mjs --all`), and the score's level per shot w
 ## Repository layout
 
 ```
-bin/cinecode.mjs            the command line
+bin/cinecode.mjs            the command line (bin/cinecode: the same as a bare command, on the plugin's PATH)
 engine/
   core/                     shared helpers: seeded random, geometry, ink and cel-shading style
   paint/                    brushes, skies, nature, scenery, water, buildings
@@ -129,7 +148,8 @@ films/
 templates/                  what `cinecode new` copies: film.json, screenplay.md, custom.mjs
 docs/                       the reference
 test/                       node:test suites
-.claude/skills/cinecode/    the Claude Code skill
+.claude/skills/             the Claude Code skills: cinecode, build-rig, build-kit, build-effect (each build skill with a starter)
+.claude-plugin/             plugin.json and marketplace.json: the repository as a plugin and its marketplace
 DESIGN.md                   the module contracts
 ```
 
@@ -142,3 +162,7 @@ node --test test/render.test.mjs  # one suite
 
 The tests need no network and no API key (the voice tests mock Gemini). Tests that run ffmpeg are skipped when it
 isn't installed.
+
+## Licence
+
+MIT, © 2026 Zakaria Fatahi. See [LICENSE](LICENSE).

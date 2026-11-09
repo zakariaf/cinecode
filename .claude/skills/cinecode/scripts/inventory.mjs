@@ -1,6 +1,6 @@
 // Print the live cast and set inventory as Markdown: every registered rig (size, speeds, poses, gestures,
 // expressions, params) and every kit (anchors with type, position and scale; props with their painted extent; ambience).
-//   node .claude/skills/cinecode/scripts/inventory.mjs [cast|sets] [films/<slug>]
+//   node <skill>/scripts/inventory.mjs [cast|sets] [films/<slug>]
 // With a film, its custom.mjs rigs and kits are registered first (loadFilm), so they are listed too.
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

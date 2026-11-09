@@ -7,9 +7,9 @@
 //  - draw only from the arguments you get (time, params, the api), never from state kept between calls: frames are
 //    drawn out of order, by several worker processes at once.
 
-// A small seeded random generator (mulberry32). The engine has its own in engine/core/lib.mjs (rng); a film can
-// import it from there too, with a relative path.
-const rng = seed => () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+// The engine's helpers are imported as `cinecode/…` wherever this film lives: cinecode/lib (rng, noise, ink…),
+// cinecode/style (cel, line, eye…), cinecode/rig (makeRig), cinecode/set (makeSet), cinecode/paint/<name>.
+import { rng } from 'cinecode/lib';
 
 // ───────────── custom beats ─────────────
 // Used in film.json as { "do": "custom", "name": "glints", "dur": 1.6, "who": "pip" }. The beat lasts `dur` seconds

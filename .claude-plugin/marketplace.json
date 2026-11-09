@@ -1,0 +1,14 @@
+{
+  "name": "cinecode",
+  "owner": {
+    "name": "Zakaria Fatahi"
+  },
+  "description": "cinecode: animated films made entirely by code, as a Claude Code plugin.",
+  "plugins": [
+    {
+      "name": "cinecode",
+      "source": "./",
+      "description": "Animated films from an idea or a screenplay, made entirely by code: storyboard, rigs, sets, camera, score, mix and render, with skills that build what the engine lacks."
+    }
+  ]
+}

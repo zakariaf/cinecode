@@ -4,7 +4,7 @@ The full field reference is `docs/storyboard.md`; the contract is `DESIGN.md` §
 
 ## A minimal valid film.json
 
-Checked with `check` and `plan` (21 s, 3 shots). Start from `node bin/cinecode.mjs new <slug>` and grow it.
+Checked with `check` and `plan` (21 s, 3 shots). Start from `cinecode new <slug>` and grow it.
 
 ```json
 {

@@ -135,6 +135,34 @@ function starterFilm(title) {
   };
 }
 
+/** First run: Node, the canvas library (installed into cinecode's own folder when missing), ffmpeg, the Gemini key. */
+async function cmdSetup(opts, ctx) {
+  const { spawnSync } = await import('node:child_process');
+  const row = (ok, label, msg) => ctx.out.write(`  ${ok === true ? 'ok  ' : ok === false ? 'FAIL' : 'note'}  ${label.padEnd(10)} ${msg}\n`);
+  const fails = [];
+  const major = +process.versions.node.split('.')[0];
+  row(major >= 20, 'node', major >= 20 ? `${process.version}` : `${process.version}: cinecode needs Node.js 20 or newer (https://nodejs.org)`);
+  if (major < 20) fails.push('node');
+  // a fresh process, so a failed import in this one is not cached
+  const canvasOk = () => spawnSync(process.execPath, ['--input-type=module', '-e', "await import('@napi-rs/canvas')"], { cwd: ROOT, stdio: 'ignore' }).status === 0;
+  let canvas = canvasOk();
+  if (!canvas && !opts.check) {
+    ctx.out.write(`  …     canvas     installing @napi-rs/canvas into ${ROOT} (npm install --omit=dev)\n`);
+    const r = spawnSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], { cwd: ROOT, encoding: 'utf8', shell: process.platform === 'win32' });
+    if (r.error || r.status !== 0) row(false, 'npm', r.error ? `npm is not on the PATH (${r.error.code}): install Node.js with npm, or run npm install in ${ROOT}` : (r.stderr || r.stdout).trim().split('\n').slice(-3).join(' / '));
+    canvas = canvasOk();
+  }
+  row(canvas, 'canvas', canvas ? '@napi-rs/canvas loads (drawing works)' : `@napi-rs/canvas is missing: run \`npm install --omit=dev\` in ${ROOT}`);
+  if (!canvas) fails.push('canvas');
+  const { hasFfmpeg } = await import('./ffmpeg.mjs');
+  const ff = hasFfmpeg();
+  row(ff || null, 'ffmpeg', ff ? 'ffmpeg and ffprobe found' : 'ffmpeg/ffprobe not on the PATH: check, plan, sheet and lint work; mix, animatic and render need them (macOS: brew install ffmpeg; Debian/Ubuntu: sudo apt install ffmpeg)');
+  row(ctx.env.GEMINI_API_KEY ? true : null, 'voices', ctx.env.GEMINI_API_KEY ? 'GEMINI_API_KEY is set' : 'GEMINI_API_KEY is not set: only `voice` (and rendering unvoiced lines) needs it. Get a key at https://aistudio.google.com/apikey, export it in your shell profile and restart; never paste it into a chat');
+  row(null, 'films', `films live in films/<slug>/ under the folder you work in (cinecode new <slug>); rigs, kits and effects several films share go in cinecode/{rigs,kits,effects}/ at the project root`);
+  if (fails.length) throw new CliError(`setup: ${fails.join(' and ')} not ready`);
+  say(ctx, 'setup', 'ready');
+}
+
 async function cmdNew(opts, ctx) {
   const slug = opts._[0];
   if (!slug) throw new UsageError('missing <slug> (e.g. cinecode new lantern-moth)');
@@ -168,7 +196,7 @@ async function cmdCheck(opts, ctx) {
   const film = await loadFilm(dir);
   const n = o => Object.keys(o || {}).length, shots = (film.scenes || []).reduce((s, sc) => s + (sc.shots?.length || 0), 0);
   say(ctx, 'check', `${film.title ?? basename(dir)}: valid`);
-  say(ctx, '', `${plural(film.scenes?.length ?? 0, 'scene')}, ${plural(shots, 'shot')}, ${n(film.cast)} cast, ${plural(n(film.sets), 'set')}${existsSync(join(dir, 'custom.mjs')) ? ', custom.mjs' : ''}`);
+  say(ctx, '', `${plural(film.scenes?.length ?? 0, 'scene')}, ${plural(shots, 'shot')}, ${n(film.cast)} cast, ${plural(n(film.sets), 'set')}${(film.custom.files || []).map(f => `, ${f}`).join('')}`);
 }
 
 async function cmdPlan(opts, ctx) {
@@ -211,11 +239,24 @@ async function cmdVoice(opts, ctx) {
 async function cmdSheet(opts, ctx) {
   const dir = filmDir(opts, ctx);
   const { plan, paths } = await planWithNote(dir, ctx);
-  const { drawFrame } = await need('engine/film/frame.mjs', 'the frame renderer');
+  const { drawFrame, frameInfo } = await need('engine/film/frame.mjs', 'the frame renderer');
+  const F = opts.shots || opts.frame || opts.debug ? await need('engine/film/sheet.mjs', 'the film sheet') : null;   // only these options use it
   const { contactSheet } = await import('./sheet.mjs');
-  const outPath = opts.out ? resolve(ctx.cwd, opts.out) : paths.sheet;
+  let times = opts.t ?? null;
+  if (opts.shots) { try { times = [...(times || []), ...F.sheetTimes(plan, { shots: opts.shots })]; } catch (e) { throw new CliError(e.message); } }
+  const outPath = opts.out ? resolve(ctx.cwd, opts.out) : opts.frame ? join(paths.out, 'frame.jpg') : paths.sheet;
+  if (opts.frame) {                                     // full-size stills, one file per time
+    const ts = times || [plan.duration / 2];
+    await step(ctx, 'frame', async () => {
+      const files = [];
+      for (const [i, t] of ts.entries()) files.push(await F.renderStill(plan, t, ts.length > 1 ? outPath.replace(/(\.\w+)$/, `-${i}$1`) : outPath, { debug: !!opts.debug }));
+      return files.map(f => rel(ctx, f)).join(', ');
+    });
+    return;
+  }
+  const draw = opts.debug ? (c, p, t) => { drawFrame(c, p, t); F.drawOverlay(c, frameInfo(p, t), p.W, p.H); } : drawFrame;
   await step(ctx, 'sheet', async () => {
-    const r = await contactSheet({ plan, drawFrame, outPath, times: opts.t, cols: opts.cols ?? 4, tileW: opts.tile ?? 480,
+    const r = await contactSheet({ plan, drawFrame: draw, outPath, times, cols: opts.cols ?? 4, tileW: opts.tile ?? 480, ...(opts.debug ? { title: `${plan.title} (debug)` } : {}),
       onProgress: (i, n) => ctx.err.isTTY && ctx.err.write(`\r\x1b[2Ksheet    ${i}/${n}`) });
     if (ctx.err.isTTY) ctx.err.write('\r\x1b[2K');
     return `${rel(ctx, r.path)} (${r.items.length} stills, ${r.width}×${r.height})`;
@@ -356,13 +397,16 @@ async function cmdRender(opts, ctx) {
   });
 }
 
-/** cast-sheet / set-sheet: an optional film first (to register its custom rigs and kits), then names. */
+/** cast-sheet / set-sheet: an optional film first (to register its own rigs and kits), then names. Without a film,
+ *  the project's shared extensions (cinecode/{rigs,kits}/ at or above the working directory) are registered. */
 async function sheetTargets(opts, ctx) {
   let pos = names(opts._), dir = null;
   if (pos[0]) { try { dir = resolveFilmDir(pos[0], ctx.cwd); } catch { dir = null; } }
-  if (dir) {
-    const { loadFilm } = await need('engine/film/load.mjs', 'the film loader');
-    await loadFilm(dir); pos = pos.slice(1);
+  const { loadFilm, loadExtensions } = await need('engine/film/load.mjs', 'the film loader');
+  if (dir) { await loadFilm(dir); pos = pos.slice(1); }
+  else {
+    const ext = await loadExtensions(ctx.cwd, { film: false });
+    if (ext.problems.length) throw new CliError(ext.problems.map(p => p.message).join('\n'));
   }
   return { list: pos, outDir: dir ? filmPaths(dir).out : resolve(ctx.cwd, 'out') };
 }
@@ -387,6 +431,65 @@ async function cmdSetSheet(opts, ctx) {
   await step(ctx, 'sets', async () => { await setSheet(kits, outPath); return `${rel(ctx, outPath)} (${kits.join(', ')})`; });
 }
 
+// ───────────── verify: the gate for a rig, kit or effect built for a film ─────────────
+
+function report(ctx, checks) {
+  for (const c of checks) ctx.out.write(`  ${c.ok ? 'ok  ' : 'FAIL'}  ${c.name.padEnd(14)} ${c.detail}\n`);
+}
+async function gate(ctx, what, checks, review) {
+  report(ctx, checks);
+  let imgs = [];
+  try { imgs = (await review()).filter(Boolean); } catch (e) { say(ctx, 'review', `could not draw the review images: ${e.message}`); }
+  if (imgs.length) say(ctx, 'review', `${imgs.map(p => rel(ctx, p)).join(', ')}: look at every image before using it`);
+  const bad = checks.filter(c => !c.ok);
+  if (bad.length) throw new CliError(`${what}: ${plural(bad.length, 'check')} failed (${bad.map(c => c.name).join(', ')})`);
+  say(ctx, 'verify', `${what}: all ${checks.length} checks pass`);
+}
+// A piece given as a file (imported like a film's own code) or by its registered name. → { mod, file, outDir }
+async function piece(opts, ctx, folder) {
+  const arg = opts._[0];
+  if (!arg) throw new UsageError(`missing <file|name> (e.g. films/my-film/${folder}/thing.mjs)`);
+  const { importFilmCode, loadExtensions } = await need('engine/film/load.mjs', 'the film loader');
+  const file = resolve(ctx.cwd, arg);
+  let r;
+  if (existsSync(file) && statSync(file).isFile()) r = { mod: await importFilmCode(file), file, outDir: join(resolve(file, '..', '..'), 'out', 'verify') };
+  else { await loadExtensions(ctx.cwd, { film: false }); r = { mod: null, file: null, outDir: resolve(ctx.cwd, 'out', 'verify') }; }
+  if (opts.out) r.outDir = resolve(ctx.cwd, opts.out);
+  return r;
+}
+
+async function cmdVerifyRig(opts, ctx) {
+  const V = await need('engine/render/verify.mjs', 'the verify module');
+  const { register, getRig } = await need('engine/cast/index.mjs', 'the rig registry');
+  const { mod, file, outDir } = await piece(opts, ctx, 'rigs');
+  const rig = mod ? mod.default : getRig(opts._[0]);
+  if (!rig) throw new CliError(mod ? `${rel(ctx, file)}: no default export (export default makeRig({ … }))` : `no rig file or rig kind "${opts._[0]}"`);
+  if (mod && typeof rig.draw === 'function' && typeof rig.kind === 'string') register(rig);
+  const checks = await step(ctx, 'verify', async () => Object.assign(V.verifyRig(rig), { msg: `rig ${rig.kind ?? '?'}` }));
+  await gate(ctx, `rig ${rig.kind}`, checks, () => V.rigReview(rig, outDir));
+}
+
+async function cmdVerifyKit(opts, ctx) {
+  const V = await need('engine/render/verify.mjs', 'the verify module');
+  const { registerKit, getKit, listKits } = await need('engine/set/kits/index.mjs', 'the kit registry');
+  const { mod, file, outDir } = await piece(opts, ctx, 'kits');
+  const name = file ? basename(file, '.mjs') : opts._[0];
+  if (mod && typeof mod.default === 'function') registerKit(name, mod.default);
+  if (!mod && !listKits().includes(name)) throw new CliError(`no kit file or kit name "${name}"`);
+  const kit = mod ? mod.default : getKit(name);
+  const checks = await step(ctx, 'verify', async () => Object.assign(V.verifyKit(kit, name), { msg: `kit ${name}` }));
+  await gate(ctx, `kit ${name}`, checks, () => (checks[0].ok ? V.kitReview(name, outDir) : []));
+}
+
+async function cmdVerifyEffect(opts, ctx) {
+  const dir = filmDir(opts, ctx), wanted = names(opts._.slice(1));
+  const V = await need('engine/render/verify.mjs', 'the verify module');
+  const { film, plan } = await planWithNote(dir, ctx);
+  const checks = await step(ctx, 'verify', async () => Object.assign(await V.verifyEffects(film, plan, wanted), { msg: `${wanted.join(', ') || 'every custom effect'}` }));
+  const out = opts.out ? resolve(ctx.cwd, opts.out) : join(filmPaths(dir).out, 'verify', `effects${wanted.length ? `-${wanted.join('-')}` : ''}.jpg`);
+  await gate(ctx, `effects of ${basename(dir)}`, checks, async () => [await V.effectReview(film, plan, wanted, out)]);
+}
+
 // ───────────── command table and help ─────────────
 
 const JOBS = { type: 'int', alias: 'j', arg: 'N', desc: 'worker processes (default: CPUs − 1)' };
@@ -395,6 +498,9 @@ const FROM = { type: 'time', arg: 'T', desc: 'start time (seconds or m:ss), for 
 const TO = { type: 'time', arg: 'T', desc: 'end time (seconds or m:ss), for a partial render' };
 
 export const COMMANDS = {
+  setup: { args: '', summary: 'first run: check Node, install the canvas library, check ffmpeg and the Gemini key', run: cmdSetup,
+    detail: 'Checks Node.js (20 or newer), installs @napi-rs/canvas into cinecode\'s own folder when it is missing (npm install --omit=dev), and reports whether ffmpeg/ffprobe are on the PATH and GEMINI_API_KEY is set (never printing it). Exit 1 when drawing cannot work.',
+    options: { check: { type: 'bool', desc: 'only report, install nothing' } } },
   new: { args: '<slug>', summary: 'scaffold a film from templates/', run: cmdNew,
     detail: 'Creates films/<slug>/ (or the given path) from templates/: a starter film.json, screenplay.md and custom.mjs, with {{title}} filled in. Without templates/film.json, writes a minimal valid starter.',
     options: { title: { type: 'string', arg: 'TEXT', desc: 'film title (default: from the slug)' }, force: { type: 'bool', desc: 'overwrite existing files' } } },
@@ -404,8 +510,11 @@ export const COMMANDS = {
   voice: { args: '<film>', summary: 'generate/cache voices with QA (needs GEMINI_API_KEY)', run: cmdVoice, options: {},
     detail: 'Only lines missing from films/<slug>/voices/ are sent to Gemini TTS; each is transcribed and checked (WER).' },
   sheet: { args: '<film>', summary: 'contact sheet: one frame per shot, or the given times', run: cmdSheet,
-    detail: 'Writes out/sheet.jpg: the middle frame of every shot (or each --t time), labelled with shot id, time and caption.',
+    detail: 'Writes out/sheet.jpg: the middle frame of every shot (or each --t time / --shots point), labelled with shot id, time and caption. --shots=3.3@0.1,3.3@0.5 draws points inside shots (u 0..1, default 0.5): a strip of a move. --debug draws actor boxes, head boxes, contacts and the caption box. --frame writes full-size stills instead (out/frame.jpg, -0, -1… for several).',
     options: { t: { type: 'times', arg: 'T,T,…', desc: 'times to draw instead of one per shot (seconds or m:ss)' },
+      shots: { type: 'string', arg: 'ID[@U],…', desc: 'shot ids to draw (each at its middle, or at u 0..1 with @u)' },
+      debug: { type: 'bool', desc: 'draw the geometry overlay (boxes, contacts, caption box)' },
+      frame: { type: 'bool', desc: 'full-size stills instead of a contact sheet' },
       cols: { type: 'int', arg: 'N', desc: 'columns (default 4)' }, tile: { type: 'int', arg: 'PX', desc: 'tile width in pixels (default 480)' }, out: OUT } },
   lint: { args: '<film>', summary: 'staging/editing checks → out/lint.json + out/lint.jpg; exit 1 on errors', run: cmdLint,
     options: { step: { type: 'number', arg: 'S', desc: 'sampling step in seconds (default 1/6)' } } },
@@ -424,6 +533,15 @@ export const COMMANDS = {
     detail: 'With a film first, its custom rigs are included and the sheet goes to its out/. Kinds may be comma-separated.', options: { out: OUT } },
   'set-sheet': { args: '[film] [kits…]', summary: 'every kit with anchors, colliders and walk regions drawn → out/set-sheet.jpg', run: cmdSetSheet,
     detail: 'With a film first, its custom kits are included and the sheet goes to its out/. Kits may be comma-separated.', options: { out: OUT } },
+  'verify-rig': { args: '<file|kind>', summary: 'the gate for a new rig: contract checks + review sheets; exit 1 on a failure', run: cmdVerifyRig,
+    detail: 'Checks the rig file (or a registered kind): contract fields, size vs height, every state painted inside its bounds in both facings, nothing through the ground, face -1 mirrors face 1, deterministic, each expression/talk/blink changes the face, gaits loop and gestures return to their pose. Writes <folder>/out/verify/<kind>.jpg (cast sheet with bounds, head and mouth) and <kind>-lineup.jpg (beside hare, human, mouse).',
+    options: { out: { ...OUT, arg: 'DIR', desc: 'folder for the review images' } } },
+  'verify-kit': { args: '<file|name>', summary: 'the gate for a new set kit: contract checks + review sheets; exit 1 on a failure', run: cmdVerifyKit,
+    detail: 'Checks the kit file (or a registered kit): at least 4 anchors with sane scales, ground anchors on walkable ground, every route between them clear, skies and ambience, area and parallax cover every camera, the ground line, every time of day painted, deterministic builds. Writes <folder>/out/verify/<name>.jpg (anchors, walk region, colliders) and <name>-times.jpg (the eight times of day).',
+    options: { out: { ...OUT, arg: 'DIR', desc: 'folder for the review images' } } },
+  'verify-effect': { args: '<film> [names…]', summary: 'the gate for a film\'s own effects: checks + a review strip; exit 1 on a failure', run: cmdVerifyEffect,
+    detail: 'For each custom overlay and beat the film uses (or the names given): a known layer, frames identical in any drawing order, and it draws something; for each custom sound: finite, deterministic, peak under 1. Writes out/verify/effects.jpg: three frames from the first use of each.',
+    options: { out: OUT } },
 };
 
 export function helpText(cmd) {
@@ -485,6 +603,8 @@ export async function main(argv, io = {}) {
     const problems = e?.problems ?? e?.errors ?? e?.issues;
     if (e?.name === 'ValidationError' && Array.isArray(problems)) {
       ctx.err.write(`cinecode ${cmd}: film.json has ${problems.length} problem${problems.length > 1 ? 's' : ''}:\n${problems.map(p => `  - ${typeof p === 'string' ? p : p.message ?? JSON.stringify(p)}`).join('\n')}\n`);
+    } else if (e?.code === 'ERR_MODULE_NOT_FOUND' && /@napi-rs\/canvas/.test(String(e.message))) {
+      ctx.err.write(`cinecode ${cmd}: the drawing library @napi-rs/canvas is not installed: run \`cinecode setup\`\n`);
     } else if (e instanceof CliError || e instanceof MissingModuleError) {
       ctx.err.write(`cinecode ${cmd}: ${e.message}\n`);
     } else {

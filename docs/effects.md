@@ -16,15 +16,38 @@ export const kits = { … };      // new locations (see sets.md, "Adding a kit")
 `cinecode new` writes a working example (`templates/custom.mjs`): a custom beat that throws glints from a character,
 an overlay of sunbeams and a bell sound. `films/_test/custom.mjs` is another small one, and
 `films/seventy-six-summers/custom.mjs` with its `fx/` folder a large one (a comet, mist, a far hill, a reflection).
-Their code may import engine helpers with a relative path (`../../engine/core/lib.mjs` from `films/<slug>/`). The
-path ties the file to its depth: a copy of the film somewhere else (a repro under `out/<name>/` is one level deeper)
-fails `check` with "Cannot find module" until the path is changed (`../../../engine/…`). Code that needs only a
-seeded generator can carry its own, as the template does, and survives any copy.
+
+Film code imports the engine's helpers by the name `cinecode`, never by a relative path, so a film works wherever it
+lives (in this repo, in another project, in a copy under `out/`):
+
+```js
+import { rng, ell, ink } from 'cinecode/lib';             // engine/core/lib.mjs
+import { cel, eye, darken } from 'cinecode/style';         // engine/core/style.mjs
+import { makeRig, mixPose } from 'cinecode/rig';           // engine/cast/rig.mjs
+import { makeSet } from 'cinecode/set';                    // engine/set/set.mjs
+import { ridge, paper } from 'cinecode/paint/paint';       // engine/paint/paint.mjs (nature, scenery, water, sky, …)
+import { glow } from 'cinecode/paint/structures';         // engine/paint/structures.mjs (cottages, lanterns, glow)
+import { grade } from 'cinecode/engine/film/grade.mjs';    // any other engine file
+```
+
+**Extension folders.** Effects, rigs and kits can also be files of their own, loaded with the film before
+`custom.mjs` (which wins on a name clash). `check` lists every file it loaded.
+
+| folder | each file | registered as |
+|---|---|---|
+| `films/<slug>/effects/` | exports `custom`, `overlays` and/or `sounds`, as above | merged with `custom.mjs`'s |
+| `films/<slug>/rigs/` | `export default makeRig({ kind, … })` | its `kind` (see cast.md, "Adding a rig") |
+| `films/<slug>/kits/` | `export default (params) => makeSet({ … })` | the file name (see sets.md, "Adding a kit") |
+| `cinecode/effects/`, `cinecode/rigs/`, `cinecode/kits/` | the same, shared by every film of a project | the nearest `cinecode/` folder above the film, up to the project root (the folder with `.git`) |
+
+Files whose name starts with `_` are skipped (helpers they import). Each kind has a gate that checks it the way the
+engine will use it and draws review images: `cinecode verify-effect <film> [names…]`, `cinecode verify-rig <file>`,
+`cinecode verify-kit <file>`; the `build-effect`, `build-rig` and `build-kit` skills walk through them.
 
 ## Two rules
 
 - **Deterministic.** No `Math.random()` or `Date.now()`. Use `api.seed` (or a fixed number) with a seeded
-  generator: `rng(seed)` from `engine/core/lib.mjs`, or your own (the template has a four-line one). Every render of a
+  generator: `rng(seed)` from `cinecode/lib`, or your own. Every render of a
   frame must be identical.
 - **Stateless.** Draw only from what you are given (the time, the params, the api), never from state kept between
   calls. Frames are drawn out of order: the contact sheet draws single frames, and a render splits the film between

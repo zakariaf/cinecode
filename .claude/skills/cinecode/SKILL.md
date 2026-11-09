@@ -7,25 +7,31 @@ description: Make a finished animated film with cinecode (painted, animated, voi
 
 cinecode turns `films/<slug>/film.json` (a storyboard) into a film: painted sets, animated characters, camera, captions, voices, music, sound effects and a mix. Everything is drawn and synthesized by code except the voices (Gemini TTS, cached in `films/<slug>/voices/`). This is the method that made `films/seventy-six-summers` (3:45, 56 shots, 56 voiced lines) good. Follow it in order.
 
-Run everything from the repo root. The CLI is `node bin/cinecode.mjs <command> films/<slug>` (`--help` on any command). Where things are:
+**Where you work.** A film is `films/<slug>/` under the folder Claude Code was started in (the person's project; in the cinecode repository, its own `films/`). Run every command from that folder. Pieces several films share go in `cinecode/{rigs,kits,effects}/` at the project root (step 6).
 
-- `docs/storyboard.md`: every storyboard field (`DESIGN.md` §4 and §9.1 are the contract). `docs/effects.md`: custom effects, rigs and kits in `custom.mjs`.
-- `references/` next to this file: `storyboard-quick.md` (a valid skeleton, beats, camera, every valid name), `cast.md` (every rig: speeds, poses, gestures, params, what rigs can't do, substitutes for missing animals), `sets.md` (every kit: anchors with x, y and scale, props' extents; hollows), `voices.md` (the 30 voices, writing tones, fixing takes), `review.md` (rendering stills and strips, the per-frame checklist, lint rules, reviewer lenses).
-- `scripts/` next to this file: `inventory.mjs` (live rig and kit tables), `warnings.mjs` (warnings `check` and `plan` don't print), `timeline.mjs` (every beat's start and end, marks, moves that run past a cut), `takes.mjs` (what each voice take says), `levels.mjs` (the score's level per shot, and quiet holes in it).
-- `films/seventy-six-summers/` is the worked example: `screenplay.md`, `film.json`, `custom.mjs` + `fx/`. `films/_test/custom.mjs` is a small custom-effects example.
+**The CLI** is `cinecode <command> films/<slug>` (`--help` on any command). As a Claude Code plugin, `cinecode` is on the PATH; if it isn't (inside the cinecode repository without the plugin), run `node ${CLAUDE_SKILL_DIR}/../../../bin/cinecode.mjs` in its place. **The first time on a machine** run `cinecode setup`: it installs the drawing library and checks Node, ffmpeg and the Gemini key; fix what it reports as FAIL before anything else.
+
+**cinecode's own folder** (engine, docs, worked examples) is `${CLAUDE_SKILL_DIR}/../../..`, written CINECODE below; this skill's folder is `${CLAUDE_SKILL_DIR}` (the references write it as `<skill>`). Where things are:
+
+- `CINECODE/docs/storyboard.md`: every storyboard field (`CINECODE/DESIGN.md` §2–4 and §9 are the contracts). `CINECODE/docs/effects.md`: custom effects; `docs/cast.md` and `docs/sets.md`: adding a rig or a kit.
+- `${CLAUDE_SKILL_DIR}/references/`: `storyboard-quick.md` (a valid skeleton, beats, camera, every valid name), `cast.md` (every rig: speeds, poses, gestures, params, what rigs can't do, substitutes for missing animals), `sets.md` (every kit: anchors with x, y and scale, props' extents; hollows), `voices.md` (the 30 voices, writing tones, fixing takes), `review.md` (rendering stills and strips, the per-frame checklist, lint rules, reviewer lenses).
+- `${CLAUDE_SKILL_DIR}/scripts/`: `inventory.mjs` (live rig and kit tables), `warnings.mjs` (warnings `check` and `plan` don't print), `timeline.mjs` (every beat's start and end, marks, moves that run past a cut), `takes.mjs` (what each voice take says), `levels.mjs` (the score's level per shot, and quiet holes in it).
+- `CINECODE/films/seventy-six-summers/` is the worked example: `screenplay.md`, `film.json`, `custom.mjs` + `fx/`. `CINECODE/films/_test/custom.mjs` is a small custom-effects example, `CINECODE/films/strawberry-race/rigs/strawberry.mjs` a film-local rig (a prop).
+- The build skills, for anything the engine doesn't have: `build-rig` (a character or a prop), `build-kit` (a place), `build-effect` (weather, light, a swarm, a sound). Each ends in a gate: `cinecode verify-rig`, `verify-kit`, `verify-effect`.
 
 Ground rules:
 
-- Work inside `films/<slug>/`. Don't edit `engine/` for one film: what the engine lacks goes in the film's `custom.mjs` (step 6). If you find an engine bug, work around it and tell the person.
-- Deterministic: no `Math.random()` or `Date.now()` in `custom.mjs`; use a seeded `rng(seed)` (the template's own, or `engine/core/lib.mjs`'s) with `api.seed`.
+- Work inside `films/<slug>/`. Never edit cinecode's `engine/` for a film: what the engine lacks is built in the film's folder (or the project's `cinecode/`), step 6. If you find an engine bug, work around it and tell the person.
+- **Never stop at "not available".** A character, place, prop or effect the engine lacks is reused, adapted or built (step 1, "What isn't there"), never cut or refused for that reason alone.
+- Deterministic: no `Math.random()` or `Date.now()` in film code; use `rng(seed)` from `cinecode/lib` with `api.seed`.
 - **Look at every image you render** with the Read tool. A film is done when the frames are good, not when the commands pass.
 - One checkpoint: after step 1, show the person the logline, cast (rig + voice), sets and length in a few lines and ask for a go-ahead or changes. Skip it when they said "just make it" or when nobody can answer (a non-interactive or workflow run): decide yourself and list your choices in the report. After the checkpoint, work to the end without asking.
 
 ## 1. The story
 
-`node bin/cinecode.mjs new <slug> --title="The Title"` creates `films/<slug>/` with a `screenplay.md` template (keep its sections), a starter `film.json` and a `custom.mjs`. The starter is a complete example film (Pip, a hare and an owl in the meadow, and a `glints` custom beat in shot 1.6); only the title is yours. Replace its logline, voices, cast, sets and scenes, and delete from `custom.mjs` whatever you don't use (with the beats that name it).
+`cinecode new <slug> --title="The Title"` creates `films/<slug>/` with a `screenplay.md` template (keep its sections), a starter `film.json` and a `custom.mjs`. The starter is a complete example film (Pip, a hare and an owl in the meadow, and a `glints` custom beat in shot 1.6); only the title is yours. Replace its logline, voices, cast, sets and scenes, and delete from `custom.mjs` whatever you don't use (with the beats that name it).
 
-Write `screenplay.md` before any JSON. **From a one-sentence idea**, invent the rest: who wants what, what stands in the way, the turn, a last image. **From a full screenplay**, adapt it: map every character to a rig and every place to a kit, cut or restage what the engine can't show, and list the substitutions for the report. The screenplay has, in this order:
+Write `screenplay.md` before any JSON. **From a one-sentence idea**, invent the rest: who wants what, what stands in the way, the turn, a last image. **From a full screenplay**, adapt it: map every character to a rig and every place to a kit (reusing, adapting or building, below), and list what you adapted or built for the report. The screenplay has, in this order:
 
 1. **Logline**: one sentence, who wants what and what's in the way. A theme line if there is one, and the lines or images that come back later with a new meaning.
 2. **Characters**: for each, the rig, look (`params` colours, cast `scale`), voice (a Gemini voice + 2–3 delivery adjectives), personality in a line.
@@ -42,7 +48,7 @@ PEBBLE (slow): "The standing stone. Tonight."
 
 6. **Ending and final image**: the last image and how it answers the opening.
 
-**Characters: choose from the existing rigs** (live list: `node .claude/skills/cinecode/scripts/inventory.mjs cast`; drawn: `node bin/cinecode.mjs cast-sheet <kinds> -o out/cast.jpg`). Walk speeds are units/s; see `references/cast.md` for on-screen times.
+**Characters: start from the existing rigs** (live list: `node ${CLAUDE_SKILL_DIR}/scripts/inventory.mjs cast`; drawn: `cinecode cast-sheet <kinds> -o out/cast.jpg`). Walk speeds are units/s; see `references/cast.md` for on-screen times.
 
 - `human`: a storybook person, child / teen / adult / elder, many clothes and hair params; walk 92; sits on the ground or a seat, crouches, kneels, points, waves, claps, jumps for joy.
 - `hare`: tall and fast (hop 190, run 640); ears, stretch, yawn, skid, slump; waves, points, thumps, shrugs.
@@ -59,11 +65,15 @@ PEBBLE (slow): "The standing stone. Tonight."
 - `beetle`: tiny, six-legged, slow.
 - `butterfly`: flies and glides, perches with folded wings.
 
-**An animal that isn't there** (a firefly, a crow, a wolf): don't write a rig for it. Reskin the nearest rig with `params` and cast `scale`, and draw what it lacks as an overlay that follows the actor (step 6). A firefly is a dark-winged, yellow-bodied butterfly at `scale` 0.6 plus a glow overlay on the `grade` layer; more substitutes are in `references/cast.md`.
+**What isn't there: reuse, adapt, build.** For every character, prop, place and effect the story needs, in this order:
 
-**A prop the story turns on** (a strawberry, a kite, a lantern) isn't built in either. On the ground, framed by the camera, changing state (split, eaten): a small static rig in `custom.mjs` (`makeRig`; `docs/cast.md`, "Adding a rig"), with a pose per state; others route round it like an actor, and its ground shadow stays until you `fade` it. In the air or held (a kite on a string): a stand-in flier (a butterfly) hovering with `height`, moved with `fly` and faded to 0 by its first beat, carrying an overlay that draws the prop; the camera can frame it with `on`, and `api.actor` still returns it at opacity 0. There is no hidden start: the stand-in shows at full opacity until its fade (one frame, plus the opening card's dissolve if it is in shot 1.1), so draw the prop over it. The pattern, and a string from a human's hand: `docs/effects.md`, "Props".
+1. **Reuse** a rig, kit or built-in effect that is the thing (a fox is the fox; a lantern-lit cottage is the village at dusk).
+2. **Adapt** one: `params` (coat colours, antlers, tail size, clothes), cast `scale`, a kit's time of day, plus at most a small overlay that follows the actor, and only when the result reads as the thing at the film's framing. A firefly is a dark-winged, yellow-bodied butterfly at `scale` 0.6 with a glow overlay (`CINECODE/films/glim/`). The substitutes in `references/cast.md` are this step: a fallback when they truly read, not the answer.
+3. **Build** it when an adaptation wouldn't read (a wolf in a close-up, a crow that must be a crow, a kite the story turns on, a strawberry that splits, a harbour, a thunderstorm): a new rig (`build-rig` skill; props on the ground or in the air are rigs too), a new kit (`build-kit`) or an effect (`build-effect`). Each lives in `films/<slug>/rigs|kits|effects/` and loads like a built-in once its gate passes (`cinecode verify-rig|verify-kit|verify-effect`) and you have looked at its review images.
 
-**Places: choose from the existing kits** (anchors in `references/sets.md`; drawn with anchors: `node bin/cinecode.mjs set-sheet <kit> -o out/set-<kit>.jpg`). Skies: dawn, morning, noon, afternoon, golden, sunset, twilight, night.
+Decide at the checkpoint what you will build: a rig or a kit costs real time, an adaptation that reads is better spent effort. Never tell the person a thing isn't available; say what you reused, adapted or built.
+
+**Places: start from the existing kits** (anchors in `references/sets.md`; drawn with anchors: `cinecode set-sheet <kit> -o out/set-<kit>.jpg`); a place none of them can be is built (`build-kit`). Skies: dawn, morning, noon, afternoon, golden, sunset, twilight, night.
 
 - `meadow`: forest edge; the owl's hollow tree with a low branch (perches), an old stump (`stump_top`), rocks, a lily pond.
 - `forest`: a dirt path between big trunks; an oak with a mouse-sized den (`den`, a hollow), a fallen log (`log_top`), a boulder; extra wide.
@@ -73,7 +83,7 @@ PEBBLE (slow): "The standing stone. Tonight."
 - `hill`: a ridge set; a long slope rising left to right to a crest with a standing stone (`stone_top`) and a hawthorn.
 - `village`: a cottage with door and windows, picket fence and gate, well, bench (`bench_seat`), lantern, lane, a tree with perches; windows and lantern light up at dusk.
 
-**Write for what the rigs can do.** Every view is side-on. Characters don't touch or hug, and hold only what you draw for them (above): tell the story with positions, walks, looks, poses, gestures, expressions, timing and the camera. Keep lines short (most under ten words), one emotion per line. Every scene needs a turn you can see with the sound off.
+**Write for what the rigs can do.** Every view is side-on. Characters don't touch or hug, and hold only what you draw for them: tell the story with positions, walks, looks, poses, gestures, expressions, timing and the camera. Keep lines short (most under ten words), one emotion per line. Every scene needs a turn you can see with the sound off.
 
 **Length target.** `plan`'s total includes the title cards (shot 1.1 starts after the opening card), so count them. Shots average 4 s. A card needs 3 s to be read: the title is fully inked 1.4 s in and dissolves into shot 1.1 over the last second; the end card's line is full from 1.3 s until it fades to black over the last 1.2 s.
 
@@ -87,7 +97,7 @@ A line lasts about `words / 2.6 + 0.3` s until it is voiced, but a slow or gruff
 
 ## 2. The storyboard (`film.json`)
 
-Look fields up in `docs/storyboard.md`; the short version with every valid name is `references/storyboard-quick.md`. Translate the screenplay shot by shot: scene `actors` (where everyone starts), then each shot's `camera` and `beats`. Put the intent in `note` fields; reviewers read them.
+Look fields up in `CINECODE/docs/storyboard.md`; the short version with every valid name is `references/storyboard-quick.md`. Translate the screenplay shot by shot: scene `actors` (where everyone starts), then each shot's `camera` and `beats`. Put the intent in `note` fields; reviewers read them.
 
 **Staging rules** (the ones that cost the most rework):
 
@@ -106,10 +116,10 @@ Look fields up in `docs/storyboard.md`; the short version with every valid name 
 ## 3. Check and plan
 
 ```bash
-node bin/cinecode.mjs check films/<slug>      # validate; lists every problem with its path
-node bin/cinecode.mjs plan films/<slug>       # shot list: start, length, first line (~ = estimated, not voiced yet)
-node .claude/skills/cinecode/scripts/warnings.mjs films/<slug>   # misspelled fields `check` ignores; two-shots staged too far apart; an actor dwarfed by an anchor or a bigger actor in "on"; blocked routes
-node .claude/skills/cinecode/scripts/timeline.mjs films/<slug> 1.4 1.5   # each beat's start and end, moves that run on past a cut, mark times; "!" = a pose or gesture lost under a move
+cinecode check films/<slug>      # validate; lists every problem with its path
+cinecode plan films/<slug>       # shot list: start, length, first line (~ = estimated, not voiced yet)
+node ${CLAUDE_SKILL_DIR}/scripts/warnings.mjs films/<slug>   # misspelled fields `check` ignores; two-shots staged too far apart; an actor dwarfed by an anchor or a bigger actor in "on"; blocked routes
+node ${CLAUDE_SKILL_DIR}/scripts/timeline.mjs films/<slug> 1.4 1.5   # each beat's start and end, moves that run on past a cut, mark times; "!" = a pose or gesture lost under a move
 ```
 
 Fix until `check` is valid and `warnings.mjs` is clean or every warning is understood. "no warnings" says nothing about framing: only lint and the contact sheets do. Compare `plan`'s total with the length target.
@@ -125,8 +135,8 @@ Fix until `check` is valid and `warnings.mjs` is clean or every warning is under
 If it's missing, ask the person to export it in their shell profile and restart the session; don't ask them to paste it into the chat. Then:
 
 ```bash
-node bin/cinecode.mjs voice films/<slug>                      # only new or changed lines go to the network
-node .claude/skills/cinecode/scripts/takes.mjs films/<slug> --all   # every take: what was asked, what was heard, its length and pauses
+cinecode voice films/<slug>                      # only new or changed lines go to the network
+node ${CLAUDE_SKILL_DIR}/scripts/takes.mjs films/<slug> --all   # every take: what was asked, what was heard, its length and pauses
 ```
 
 Each new take is transcribed and checked: a take that reads its tone aloud is retried with less of it (up to 3 tries, the best kept), and `voice` marks lines still above 20% word error with `!`. That isn't everything, so read every take in `takes.mjs --all` (without `--all` it prints only flagged and non-verbal lines; details in `references/voices.md`):
@@ -143,10 +153,10 @@ Voice before the contact-sheet loop: shot lengths come from the real takes, so s
 This is where the film gets good. Commands and the full checklist are in `references/review.md`.
 
 ```bash
-node bin/cinecode.mjs sheet films/<slug>       # middle frame of every shot → films/<slug>/out/sheet.jpg
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/s03.jpg --shots=3.1,3.2,3.3,3.4 --cols=2 --tile=640   # one scene, bigger
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/s03d.jpg --shots=3.3 --debug                          # boxes, contacts, caption box
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/strip.jpg --shots=3.3@0.1,3.3@0.3,3.3@0.5,3.3@0.7,3.3@0.9 --cols=5 --tile=384
+cinecode sheet films/<slug>       # middle frame of every shot → films/<slug>/out/sheet.jpg
+cinecode sheet films/<slug> --shots=3.1,3.2,3.3,3.4 --cols=2 --tile=640 -o films/<slug>/out/s03.jpg  # one scene, bigger
+cinecode sheet films/<slug> --shots=3.3 --debug -o films/<slug>/out/s03d.jpg                         # boxes, contacts, caption box
+cinecode sheet films/<slug> --shots=3.3@0.1,3.3@0.3,3.3@0.5,3.3@0.7,3.3@0.9 --cols=5 --tile=384 -o films/<slug>/out/strip.jpg
 ```
 
 `--shots=` takes shot ids (with `@u` for a point 0..1 in the shot); `--t=` takes **seconds**, so `--t=2.2` is not shot 2.2.
@@ -154,29 +164,38 @@ node engine/film/sheet.mjs films/<slug> films/<slug>/out/strip.jpg --shots=3.3@0
 1. Render a scene's sheet and **look at every tile**. List what's wrong, as `shot: problem → fix`: framing (size, lead room, headroom, cut-off heads), floating (feet above their own shadow when nobody is jumping, a shadow on nothing), hidden subjects (behind a trunk, a front layer, mist, an overlay, the dark), eyes (shut, looking at the wrong person), overlap (two characters drawn into each other), captions (over a face, too long, in a band someone walks into), continuity across cuts.
 2. Middle frames hide motion. For every shot with a walk, hop, entrance, camera move, gesture or pose change, render a strip of 4–6 frames and check the whole move: where it starts, that it ends where the next shot begins, that nobody slides or pops.
 3. Fix `film.json`, re-render only those shots and their neighbours, look again. Repeat until a whole pass finds nothing.
-4. `node bin/cinecode.mjs lint films/<slug> --step=0.5` (about a minute for 3½ minutes of film, seconds for a short; run long ones in the background). Read `films/<slug>/out/lint.jpg`. Fix every error and every warning that is a real problem; a warning you keep on purpose goes in the report. `edge-cut`, `tangent` and `halo` messages end with a camera change or staging that lint tried on the recompiled film: apply it and look again. A `subject-size` warning that `zoom` doesn't clear means the frame holds something besides the subject: see the lint table in `references/review.md`. One exception: a static shot is framed for the pose its subject holds for most of the shot, so one who sits or lies down early (or stands up late) overfills it while taller: keep the taller pose for most of the shot, cut on the change, or `"zoom": 0.8` (lint may still warn: keep it and say so).
+4. `cinecode lint films/<slug> --step=0.5` (about a minute for 3½ minutes of film, seconds for a short; run long ones in the background). Read `films/<slug>/out/lint.jpg`. Fix every error and every warning that is a real problem; a warning you keep on purpose goes in the report. `edge-cut`, `tangent` and `halo` messages end with a camera change or staging that lint tried on the recompiled film: apply it and look again. A `subject-size` warning that `zoom` doesn't clear means the frame holds something besides the subject: see the lint table in `references/review.md`. One exception: a static shot is framed for the pose its subject holds for most of the shot, so one who sits or lies down early (or stands up late) overfills it while taller: keep the taller pose for most of the shot, cut on the change, or `"zoom": 0.8` (lint may still warn: keep it and say so).
 
-## 6. Custom effects, rigs or kits (only when the story needs them)
+## 6. Building what the engine lacks
 
-When the story needs something the engine lacks (a comet, mist that parts, a reflection, a glow on a reskinned rig, a swarm, a new sound), write it in `films/<slug>/custom.mjs`. Read `docs/effects.md` first: `custom.mjs` may export `custom` (custom beats, `{ "do": "custom", "name": … }`), `overlays` (whole-scene drawings on a layer: sky, back, world, front, grade, screen), `sounds`, `rigs` and `kits`. `films/_test/custom.mjs` is a 50-line example; `films/seventy-six-summers/fx/` is a large one (comet, mist, far hill, reflection, star highlight). A new rig or kit is a big job: reskin first (step 1).
+Small, film-only drawing (a glow on a reskinned rig, a comet, mist that parts, a reflection, a new sound) goes in `films/<slug>/custom.mjs`: it may export `custom` (custom beats, `{ "do": "custom", "name": … }`), `overlays` (whole-scene drawings on a layer: sky, back, world, front, grade, screen), `sounds`, `rigs` and `kits` (`CINECODE/docs/effects.md`). A piece worth its own file goes in the film's folders, loaded like a built-in:
 
+```
+films/<slug>/rigs/<kind>.mjs      export default makeRig({ kind: '<kind>', … })     build-rig skill
+films/<slug>/kits/<name>.mjs      export default (params) => makeSet({ … })         build-kit skill  ("kit": "<name>")
+films/<slug>/effects/<name>.mjs   export const overlays / custom / sounds           build-effect skill
+cinecode/rigs|kits|effects/       the same, shared by every film in the project
+```
+
+Film code imports the engine as `cinecode/<name>` wherever the film lives: `cinecode/lib` (rng, noise, ink, ell, rpoly, clump…), `cinecode/style` (cel, line, eye, brow…), `cinecode/rig` (makeRig, footAt, gest…), `cinecode/set` (makeSet), `cinecode/paint/<name>` (scenery, nature, water, structures…), `cinecode/engine/<path>` for anything else. Never a relative path into cinecode's folder.
+
+- Use the build skill: it has the contract, a starter that passes its gate, and the house-style helpers. **The gate is not optional**: `cinecode verify-rig <file>` / `verify-kit <file>` / `verify-effect films/<slug> <name>` must pass, and you must look at every review image it writes, before the piece goes into `film.json`. Fix and rerun until both are good.
 - Match the style: inked wobbly outlines, gouache dabs, cel shading, light from the upper left. Emitted light (a lamp, a comet, a firefly) goes on the `grade` layer, after the night grade, or it turns grey.
-- To follow an actor, draw at `api.toScreen` of `api.actor(id).box` (null while it is off stage), sized by `api.cam.zoom`. A prop's painted extent is `api.set.props` (the hawthorn's crown has no anchor), the horizon `api.set.horizon`, a human's hand in `docs/effects.md`.
+- To follow an actor, draw at `api.toScreen` of `api.actor(id).box` (null while it is off stage), sized by `api.cam.zoom`. A prop's painted extent is `api.set.props` (the hawthorn's crown has no anchor), the horizon `api.set.horizon`, a human's hand in `CINECODE/docs/effects.md`.
 - A sound under a whole scene (rain): a custom sound that takes its length from `params`, `{ "sfx": "rain-bed", "params": { "dur": 30 } }` with no beat `dur`. The beat then takes no time and the sound plays on across the cuts (a beat `dur` would hold the shot that long).
-- `custom.mjs` may import engine helpers by relative path (`../../engine/core/lib.mjs`), which breaks if the film folder is copied to another depth (a repro under `out/`): keep it self-contained where you can (the template carries its own `rng`).
 - Deterministic and stateless: draw only from `api.t`, `api.seed`, the params and a seeded `rng()`, never from state kept between calls (workers draw frames out of order). Key timed events off `mark` beats (`api.marks`), not hard-coded seconds.
 - The built-in `fireflies` field is spread thinly over the whole world (3–6 × `n` per 420 px square): a shot of a small rig shows few even at `n: 6`. For a swarm, write an overlay around an anchor, keyed to a `mark`.
-- Run `check`, then a strip across the shots that use it. Make sure it never covers a character's face or makes a speaker unreadable.
+- Run `check` (it lists the extension files it loaded), then a strip across the shots that use the piece. Make sure it never covers a character's face or makes a speaker unreadable.
 
 ## 7. Music, mix, animatic, render
 
 ```bash
-node bin/cinecode.mjs music films/<slug>      # the score alone → out/music.wav
-node bin/cinecode.mjs mix films/<slug>        # score + dialogue + sfx + ambience, ducked and mastered to −16 LUFS → out/mix.wav
-node bin/cinecode.mjs animatic films/<slug>   # 12 fps, half size, with sound → out/animatic.mp4 (mixes first if stale)
+cinecode music films/<slug>      # the score alone → out/music.wav
+cinecode mix films/<slug>        # score + dialogue + sfx + ambience, ducked and mastered to −16 LUFS → out/mix.wav
+cinecode animatic films/<slug>   # 12 fps, half size, with sound → out/animatic.mp4 (mixes first if stale)
 ```
 
-Music comes from scene and shot `music` cues (moods, stings, a `score` motif); footsteps and hops are added automatically. You can't hear it, so check what you can measure: `plan` counts the music cues, `mix` prints the loudness, and `node .claude/skills/cinecode/scripts/levels.mjs films/<slug>` prints the score's level per shot in 0.5 s windows and flags quiet holes under a cue (a mean over a shot hides them). Two causes so far: a mood change on a cut without `"downbeat": true` can open with a second or more of near-silence (give it `downbeat`), and the last cue's final chord lands about 3 s before the end and dies under a short end card (give it `"hold": true`). A quiet scene should still read quieter than a chase. Whether the moods fit is for the person to judge in the animatic; say so in the report. Then look at the whole film at once:
+Music comes from scene and shot `music` cues (moods, stings, a `score` motif); footsteps and hops are added automatically. You can't hear it, so check what you can measure: `plan` counts the music cues, `mix` prints the loudness, and `node ${CLAUDE_SKILL_DIR}/scripts/levels.mjs films/<slug>` prints the score's level per shot in 0.5 s windows and flags quiet holes under a cue (a mean over a shot hides them). Two causes so far: a mood change on a cut without `"downbeat": true` can open with a second or more of near-silence (give it `downbeat`), and the last cue's final chord lands about 3 s before the end and dies under a short end card (give it `"hold": true`). A quiet scene should still read quieter than a chase. Whether the moods fit is for the person to judge in the animatic; say so in the report. Then look at the whole film at once:
 
 ```bash
 d=$(ffprobe -v error -show_entries format=duration -of csv=p=0 films/<slug>/out/animatic.mp4)
@@ -186,15 +205,15 @@ ffmpeg -v error -y -i films/<slug>/out/animatic.mp4 -vf "fps=32/$d,scale=320:-1,
 Read the overview (32 frames spread over the film, whatever its length): the journey, the light and the screen direction should read at a glance. Ask the person to watch the animatic: they can hear it, and it's the cheapest moment for notes. Then render:
 
 ```bash
-node bin/cinecode.mjs render films/<slug>                       # → out/<slug>.mp4 + out/<slug>.srt (run in the background)
-node bin/cinecode.mjs render films/<slug> --from=1:20 --to=1:40  # a full-quality sequence → out/<slug>-80s.mp4
+cinecode render films/<slug>                       # → out/<slug>.mp4 + out/<slug>.srt (run in the background)
+cinecode render films/<slug> --from=1:20 --to=1:40  # a full-quality sequence → out/<slug>-80s.mp4
 ```
 
 `render` voices any missing lines first (with the key) and stops without it. It takes tens of minutes for a few minutes of film (every core works). Its last line (`verify`) is an ffprobe check: size, codec, frame count, fps, duration, audio, subtitles. Grab a few frames from the final file with `ffmpeg -ss <t>` and look at them.
 
 ## 8. The report to the person
 
-- The file: `films/<slug>/out/<slug>.mp4` (and the `.srt`), its length, resolution, and how to re-render (`node bin/cinecode.mjs render films/<slug>`).
+- The file: `films/<slug>/out/<slug>.mp4` (and the `.srt`), its length, resolution, and how to re-render (`cinecode render films/<slug>`).
 - What's in it: the logline, the scenes in a line each, the cast (rig and voice), anything custom you built.
 - The choices you made without asking (when you skipped the checkpoint), and what you changed from their idea or screenplay and why (substitute rigs or places, cut lines).
 - Known issues, honestly: lint warnings you kept, takes you couldn't get right (ids), shots you'd still improve, the lines and the music they should listen to.

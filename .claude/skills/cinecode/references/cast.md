@@ -1,6 +1,6 @@
 # Cast reference (rigs)
 
-Generated from the rig registry by `node .claude/skills/cinecode/scripts/inventory.mjs cast` (add `films/<slug>` to include that film's custom rigs). Rerun it when the engine changes; the live registry wins over this snapshot. The notes at the end are by hand. `node bin/cinecode.mjs cast-sheet <kinds> -o out/<name>.jpg` draws every pose, gesture and expression.
+Generated from the rig registry by `node <skill>/scripts/inventory.mjs cast` (add `films/<slug>` to include that film's custom rigs). Rerun it when the engine changes; the live registry wins over this snapshot. The notes at the end are by hand. `cinecode cast-sheet <kinds> -o out/<name>.jpg` draws every pose, gesture and expression.
 
 Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s, where s = set.scaleAt(x, y) × cast `scale`. "300 px" = seconds to walk 300 world px at s 1.3.
 
@@ -163,14 +163,17 @@ Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s
   of frame for 0.5 s or more (the mouse's `gasp` sits her up): it eases out to keep the ears in and back after.
   Extreme close-ups and moving shots frame the resting head only: use the pose of the same name there (mouse poses
   `gasp`, `cheer`, `alert`).
-- **No rig for the animal?** Reskin the nearest rig (`params`, cast `scale`) and draw what it lacks as an overlay that
-  follows `api.actor(id).box` (light on the `grade` layer). Seen to read well: firefly = butterfly `scale` 0.6, dark
-  wings (`col`, `col2`, `tip`), yellow `body` + a glow overlay; crow (loosely, a bat) = near-black songbird `scale`
-  1.3; rabbit = hare `scale` 0.7; rat = mouse; wolf or dog = grey or brown fox (`coat`, `cream`, `sock`); ladybird =
-  red beetle (`shell`); turtle = tortoise. Name the substitution in the screenplay and the report.
-- **Props** (no rig either). A ground object the camera frames and that changes state (a strawberry that splits, is
-  eaten): a small static `makeRig` rig in `custom.mjs` (`docs/cast.md`, "Adding a rig") with a pose per state and
-  params for the rest; moving actors route round it (a wide detour near a small prop: keep routes clear of it) and its
-  ground shadow stays until a `fade`. A thing in the air (a kite, a ball, a lantern): a butterfly stand-in hovering with
-  `height`, moved by `fly`, faded to 0 by its first beat, carrying an overlay that draws the thing at its `box` (still
-  returned at opacity 0; the camera frames it with `on`).
+- **No rig for the animal?** Adapt first, build second (SKILL.md, "What isn't there"). These adaptations have read
+  well, at the framings they were used in: firefly = butterfly `scale` 0.6, dark wings (`col`, `col2`, `tip`), yellow
+  `body` + a glow overlay; crow (loosely, a bat) = near-black songbird `scale` 1.3; rabbit = hare `scale` 0.7; rat =
+  mouse; wolf or dog = grey or brown fox (`coat`, `cream`, `sock`); ladybird = red beetle (`shell`); turtle = tortoise.
+  They are a fallback, not the answer: when the animal must read as itself (a wolf in a close-up, a crow that caws on a
+  branch), build its rig with the `build-rig` skill (`films/<slug>/rigs/<kind>.mjs`, gated by `cinecode verify-rig`).
+  Name every adaptation or new rig in the screenplay and the report.
+- **Props.** A ground object the camera frames and that changes state (a strawberry that splits, is eaten): a small
+  static rig (`build-rig`; `CINECODE/films/strawberry-race/rigs/strawberry.mjs` is one) with a pose per state and params
+  for the rest; moving actors route round it (a wide detour near a small prop: keep routes clear of it) and its ground
+  shadow stays until a `fade`. A thing in the air (a kite, a ball, a lantern): its own flying rig (`flies: true`, a `fly`
+  gait, hovering with `height`), or the quicker stand-in: a butterfly hovering with `height`, moved by `fly`, faded to 0
+  by its first beat, carrying an overlay that draws the thing at its `box` (still returned at opacity 0; the camera
+  frames it with `on`; `CINECODE/films/kite/`).

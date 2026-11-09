@@ -34,10 +34,11 @@ engine/audio/sfx.mjs        procedural sound effects + ambience    (owner: sfx)
 engine/audio/mix.mjs        final audio mix                        (owner: sfx)
 engine/lint/lint.mjs        staging and editing checks             (owner: lint)
 engine/render/*.mjs         frame workers, encode, mux, sheets     (owner: render)
-films/<slug>/               film.json, custom.mjs, audio cache, out/
+films/<slug>/               film.json, custom.mjs, rigs/ kits/ effects/ (optional), audio cache, out/
 templates/                  film.json starter, bible template      (owner: docs)
 docs/                       guides                                 (owner: docs)
-SKILL.md                    Claude Code skill: idea → film         (owner: docs)
+.claude/skills/             Claude Code skills: cinecode (idea → film), build-rig, build-kit, build-effect (owner: docs)
+.claude-plugin/             plugin.json + marketplace.json: the repo is a Claude Code plugin and its marketplace
 ```
 
 ## 2. Rigs (`engine/cast/`)
@@ -216,6 +217,16 @@ export const kits = { harbour: harbourKit }; // extra set kits
 export const custom = { acornDrop: { draw(ctx, u, api) {}, sfx: [{ at: 0.3, name: 'plop' }] } };
 ```
 
+**Extension folders** (`engine/film/load.mjs`): the same things as files of their own, loaded before `custom.mjs`
+(which wins on a clash). `films/<slug>/rigs/<kind>.mjs` default-exports a rig (registered by its `kind`),
+`kits/<name>.mjs` default-exports `(params) => set` (registered by file name), `effects/<name>.mjs` exports any of
+`custom`, `overlays`, `sounds`. A project shares them between films in `cinecode/rigs|kits|effects/`: the nearest such
+folder above the film, not past the project root (a folder with `.git`). Files starting with `_` are skipped.
+Film code imports the engine by package name, never by relative path: `cinecode/lib`, `cinecode/style`,
+`cinecode/rig`, `cinecode/set`, `cinecode/paint/<file>`, `cinecode/engine/<path>` (package.json `exports`; a resolve
+hook maps the name to this package wherever the film lives). Gates: `verify-rig`, `verify-kit`, `verify-effect`
+(`engine/render/verify.mjs`).
+
 ## 5. Compiled plan (`engine/film/`)
 
 ```js
@@ -305,6 +316,10 @@ animatic            fast low-res preview with sound → out/animatic.mp4
 render [--jobs=N]   final film → out/<slug>.mp4 + out/<slug>.srt
 cast-sheet [kinds]  every rig in every pose/expression → out/cast-sheet.jpg
 set-sheet [kits]    every kit with anchors, colliders and walk regions drawn → out/set-sheet.jpg
+verify-rig <file|kind>        a rig's gate: contract, size, bounds, ground, flip, determinism, face, motion + review images
+verify-kit <file|name>        a kit's gate: contract, anchors, world, walk, paint + review images
+verify-effect <film> [names]  effects' gate: layer, frame order, draws, sounds + a review strip
+setup [--check]               check Node, the canvas library (installs it when missing), ffmpeg, GEMINI_API_KEY
 ```
 
 ## 9. Round 2 extensions (all generic; first used by `films/seventy-six-summers`)

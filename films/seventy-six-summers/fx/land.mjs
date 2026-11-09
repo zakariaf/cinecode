@@ -58,10 +58,10 @@
 //                         of focus, in front of the subject), params.shade (0..1, a cool multiply: nearer the lens,
 //                         in the subject's shadow). Drawn from the actor's own state (pose, gesture, expression, look,
 //                         tilt, blinks), so the beats that move the actor move it; no shadow, no lift (nearFigure).
-import { rng, noise1, clamp, lerp, smooth, canvas, blob, ink, path, quad } from '../../../engine/core/lib.mjs';
-import { skyHaze, SKY_W, SKY_H } from '../../../engine/paint/sky.mjs';
-import { glow, lanternBody, lampLevel, WARM } from '../../../engine/paint/structures.mjs';
-import { LANTERN_G, villageScale } from '../../../engine/set/kits/village.mjs';
+import { rng, noise1, clamp, lerp, smooth, canvas, blob, ink, path, quad } from 'cinecode/lib';
+import { skyHaze, SKY_W, SKY_H } from 'cinecode/paint/sky';
+import { glow, lanternBody, lampLevel, WARM } from 'cinecode/paint/structures';
+import { LANTERN_G, villageScale } from 'cinecode/engine/set/kits/village.mjs';
 
 const ease = u => { u = clamp(u); return u * u * (3 - 2 * u); };
 const INK = '42,33,48';

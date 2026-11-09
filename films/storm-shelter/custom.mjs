@@ -4,7 +4,7 @@
 //  - shake (custom beat, world layer): spray flung off an actor (the badger rig has no shake gesture)
 //  - thunder, rain-bed (sounds)
 // Deterministic and stateless: everything is drawn from api.t, api.marks, api.params and seeded generators.
-import { rng, noise1, clamp } from '../../engine/core/lib.mjs';
+import { rng, noise1, clamp } from 'cinecode/lib';
 
 // lightning brightness at `dt` seconds after a strike: a bright first stroke, a dip, a re-strike, a fading tail
 function flashEnv(dt) {
@@ -156,6 +156,7 @@ export const sounds = {
       const crack = near * Math.exp(-t / 0.09) * (t < 0.4 ? 1 : 0);
       out[i] = (0.9 + 0.6 * near) * env * lp2 * 9 + 0.22 * crack * hp;
       if (i > n - 2400) out[i] *= (n - i) / 2400;
+      out[i] = 0.8 * Math.tanh(out[i] / 0.8);                     // soft limit: the crack's peaks stay under 1
     }
     return out;
   },

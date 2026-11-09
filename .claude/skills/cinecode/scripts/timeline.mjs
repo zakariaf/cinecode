@@ -2,13 +2,13 @@
 // mark's film time (for `sheet.mjs --t=`), a move that runs on past its shot's cut (and into which shot), and two
 // traps: a pose that starts while its actor is still moving (the move's end pose replaces it) and a gesture laid over
 // a move (the legs keep the gait: a jump or a stamp doesn't show until the move ends).
-//   node .claude/skills/cinecode/scripts/timeline.mjs films/<slug> [shot ids…]
+//   node <skill>/scripts/timeline.mjs films/<slug> [shot ids…]
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const [film, ...only] = process.argv.slice(2);
-if (!film) { console.error('usage: node .claude/skills/cinecode/scripts/timeline.mjs films/<slug> [shot ids…]'); process.exit(2); }
+if (!film) { console.error('usage: node <skill>/scripts/timeline.mjs films/<slug> [shot ids…]'); process.exit(2); }
 const { loadPlan, resolveFilmDir } = await import(join(ROOT, 'engine/render/film-source.mjs'));
 const { plan } = await loadPlan(resolveFilmDir(film));
 
