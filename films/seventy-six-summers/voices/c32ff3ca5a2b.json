@@ -1,0 +1,44 @@
+{
+ "id": "c32ff3ca5a2b",
+ "who": "fidget",
+ "text": "Got a name, Old Shell?",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, friendly",
+ "prompt": "[friendly] Got a name, Old Shell?",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.99,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0.56,1,1,0.923,0.572,0.277,0.909,0.9,0.615,0.21,0,0,0,0.986,1,1,0.998,1,0.988,0.983,0.997,0.991,0.972,0.972,0.956,0.839,0.895,0.936,0.966,0.963,0.795,0.481,0.135,0.082,0.931,1,1,1,1,1,0.962,0.796,0.438,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Got a name, old shell?",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, friendly",
+    "wer": 1,
+    "transcript": "Quick, bright, cheeky, friendly. Got a name, old chap?",
+    "leading": 4,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 3.52
+   },
+   {
+    "attempt": 2,
+    "direction": "friendly",
+    "wer": 0,
+    "transcript": "Got a name, old shell?",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.99
+   }
+  ]
+ }
+}

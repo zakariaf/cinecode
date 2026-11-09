@@ -1,0 +1,54 @@
+{
+ "id": "32dba82fe2ba",
+ "who": "pebble",
+ "text": "Since spring.",
+ "voice": "Algenib",
+ "tone": "old, gravelly, slow, dry, steady",
+ "prompt": "Since spring.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.72,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0.978,1,0.961,0.708,0.317,0.107,0.269,1,1,0.885,0.552,0.177,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Since spring",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 3,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "old, gravelly, slow, dry, steady",
+    "wer": 2.5,
+    "transcript": "old gravelly slow dry steady",
+    "leading": 3,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 6.59
+   },
+   {
+    "attempt": 2,
+    "direction": "steady",
+    "wer": 0.5,
+    "transcript": "steady since spring",
+    "leading": 1,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 1.35
+   },
+   {
+    "attempt": 3,
+    "direction": "",
+    "wer": 0,
+    "transcript": "Since spring",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 0.72
+   }
+  ]
+ }
+}

@@ -1,0 +1,44 @@
+{
+ "id": "8a46e8acc2dc",
+ "who": "pebble",
+ "text": "Tortoises don't get the year wrong.",
+ "voice": "Algenib",
+ "tone": "old, gravelly, slow, dry, gently offended",
+ "prompt": "[gently offended] Tortoises don't get the year wrong.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.99,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0,0,0,0.236,0.996,1,1,1,1,0.897,0.543,0.863,0.98,0.769,0.373,1,1,0.966,0.746,0.951,0.972,0.705,0.622,0.934,0.818,0.62,0.447,0.542,0.842,0.987,0.964,0.869,0.87,0.808,0.661,0.612,0.614,0.561,0.962,1,0.982,0.5,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Tortoises don't get the year wrong,",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "old, gravelly, slow, dry, gently offended",
+    "wer": 1,
+    "transcript": "Old gravelly slow dry gently offended Tortoises don't get the year wrong",
+    "leading": 6,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 11.43
+   },
+   {
+    "attempt": 2,
+    "direction": "gently offended",
+    "wer": 0,
+    "transcript": "Tortoises don't get the year wrong,",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.99
+   }
+  ]
+ }
+}

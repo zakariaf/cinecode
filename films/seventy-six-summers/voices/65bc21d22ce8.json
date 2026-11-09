@@ -1,0 +1,54 @@
+{
+ "id": "65bc21d22ce8",
+ "who": "fidget",
+ "text": "I'm coming.",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, quiet, certain",
+ "prompt": "I'm coming.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.77,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0.663,0.751,0.531,0.866,1,1,1,0.999,0.997,0.995,0.997,0.984,0.985,0.996,0.927,0.5,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "I'm coming.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 3,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, quiet, certain",
+    "wer": 2.5,
+    "transcript": "Quick, bright, cheeky, quiet, certain.",
+    "leading": 3,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 2.89
+   },
+   {
+    "attempt": 2,
+    "direction": "certain",
+    "wer": 0.5,
+    "transcript": "Certain, I'm coming.",
+    "leading": 1,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 1.17
+   },
+   {
+    "attempt": 3,
+    "direction": "",
+    "wer": 0,
+    "transcript": "I'm coming.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 0.77
+   }
+  ]
+ }
+}

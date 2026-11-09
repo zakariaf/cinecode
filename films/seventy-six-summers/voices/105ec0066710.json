@@ -1,0 +1,44 @@
+{
+ "id": "105ec0066710",
+ "who": "fidget",
+ "text": "I'm not coming.",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, flat, exhausted",
+ "prompt": "[exhausted] I'm not coming.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 2.36,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0.995,1,0.997,0.933,0.791,0.578,0.332,0.115,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.594,0.874,0.987,0.997,1,1,1,1,1,0.889,0.61,0.58,0.753,0.888,0.987,1,1,1,1,0.972,0.796,0.47,0.134,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "I'm not coming.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, flat, exhausted",
+    "wer": 1.667,
+    "transcript": "Quick, bright, cheeky, flat, exhausted. I'm not coming.",
+    "leading": 5,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 4.32
+   },
+   {
+    "attempt": 2,
+    "direction": "exhausted",
+    "wer": 0,
+    "transcript": "I'm not coming.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 2.36
+   }
+  ]
+ }
+}

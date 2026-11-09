@@ -1,0 +1,34 @@
+{
+ "id": "2d62a27e1840",
+ "who": "young_pebble",
+ "text": "I'll be here.",
+ "voice": "Algenib",
+ "tone": "light, steady, dry, steady",
+ "prompt": "[light, steady, dry, steady] I'll be here.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.8,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0.592,0.947,1,1,0.932,1,1,1,0.992,0.853,0.978,0.959,0.865,0.661,0.297,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "I'll be here",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "light, steady, dry, steady",
+    "wer": 0,
+    "transcript": "I'll be here",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 0.8
+   }
+  ]
+ }
+}

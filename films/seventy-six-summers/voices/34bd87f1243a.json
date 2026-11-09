@@ -1,0 +1,44 @@
+{
+ "id": "34bd87f1243a",
+ "who": "pebble",
+ "text": "I'll start walking tomorrow.",
+ "voice": "Algenib",
+ "tone": "old, gravelly, slow, dry, dry",
+ "prompt": "[dry] I'll start walking tomorrow.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.71,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0,0,0,0,0,0,0.716,0.783,0.456,0.183,0.518,1,1,0.985,0.935,1,1,1,0.98,0.735,0.441,0.571,0.494,0.235,0.091,0.228,0.4,0.677,0.809,0.963,0.86,0.808,0.798,0.574,0.285,0.045,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "I'll start walking tomorrow.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "old, gravelly, slow, dry, dry",
+    "wer": 1.25,
+    "transcript": "Old gravelly slow dry dry I'll start walking tomorrow",
+    "leading": 5,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 9.81
+   },
+   {
+    "attempt": 2,
+    "direction": "dry",
+    "wer": 0,
+    "transcript": "I'll start walking tomorrow.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.71
+   }
+  ]
+ }
+}

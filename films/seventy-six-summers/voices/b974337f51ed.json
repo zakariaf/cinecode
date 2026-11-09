@@ -1,0 +1,44 @@
+{
+ "id": "b974337f51ed",
+ "who": "fidget",
+ "text": "I'm sorry.",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, whispering",
+ "prompt": "[whispering] I'm sorry.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.67,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0.294,0.493,0.337,0.167,0.089,0.479,0.824,0.794,0.771,0.711,0.591,0.442,0.274,0.095,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "I'm sorry",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, whispering",
+    "wer": 2,
+    "transcript": "Quick, bright, cheeky whispering. I'm sorry.",
+    "leading": 4,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 3.96
+   },
+   {
+    "attempt": 2,
+    "direction": "whispering",
+    "wer": 0,
+    "transcript": "I'm sorry",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 0.67
+   }
+  ]
+ }
+}

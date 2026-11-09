@@ -1,0 +1,34 @@
+{
+ "id": "110e067d035e",
+ "who": "young_nell",
+ "text": "Don't be late.",
+ "voice": "Leda",
+ "tone": "small, high, earnest, stern, bossy",
+ "prompt": "[small, high, earnest, stern, bossy] Don't be late.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.92,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0.096,0,0.768,1,0.998,0.989,0.827,0.998,0.997,0.979,0.984,1,1,0.973,0.911,0.661,0.252,0,0,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Don't be late.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "small, high, earnest, stern, bossy",
+    "wer": 0,
+    "transcript": "Don't be late.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 0.92
+   }
+  ]
+ }
+}

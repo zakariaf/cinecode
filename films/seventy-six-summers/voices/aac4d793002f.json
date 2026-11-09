@@ -1,0 +1,44 @@
+{
+ "id": "aac4d793002f",
+ "who": "pebble",
+ "text": "She was six.",
+ "voice": "Algenib",
+ "tone": "old, gravelly, slow, dry, deadpan",
+ "prompt": "[deadpan] She was six.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0.792,0.963,0.962,1,1,0.908,0.576,0.214,0.086,1,1,1,0.94,0.64,0.309,0.053,0,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "She was six",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "old, gravelly, slow, dry, deadpan",
+    "wer": 1.667,
+    "transcript": "Old, gravelly, slow, dry, deadpan.",
+    "leading": 2,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 7.42
+   },
+   {
+    "attempt": 2,
+    "direction": "deadpan",
+    "wer": 0,
+    "transcript": "She was six",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1
+   }
+  ]
+ }
+}

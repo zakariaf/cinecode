@@ -1,0 +1,34 @@
+{
+ "id": "596e63ce4271",
+ "who": "pebble",
+ "text": "She showed me the last one.",
+ "voice": "Algenib",
+ "tone": "old, gravelly, slow, dry, quiet",
+ "prompt": "[old, gravelly, slow, dry, quiet] She showed me the last one.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 3.41,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0.168,0.255,0.273,0.278,0.575,0.931,0.999,1,0.941,0.733,0.456,0.335,0.341,0.368,0.422,0.663,0.999,1,1,1,1,1,1,1,0.946,0.745,0.616,0.911,0.973,0.944,0.922,0.997,0.992,0.936,0.923,0.913,0.812,0.623,0.486,0.291,0.096,0,0,0.214,0.963,0.916,0.844,0.799,0.703,0.794,0.993,1,0.993,0.94,0.898,0.847,0.72,0.448,0.183,0,0,0,0,0.048,0.527,0.878,1,0.997,0.929,0.777,0.578,0.373,0.218,0.089,0,0,0,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "She showed me the last one.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "old, gravelly, slow, dry, quiet",
+    "wer": 0,
+    "transcript": "She showed me the last one.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 3.41
+   }
+  ]
+ }
+}

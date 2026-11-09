@@ -1,0 +1,44 @@
+{
+ "id": "2111e400ebe2",
+ "who": "young_pebble",
+ "text": "Promise.",
+ "voice": "Algenib",
+ "tone": "light, steady, dry, simple",
+ "prompt": "[simple] Promise.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.58,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0.395,1,1,1,0.95,0.75,0.384,0.067,0,0,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "promise",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "light, steady, dry, simple",
+    "wer": 4,
+    "transcript": "light steady dry simple promise",
+    "leading": 4,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 4.04
+   },
+   {
+    "attempt": 2,
+    "direction": "simple",
+    "wer": 0,
+    "transcript": "promise",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 0.58
+   }
+  ]
+ }
+}

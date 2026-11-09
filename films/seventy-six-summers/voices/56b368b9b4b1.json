@@ -1,0 +1,54 @@
+{
+ "id": "56b368b9b4b1",
+ "who": "fidget",
+ "text": "Is this her house?",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, bright, hopeful",
+ "prompt": "Is this her house?",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.63,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0.962,1,0.926,0.598,0.228,0,0,0,0,0,0,0,0.045,0.987,0.992,0.821,0.591,0.443,0.314,0.792,1,1,1,1,0.937,0.73,0.359,0.055,0,0,0,0,0,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Is this her house?",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 3,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, bright, hopeful",
+    "wer": 1.25,
+    "transcript": "Quick, bright, cheeky, bright, hopeful. Is this her house?",
+    "leading": 5,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 4.14
+   },
+   {
+    "attempt": 2,
+    "direction": "hopeful",
+    "wer": 0.25,
+    "transcript": "Hopeful, is this her house?",
+    "leading": 1,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 2.22
+   },
+   {
+    "attempt": 3,
+    "direction": "",
+    "wer": 0,
+    "transcript": "Is this her house?",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.63
+   }
+  ]
+ }
+}

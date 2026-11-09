@@ -1,0 +1,43 @@
+{
+ "id": "8b03dfb08f91",
+ "who": "nell",
+ "text": "Same time next comet?",
+ "voice": "Sulafat",
+ "tone": "elderly, warm, wry, twinkly, teasing",
+ "prompt": "[elderly, warm, wry, twinkly, teasing] Same time next comet?",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 2.22,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0,0,0,0,0.771,0.851,0.794,0.847,0.938,0.987,0.992,1,0.994,0.812,0.585,0.985,0.973,0.898,0.823,0.745,0.689,0.809,0.995,1,0.998,1,1,0.989,0.778,0.436,0.11,0,0,0,0.105,0.261,0.99,1,1,0.997,1,1,0.962,0.843,0.479,0.158,0.194,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Same time next comet?",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "elderly, warm, wry, twinkly, teasing",
+    "wer": 0.25,
+    "transcript": "Huh, same time next comet?",
+    "leading": 1,
+    "trailing": 0,
+    "dur": 2.17
+   },
+   {
+    "attempt": 2,
+    "direction": "elderly, warm, wry, twinkly, teasing",
+    "wer": 0,
+    "transcript": "Same time next comet?",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 2.22
+   }
+  ]
+ }
+}

@@ -482,3 +482,14 @@ test('non-verbal QA: one direction word read aloud fails the take; a voiced capt
   assert.equal(nb.qa.pass, false); assert.equal(nb.qa.directionSpoken, true);
   rmSync(dir, { recursive: true });
 });
+
+test('a take that says the direction instead of the line is caught, and long directions are shortened', async () => {
+  const { directionReplaced, directionLevels, normalizeWords } = await import('../engine/audio/voice.mjs');
+  const line = normalizeWords('Easy! Big step!');
+  assert.equal(directionReplaced('quick, bright, cheeky, cheerful', normalizeWords('Quick, bright, cheeky, cheerful'), line), true);
+  assert.equal(directionReplaced('quick, bright, cheeky, cheerful', normalizeWords('Easy! Big step!'), line), false);
+  // a direction word that the line itself says doesn't count ("slow" in "slow down")
+  assert.equal(directionReplaced('slow', normalizeWords('Slow down.'), normalizeWords('Slow down.')), false);
+  assert.deepEqual(directionLevels('drowsy, clipped, dry, dry, half asleep'), ['clipped, dry, half asleep', 'half asleep', '']);
+  assert.deepEqual(directionLevels('warm'), ['warm', '']);
+});

@@ -1,0 +1,43 @@
+{
+ "id": "7296e8011d25",
+ "who": "fidget",
+ "text": "How long you been walking?",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, casual",
+ "prompt": "[quick, bright, cheeky, casual] How long you been walking?",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.9,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0.934,1,0.867,0.51,0.204,0.962,0.981,0.755,0.117,0,0,0,0,0,0.048,0,0,0.636,1,1,1,1,1,0.984,0.921,0.916,0.796,0.99,0.966,0.926,0.994,1,1,0.896,0.523,0.526,0.679,0.474,0.257,0.076,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "How long you been walking?",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, casual",
+    "wer": 1,
+    "transcript": "quick bright cheeky casual",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 2.7
+   },
+   {
+    "attempt": 2,
+    "direction": "quick, bright, cheeky, casual",
+    "wer": 0,
+    "transcript": "How long you been walking?",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.9
+   }
+  ]
+ }
+}

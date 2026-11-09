@@ -1,0 +1,32 @@
+{
+ "id": "e9f95118fa50",
+ "who": "fidget",
+ "text": "Ha! Ha ha ha!",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, cackling",
+ "prompt": "[quick, bright, cheeky, cackling] Ha! Ha ha ha!",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.28,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0.443,0.22,0.951,1,0.605,0.185,0,0,0,0,0,0.268,0.282,0.223,1,1,0.872,0.964,1,0.927,0.568,0.687,1,0.865,0.47,0.191,0.63,0.5,0],
+ "qa": {
+  "wer": null,
+  "transcript": "",
+  "nonverbal": true,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, cackling",
+    "wer": null,
+    "transcript": "",
+    "nonverbal": true,
+    "dur": 1.28
+   }
+  ]
+ }
+}

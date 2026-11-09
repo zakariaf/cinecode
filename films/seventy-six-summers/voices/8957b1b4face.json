@@ -1,0 +1,44 @@
+{
+ "id": "8957b1b4face",
+ "who": "fidget",
+ "text": "Don't ask.",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, flat",
+ "prompt": "[flat] Don't ask.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.95,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0,0,0,0,1,1,1,0.998,0.993,0.988,0.975,0.858,0.515,0.154,0,0,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Don't ask.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, flat",
+    "wer": 2,
+    "transcript": "Quick break, cheeky fap. Don't ask.",
+    "leading": 4,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 2.56
+   },
+   {
+    "attempt": 2,
+    "direction": "flat",
+    "wer": 0,
+    "transcript": "Don't ask.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 0.95
+   }
+  ]
+ }
+}

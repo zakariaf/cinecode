@@ -1,0 +1,54 @@
+{
+ "id": "9ba24310988b",
+ "who": "fidget",
+ "text": "Bigger step.",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, less sure",
+ "prompt": "Bigger step.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.78,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0.672,1,1,1,0.888,0.977,0.987,0.885,0.543,0.16,0.064,0.358,0.441,0.293,0.127,0,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Bigger step",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 3,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "bright, cheeky, less sure",
+    "wer": 1.5,
+    "transcript": "bright cheeky Leicester",
+    "leading": 1,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 2.14
+   },
+   {
+    "attempt": 2,
+    "direction": "less sure",
+    "wer": 1.5,
+    "transcript": "Mm, less sure, bigger step",
+    "leading": 3,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 3.08
+   },
+   {
+    "attempt": 3,
+    "direction": "",
+    "wer": 0,
+    "transcript": "Bigger step",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 0.78
+   }
+  ]
+ }
+}

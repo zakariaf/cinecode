@@ -1,0 +1,43 @@
+{
+ "id": "a2dec6ced914",
+ "who": "fidget",
+ "text": "Seventy-six years?",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, thoughtful",
+ "prompt": "[quick, bright, cheeky, thoughtful] Seventy-six years?",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 2.02,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0,0,0,0,0.77,0.907,0.774,0.534,1,1,1,1,1,0.978,0.719,0.349,0.075,0,0.454,1,0.988,0.755,0.37,0.077,0,0,0,0.124,0.462,0.663,0.716,0.786,0.865,0.904,0.858,0.988,1,0.878,0.497,0.127,0,0,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Seventy-six years?",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, thoughtful",
+    "wer": 0.667,
+    "transcript": "76 years?",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.83
+   },
+   {
+    "attempt": 2,
+    "direction": "quick, bright, cheeky, thoughtful",
+    "wer": 0,
+    "transcript": "Seventy-six years?",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 2.02
+   }
+  ]
+ }
+}

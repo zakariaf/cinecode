@@ -89,13 +89,24 @@ export function joinTones(...tones) {
  * (usually the line's own delivery, e.g. "grumbling"), then none (the voice alone carries it).
  */
 export function directionLevels(tone) {
-  const parts = String(tone ?? '').split(',').map(s => s.trim()).filter(Boolean);
-  return [...new Set([parts.join(', '), parts.at(-1) ?? '', ''])];
+  const parts = [...new Map(String(tone ?? '').split(',').map(s => s.trim()).filter(Boolean).map(p => [p.toLowerCase(), p])).values()];
+  // Long lists get read aloud far more often (seen live: "quick, bright, cheeky, cheerful" spoken instead of the line),
+  // so the first try keeps at most the last three descriptors (the line's own delivery comes last).
+  return [...new Set([parts.slice(-3).join(', '), parts.at(-1) ?? '', ''])];
 }
 /** True when the words inserted before the line are (mostly) the direction itself. */
 export function directionSpoken(direction, leadingWords) {
   const dir = new Set(normalizeWords(direction));
   return dir.size > 0 && leadingWords.filter(w => dir.has(w)).length >= Math.min(2, dir.size);
+}
+/**
+ * True when the take says the direction INSTEAD of (or around) the line: direction words the line doesn't contain
+ * appear anywhere in the transcript. Seen live: "[quick, bright, cheeky, cheerful] Easy! Big step!" came back as
+ * "Quick, bright, cheeky, cheerful", which has no inserted leading words for directionSpoken() to catch.
+ */
+export function directionReplaced(direction, transcriptWords, lineWords) {
+  const line = new Set(lineWords), dir = new Set(normalizeWords(direction).filter(w => !line.has(w) && !FUNCTION_WORDS.has(w)));
+  return dir.size > 0 && transcriptWords.filter(w => dir.has(w)).length >= Math.min(2, dir.size);
 }
 
 const FUNCTION_WORDS = new Set('a an the and or but with of in on at to for as like very is are it its his her their by from into'.split(' '));
@@ -403,7 +414,7 @@ async function synthesize(L, ctx) {
         } else {
           const w = wordErrorRate(ref, hyp);
           qa = { wer: Math.round(w.wer * 1000) / 1000, transcript, leading: w.leading, trailing: w.trailing };
-          if (directionSpoken(direction, hyp.slice(0, w.leading))) qa.directionSpoken = true;
+          if (directionSpoken(direction, hyp.slice(0, w.leading)) || directionReplaced(direction, hyp, ref)) qa.directionSpoken = true;
         }
       } catch (e) { qa = { wer: null, transcript: null, error: e.message }; }   // QA service down: keep the take unchecked
     }

@@ -1,0 +1,32 @@
+{
+ "id": "80d3ac768169",
+ "who": "young_nell",
+ "text": "Hahaha!",
+ "voice": "Leda",
+ "tone": "small, high, earnest, giggling",
+ "prompt": "[small, high, earnest, giggling] Hahaha!",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.76,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0.949,1,0.989,0.945,0.935,1,1,0.934,0.611,0.813,0.817,0.629,0.543,0.896,0.72,0.358,0],
+ "qa": {
+  "wer": null,
+  "transcript": "",
+  "nonverbal": true,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "small, high, earnest, giggling",
+    "wer": null,
+    "transcript": "",
+    "nonverbal": true,
+    "dur": 0.76
+   }
+  ]
+ }
+}

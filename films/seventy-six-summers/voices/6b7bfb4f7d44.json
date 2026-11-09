@@ -1,0 +1,44 @@
+{
+ "id": "6b7bfb4f7d44",
+ "who": "fidget",
+ "text": "So who's at the stone?",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, casual",
+ "prompt": "[casual] So who's at the stone?",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.38,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0,0,0.994,1,1,0.913,1,1,1,0.903,1,1,0.938,0.66,0.574,0.269,0,0,0.823,0.938,0.963,0.985,0.999,0.976,0.887,0.636,0.28,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "So who's at the stone?",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, casual",
+    "wer": 0.8,
+    "transcript": "quick, bright, cheeky, casual So, who's at the Stone?",
+    "leading": 4,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 4.67
+   },
+   {
+    "attempt": 2,
+    "direction": "casual",
+    "wer": 0,
+    "transcript": "So who's at the stone?",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.38
+   }
+  ]
+ }
+}

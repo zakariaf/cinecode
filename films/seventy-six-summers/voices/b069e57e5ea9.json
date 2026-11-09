@@ -1,0 +1,34 @@
+{
+ "id": "b069e57e5ea9",
+ "who": "young_nell",
+ "text": "Promise?",
+ "voice": "Leda",
+ "tone": "small, high, earnest, solemn",
+ "prompt": "[small, high, earnest, solemn] Promise?",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.89,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0.663,0.952,0.966,0.997,1,1,1,0.998,0.948,0.78,0.395,0.058,0,0,0,0,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Promise",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "small, high, earnest, solemn",
+    "wer": 0,
+    "transcript": "Promise",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 0.89
+   }
+  ]
+ }
+}

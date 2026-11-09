@@ -1,0 +1,44 @@
+{
+ "id": "654a81f6c8c2",
+ "who": "fidget",
+ "text": "Morning, boulder! Where you headed?",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, bright",
+ "prompt": "[bright] Morning, boulder! Where you headed?",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.56,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0.735,0.998,0.999,0.955,0.89,0.845,0.806,0.621,0.911,0.968,1,1,1,1,0.996,0.965,0.806,0.436,0.072,0,0,0,0.816,0.964,0.94,1,0.991,0.983,1,0.977,1,1,0.917,0.638,0.233,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Morning Boulder, where you headed?",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, bright",
+    "wer": 0.8,
+    "transcript": "Crack bright, cheeky bright. Morning, Boulder, where you headed?",
+    "leading": 4,
+    "trailing": 0,
+    "directionSpoken": true,
+    "dur": 3.11
+   },
+   {
+    "attempt": 2,
+    "direction": "bright",
+    "wer": 0,
+    "transcript": "Morning Boulder, where you headed?",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.56
+   }
+  ]
+ }
+}

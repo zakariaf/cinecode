@@ -1,0 +1,34 @@
+{
+ "id": "e548bb6e1623",
+ "who": "nell",
+ "text": "Hello, Pebble.",
+ "voice": "Sulafat",
+ "tone": "elderly, warm, wry, soft, tender",
+ "prompt": "[elderly, warm, wry, soft, tender] Hello, Pebble.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.63,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0,0,0.318,0.815,0.831,0.835,0.859,0.854,0.912,0.987,1,1,1,1,1,1,1,0.86,0.461,0.238,0.161,0.682,1,0.999,0.968,0.818,0.966,0.998,0.98,0.948,0.935,0.853,0.551,0.208,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Hello Pebble",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "elderly, warm, wry, soft, tender",
+    "wer": 0,
+    "transcript": "Hello Pebble",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.63
+   }
+  ]
+ }
+}

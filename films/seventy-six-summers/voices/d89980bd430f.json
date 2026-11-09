@@ -1,0 +1,34 @@
+{
+ "id": "d89980bd430f",
+ "who": "fidget",
+ "text": "Since spring?!",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, stunned, incredulous",
+ "prompt": "[quick, bright, cheeky, stunned, incredulous] Since spring?!",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.02,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0.658,1,1,0.987,0.758,0.383,0.108,0,0,0,0.862,0.943,0.897,1,1,0.999,0.986,0.927,0.5,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Since spring?",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, stunned, incredulous",
+    "wer": 0,
+    "transcript": "Since spring?",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.02
+   }
+  ]
+ }
+}

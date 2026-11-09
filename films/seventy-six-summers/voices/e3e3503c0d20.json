@@ -1,0 +1,34 @@
+{
+ "id": "e3e3503c0d20",
+ "who": "fidget",
+ "text": "Old Shell.",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, breathless",
+ "prompt": "[quick, bright, cheeky, breathless] Old Shell.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.44,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0.999,1,0.932,0.766,0.686,0.862,0.508,0.116,0,0,0,0,0,0,0.991,0.999,1,0.997,0.95,0.756,0.415,0.188,0.541,1,1,0.96,0.893,1,1,0.919,0.5,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Old shell.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "quick, bright, cheeky, breathless",
+    "wer": 0,
+    "transcript": "Old shell.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.44
+   }
+  ]
+ }
+}
