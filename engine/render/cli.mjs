@@ -197,8 +197,10 @@ async function cmdVoice(opts, ctx) {
     return Object.assign(v, { msg: `${v.size} lines ready` });
   });
   let flagged = 0;
+  const vm = await import('../audio/voice.mjs').catch(() => ({}));
+  const pick = l => (typeof vm.voiceFor === 'function' ? vm.voiceFor(voices, l) : voices.get(l.id));   // each line's own cut
   for (const l of plan.lines) {
-    const v = voices.get(l.id), wer = v?.qa?.wer;
+    const v = pick(l), wer = v?.qa?.wer;
     if (wer > 0.2) flagged++;
     ctx.out.write(`  ${wer > 0.2 ? '!' : ' '} ${l.id.slice(0, 10).padEnd(10)} ${String(l.who).padEnd(10)} ${v ? `${v.dur.toFixed(2)}s`.padStart(6) : '   –  '} ${wer != null ? `wer ${wer.toFixed(2)}` : '        '}  ${trunc(l.text, 60)}\n`);
   }

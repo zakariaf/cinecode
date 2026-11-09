@@ -11,6 +11,7 @@ import { Actor, RouteLeg, JumpLeg, FlyLeg, groundPos, anchorPos } from './actor.
 import { buildCamera, frameSubjects, clampFrame } from './camera.mjs';
 import { skyList, mixGrade, mixStory, spanU, STORY, isNight } from './grade.mjs';
 import { chunkCaption } from './text.mjs';
+import { voiceFor } from '../audio/voice.mjs';
 import { FX_DUR, ONE_SHOT } from './fx.mjs';
 import { moodNames, stingNames, MUSIC_EXTRAS, RIM_DEFAULTS } from './validate.mjs';
 import { clamp, hash32, shortHash, parseTarget, rigPose, profile, probe } from './util.mjs';
@@ -177,7 +178,7 @@ class Compiler {
     const key = narrator ? 'narrator' : (film.cast[who]?.voice && film.voices?.[film.cast[who].voice] ? film.cast[who].voice : film.voices?.[who] ? who : film.cast[who]?.voice);
     const cfg = film.voices?.[key] || {}, text = normText(b.text), speak = normText(b.tts ?? b.text), tone = joinTones(cfg.tone, b.tone);
     const id = shortHash(who, cfg.voice ?? '', speak, tone), trimEnd = Math.max(0, Number(b.trimEnd) || 0);
-    const v = this.voices.get(id);
+    const v = voiceFor(this.voices, { id, trimEnd });   // each line gets its own cut, even when two lines share words
     // the voice module returns the trimmed take's length; before voicing, estimate the spoken words minus the cut
     const dur = Number.isFinite(v?.dur) && v.dur > 0 ? v.dur : Math.max(0.25, estimateLine(speak) - trimEnd);
     const line = { id, who, voice: key, tone: b.tone ?? '', text, speak, nonverbal: text.startsWith('['), trimEnd, t0: t, t1: t + dur, vo: !!b.vo, narrator, shot: srec.id, scene: rec.id, estimated: !v };
@@ -209,8 +210,9 @@ class Compiler {
       case 'walk': case 'run': case 'hop': case 'fly': return this.move(rec, srec, A, b, t, d);
       case 'exit': return this.exit(rec, srec, A, b, t);
       case 'pose': {
+        // an explicit dur is how long the change takes (an old woman rising over 2 s); otherwise a quick 0.35 s blend
         const dur = b.dur ?? 1;
-        A.setPose(t, b.pose, Math.min(0.35, Math.max(0.12, dur)), 'beat');
+        A.setPose(t, b.pose, b.dur !== undefined ? Math.max(0.12, dur) : 0.35, 'beat');
         if (b.expr) A.exprEv.push({ t, expr: b.expr });
         if (b.pose !== 'sleep') A.sleepEv.push({ t, asleep: false });
         return dur;
