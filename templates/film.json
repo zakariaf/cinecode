@@ -1,5 +1,6 @@
 {
   "title": "{{title}}",
+  "note": "The starter: a complete example film. Replace its logline, voices, cast, sets and scenes (and this note) with your own; drop the glints beat in shot 1.6 if you remove it from custom.mjs.",
   "logline": "A girl looking for a friend wakes a sleepy hare and races him to the pond.",
   "format": { "width": 1920, "height": 1080, "fps": 24, "captions": "dialogue" },
   "titles": {
@@ -30,36 +31,36 @@
         "pip": { "offstage": "left" }
       },
       "shots": [
-        { "id": "s01-01", "camera": { "size": "establishing", "move": "push-in" },
+        { "id": "1.1", "camera": { "size": "establishing", "move": "push-in" },
           "beats": [
             { "say": "narrator", "text": "At the edge of the old forest, a girl named Pip went looking for a friend.", "tone": "softly", "at": 0.5 }
           ], "hold": 0.8 },
-        { "id": "s01-02", "camera": { "size": "full", "on": ["pip"], "move": "track" },
+        { "id": "1.2", "camera": { "size": "full", "on": ["pip"], "move": "track" },
           "beats": [
             { "do": "enter", "who": "pip", "from": "left", "to": "meadow_right" },
             { "do": "look", "who": "pip", "to": "hare" },
             { "say": "pip", "text": "Hello? Is anybody out here?", "tone": "curious", "expr": "curious" },
             { "do": "wake", "who": "hare", "with": "prev", "after": 0.8 }
           ], "hold": 0.4 },
-        { "id": "s01-03", "camera": { "size": "medium", "on": ["hare"] },
+        { "id": "1.3", "camera": { "size": "medium", "on": ["hare"] },
           "beats": [
             { "do": "look", "who": "hare", "to": "pip" },
             { "say": "hare", "text": "Only me. I was having a nap.", "tone": "grumbling", "expr": "sleepy" }
           ], "hold": 0.5 },
-        { "id": "s01-04", "camera": { "size": "full", "on": ["pip", "hare"] },
+        { "id": "1.4", "camera": { "size": "full", "on": ["pip", "hare"] },
           "beats": [
             { "do": "gesture", "who": "pip", "name": "jump-for-joy" },
             { "say": "pip", "text": "Then wake up! Race you to the pond!", "tone": "excited", "expr": "happy", "with": "prev", "after": 0.3 },
             { "music": "sting", "name": "surprise", "with": "prev" },
             { "do": "emote", "who": "hare", "expr": "smug", "after": 0.2 }
           ], "hold": 0.4 },
-        { "id": "s01-05", "camera": { "size": "wide", "on": ["hare", "pip"], "move": "track" },
+        { "id": "1.5", "camera": { "size": "wide", "on": ["hare", "pip"], "move": "track" },
           "beats": [
             { "do": "hop", "who": "hare", "to": "pond_far" },
             { "do": "run", "who": "pip", "to": "pond_edge", "with": "prev", "after": 0.3 },
             { "sfx": "owl-hoot", "with": "prev", "after": 0.6 }
           ], "hold": 0.3 },
-        { "id": "s01-06", "camera": { "size": "full", "on": ["pip", "hare"], "move": "push-in" },
+        { "id": "1.6", "camera": { "size": "full", "on": ["pip", "hare"], "move": "push-in" },
           "beats": [
             { "do": "look", "who": "hare", "to": "pip" },
             { "do": "gesture", "who": "pip", "name": "jump-for-joy", "after": 0.2 },

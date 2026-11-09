@@ -50,11 +50,11 @@ Checked with `check` and `plan` (21 s, 3 shots). Start from `node bin/cinecode.m
 
 ## Structure
 
-- **film**: `title`, `logline`, `format` (`captions`: dialogue = characters' lines burned in | all = also narration and sfx that carry a `caption` | none), `titles` (`open`: title, subtitle, dur; `end`: lines, dur), `voices`, `cast`, `sets`, `scenes`, optional `score` (`{ "key": "C", "motif": "G4:1 E4:0.5 G4:0.5 A4:2 C5:3" }`: the film's melodic motif, stated by music cues with `motif`), `seed` (the score's seed).
+- **film**: `title`, `logline`, `format` (`captions`: dialogue = characters' lines burned in | all = also narration and sfx that carry a `caption` | none), `titles` (`open`: title, subtitle, dur; `end`: lines, dur; both count in `plan`'s total: 2–2.5 s each for a film under a minute), `voices`, `cast`, `sets`, `scenes`, optional `score` (`{ "key": "C", "motif": "G4:1 E4:0.5 G4:0.5 A4:2 C5:3" }`: the film's melodic motif, stated by music cues with `motif`), `seed` (the score's seed).
 - **cast entry**: `rig`, `name`, `voice` (a key of `voices`; omit for a silent character), `scale` (multiplies the set's perspective scale), `params` (rig look).
 - **scene**: `id`, `set`, `time` (a sky name or `{ "from": "golden", "to": "twilight" }`), `transition` (cut | fade | dissolve), `music`, `ambience` (auto | a name | none), `actors`, `overlays`, `rim`, `shots`.
 - **scene actor**: `at` (target), `face` (left | right), `pose`, `expr`, `on` (start riding another actor), `offstage` (left | right: not in the scene until an `enter`).
-- **shot**: `id`, `camera`, `beats`, `hold` (seconds after the last beat, default 0.5) or `dur` (fixed length), `fadeIn` / `fadeOut`, `time` / `grade` / `gradeTo` (override the scene's light), `music` (a cue at the shot start), `note`.
+- **shot**: `id` (`<scene>.<shot>` like the screenplay: `2.3`), `camera`, `beats`, `hold` (seconds after the last beat, default 0.5) or `dur` (fixed length), `fadeIn` / `fadeOut`, `time` / `grade` / `gradeTo` (override the scene's light), `music` (a cue at the shot start), `note`.
 - **Every object accepts `note`**: write the intent there ("he lands and sits before 2.2"); reviewers read it.
 
 Actor state (position, pose, face, params) **carries over from shot to shot inside a scene**; a new scene starts from its `actors` block.
@@ -71,20 +71,20 @@ Beats run in sequence. Modifiers: `"with": "prev"` (start with the previous beat
 | `do: place` | `who`, `to`, `face`: put an actor somewhere instantly (between shots; a cut hides it) | 0 |
 | `do: pose` | `who`, `pose`, `dur` (the blend; 1–2.5 s for a slow body), `expr` | `dur` |
 | `do: gesture` | `who`, `name` | the gesture |
-| `do: look` | `who`, `to` (actor, anchor, left, right, up, sky, down) | 0.3 (tortoise 1.0) |
+| `do: look` | `who`, `to` (actor, anchor, left, right, up, sky, down; the beetle, butterfly and songbird don't tilt) | 0.3 (tortoise 1.0) |
 | `do: turn` / `emote` / `blink` | `who`, `face` / `expr` | 0.25 / 0 / 0.2 |
 | `do: sit / stand / lie / sleep / wake` | `who` (`wake` may keep a `pose`) | 0.6 |
 | `do: set` | `who`, `params`, `pose`, `expr`: change look or state instantly (wet fur, a star's opacity) | 0 |
 | `do: fade` | `who`, `to` (opacity 0..1), `dur` | `dur` |
 | `do: custom` | `name` (in custom.mjs `custom`), `dur`, any params | `dur` |
 | `sfx` | name, `gain`, `pan`, `params`, `dur`, `caption` | 0 |
-| `fx` | dust, splash, leaves, sparkle, rain, fireflies, motes, mist; `at` / `on` (place), `dur`, `n` | 0 |
+| `fx` | dust, splash, sparkle (one-shots at `at` / `on`); leaves, rain, fireflies, motes, mist (fields over the whole frame, `n` = density per world area: a close shot of a small rig shows few); `dur`, `n` | 0 |
 | `music` | `{ "music": { "mood": "tender", "intensity": 0.3 } }` or `{ "music": "sting", "name": "plunk" }`; cue extras `motif`, `motifVoice`, `hold`, `downbeat`, `tempo` | 0 |
 | `title` | `title`, `sub`, `dur`, `place` (top, upper, center, lower, bottom, auto, or a fraction) | `dur` |
 | `mark` | a unique name; `plan.marks[name]` = its film time (custom effects key off it) | 0 |
 | `wait` | seconds | the value |
 
-**Targets** (`to`, `at`): an anchor name, `x:1500`, `x:1500,y:1060`, `near:<actor>`, `left-of:<actor>`, `right-of:<actor>`, `front-of:<actor>`, `behind:<actor>`, `on:<actor>` (ride its mount point; hop or place only), `left` / `right` (enter and exit only).
+**Targets** (`to`, `at`): an anchor name, `x:1500`, `x:1500,y:1060`, `near:<actor>`, `left-of:<actor>`, `right-of:<actor>`, `front-of:<actor>`, `behind:<actor>`, `on:<actor>` (ride its mount point; hop or place only), `left` / `right` (enter and exit only). `x:` alone is the main lane. Every target is somewhere to stand: fliers can't hover, a flight ends on the ground, a surface, a perch, a hollow or `on:<actor>`. `near:` leaves only a few pixels between small rigs; land a small flier with an explicit `x:`.
 
 ## Camera
 
@@ -100,7 +100,7 @@ Beats run in sequence. Modifiers: `"with": "prev"` (start with the previous beat
 | `moveAt`, `moveDur` | confine the move to a window of the shot (eased, holding before and after) |
 | `dof` | true blurs the far layers (close-ups default to true) |
 
-A static shot is composed once for everything its subjects do in the shot: if someone walks across, the frame holds the whole walk (and gets loose). To tighten as subjects come together, use a push-in with `to`.
+A static shot is composed once for everything its subjects do in the shot: if someone walks across, the frame holds the whole walk (and gets loose); if they stand up later, it is framed for their standing height from the start. To tighten as subjects come together, use a push-in with `to`. Close-ups frame the resting head, not a gesture's peak (use the pose of the same name). An anchor in `on` is framed as a box about a standing hare's size.
 
 ## Names valid today
 

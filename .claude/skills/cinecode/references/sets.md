@@ -1,8 +1,8 @@
 # Set reference (kits)
 
-Generated from the kit registry by `node .claude/skills/cinecode/scripts/inventory.mjs sets` (add `films/<slug>` to include custom kits). Rerun it when the engine changes. `node bin/cinecode.mjs set-sheet <kits> -o out/<name>.jpg` draws each kit with its anchors, solid footprints, walk region and water: look at it before you stage a scene.
+Generated from the kit registry by `node .claude/skills/cinecode/scripts/inventory.mjs sets` (add `films/<slug>` to include custom kits); the notes at the end are by hand. Rerun it when the engine changes. `node bin/cinecode.mjs set-sheet <kits> -o out/<name>.jpg` draws each kit with its anchors, solid footprints, walk region and water: look at it before you stage a scene.
 
-Anchor types: ground (stand here), surface (stand on a prop top), perch (branch; perch rigs only), hollow (inside a prop, clipped), view (a far landmark to frame or look at, not to stand on). s = actor scale there.
+Anchor types: ground (stand here), surface (stand on a prop top: walk there and the actor jumps up), perch (branch; perch rigs only), hollow (an opening in a prop: the actor jumps in and is drawn clipped to it, in front of a dark hole), view (a far landmark to frame or look at, not to stand on). s = actor scale there.
 
 ### forest
 
@@ -149,3 +149,17 @@ Anchor types: ground (stand here), surface (stand on a prop top), perch (branch;
 | branch_end | perch (way_tree) | 1128 | 597 | 0.96 | wood |
 | branch_base | perch (way_tree) | 1447 | 622 | 0.96 | wood |
 
+## Notes that the tables don't show
+
+- **`x:` alone is the main lane** (the `lane y` above). For any other ground spot give both: `x:1530,y:1028`. Points
+  inside a solid prop's footprint move to the nearest walkable spot.
+- **Hollows** (`den`, `owl_hollow`): `run`/`walk` to one goes to the foot of the prop and jumps in (a flier flies in);
+  `enter` with `"from": "den"` appears in it. The occupant is clipped to the opening in front of a dark hole: at
+  night it reads only by the scene's `rim` light or a glow you draw. The forest `den` is a 60 × 44 px opening at the
+  foot of the oak, mouse-sized (taller rigs are cut by it); the nearest ground is just in front, about
+  `x:1490–1550,y:1028`, 30 px below it, close enough for a two-shot of small rigs. `owl_hollow` is 360 px up its tree:
+  owl or other fliers, and cut between it and the ground.
+- **Anchors as camera subjects** (`"on": ["den"]`) are framed as a box about 120 × 110 px × s (a standing hare), so a
+  small actor framed with an anchor comes out small; lint's `subject-size` catches it, `warnings.mjs` doesn't.
+- **Nothing is in the air.** Every anchor and point is somewhere to stand; a flight ends on one of them (or on a
+  rider's place, `on:<actor>`).

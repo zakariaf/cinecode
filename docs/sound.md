@@ -71,7 +71,16 @@ Bad: `"grumpy old badger"`, `"voice catching"`, a list of six adjectives, a stag
 before or instead of the line. Pauses are beats (`"after": 0.6`), not "…" in the text.
 
 When a take reads the direction aloud, the next try sends only the last descriptor, and the one after that no
-direction at all (the voice alone carries the line).
+direction at all (the voice alone carries the line). Such a take can pass with the line's words right and its
+delivery gone; `takes.mjs` (below) flags it `TONE-CUT`.
+
+No word is safe every time. Read aloud in the demo film or a test film: "wondering", "hopeful", "certain", "less
+sure" (each even as the whole direction), "steady", "simple", "deadpan", "whispering", "gently offended". Never read
+aloud there: "soft", "warm", "teasing", "tender", "scared", "grateful", "delighted", "excited", "quiet", "solemn",
+"earnest", "breathless". When a tone is read aloud, change the word rather than retrying it.
+
+Made-up names are often misheard by the transcriber ("Glim" came back as "Clem", then "Glem"), which fails a good
+take and uses up tries: read what was heard before you redo a take, and prefer names that are real words or names.
 
 Non-verbal lines: a `text` starting with `[` (`"[laughs]"`) is a non-verbal caption. Give the voice something to
 say with `tts` (`{ "text": "[laughs]", "tts": "Hahaha!" }`): the caption stays, the voice says the `tts` text.
@@ -94,8 +103,9 @@ id, the speaker, the take's length, its error rate and the text), marks those st
 them.
 
 `node .claude/skills/cinecode/scripts/takes.mjs films/<slug>` lists flagged and non-verbal takes with what was asked
-and what was heard. To fix a take, simplify its tone (that makes a new line), or delete its two cache files and run
-`voice` again.
+and what was heard, every try of a flagged line, and `TONE-CUT` for a kept take that was sent with less direction
+than asked (or none) because earlier tries read it aloud. To fix a take, simplify its tone (that makes a new line), or
+delete its two cache files and run `voice` again.
 
 The kept take is trimmed of silence below −45 dBFS (10 ms windows, 60 ms kept around the speech), resampled to 48 kHz
 and given short edge fades. Its loudness envelope at the film's fps drives the speaker's mouth (lip sync). A line's
@@ -106,7 +116,9 @@ and given short edge fades. Its loudness envelope at the film's fps drives the s
 Each line is stored in `films/<slug>/voices/` as `<id>.wav` (48 kHz mono, 16-bit) and `<id>.json` (text, voice, tone,
 the prompt sent, the models, the QA transcript and error of every take, the envelope). The id is a hash of who speaks,
 the voice, the spoken text and the tone, so changing any of them makes a new line; an entry is reused while its text,
-voice and tone still match. Two identical lines share one take.
+voice and tone still match. Two identical lines share one take. A line whose text, tone or voice changes leaves its
+old take behind; it is never used again. `takes.mjs` lists those unused takes with the command to delete them, which
+is safe (they only cost a request if you change the line back).
 
 Once every line is cached, the film plans, mixes and renders with no network and no key. `plan` uses the real take
 lengths (unvoiced lines show an estimate of `words / 2.6 + 0.3` s, marked `~`). `voice` sends only missing lines, two

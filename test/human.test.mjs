@@ -742,3 +742,59 @@ test('profile: tear, glasses (one lens and its temple arm), beards and every hai
   const once = () => Buffer.from(faceAt({ ...NELL, tear: 0.6 }, { expr: 'laughing', talk: 0.5, look: 0.4, tilt: 0.3, blink: 0.2 }, -1).d);
   assert.ok(once().equals(once()), 'the same frame renders identical pixels');
 });
+
+// pixels differing between a and b inside a box (canvas px, x0/x1 in either order)
+const boxDiff = (a, b, W, x0, x1, y0, y1) => { let n = 0; for (let y = Math.max(0, Math.round(y0)); y < Math.min(W, Math.round(y1)); y++) for (let x = Math.max(0, Math.round(Math.min(x0, x1))); x < Math.min(W, Math.round(Math.max(x0, x1))); x++) { const i = (y * W + x) * 4; if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 30) n++; } return n; };
+const boxDark = (a, W, x0, x1, y0, y1) => { let n = 0; for (let y = Math.max(0, Math.round(y0)); y < Math.min(W, Math.round(y1)); y++) for (let x = Math.max(0, Math.round(Math.min(x0, x1))); x < Math.min(W, Math.round(Math.max(x0, x1))); x++) { const i = (y * W + x) * 4; if (a[i] + a[i + 1] + a[i + 2] < 160) n++; } return n; };
+
+test('profile: an open mouth leaves the upper lip and cheek alone (no shade wedge, no moustache); the ear has a light rim, not ink', () => {
+  for (const params of [...AGES.map(age => ({ age })), NELL, YOUNG]) for (const f of [1, -1]) {
+    const n = faceAt(params, {}, f), { r, k, W } = n, m = r.mouth, tag = `${params.age}${params.hairStyle ? ' ' + params.hairStyle : ''} face ${f}`;
+    // above the lips, from the front of the face back past the mouth corner: the jaw drops below it, nothing else moves
+    for (const talk of [0.5, 1]) {
+      const dn = boxDiff(n.d, faceAt(params, { talk }, f).d, W, m[0] - 0.5 * k * f, m[0] + 0.1 * k * f, m[1] - 0.22 * k, m[1] - 0.06 * k);
+      assert.ok(dn < 30, `${tag} talk ${talk}: ${dn} px change on the upper lip and cheek`);
+    }
+    // the ear (mid-head, behind the jaw hinge: back and down from the eye) has no ink-dark pixels (a braid may hang over it)
+    if (params.hairStyle === 'braids') continue;
+    const c = [r.eye[0] - 0.66 * k * f, r.eye[1] + 0.155 * k], dk = boxDark(n.d, W, c[0] - 0.13 * k * f, c[0] + 0.07 * k * f, c[1] - 0.22 * k, c[1] + 0.22 * k);
+    assert.ok(dk < 20, `${tag}: ${dk} ink-dark px on the ear`);
+  }
+});
+
+test('profile: a tear beads on the cheek below the eye; under a hat no hair shows above the brim; long hair hangs behind her when she looks up or down', () => {
+  for (const params of [{ age: 'child' }, { age: 'adult' }, NELL, YOUNG]) for (const expr of ['neutral', 'sad', 'laughing']) {
+    const a = faceAt({ ...params, tear: 0 }, { expr }), b = faceAt({ ...params, tear: 1 }, { expr }), e = a.r.eye, k = a.k;
+    const cheek = boxDiff(a.d, b.d, 480, e[0] - 0.05 * k, e[0] + 0.2 * k, e[1] + 0.1 * k, e[1] + 0.4 * k), inEye = boxDiff(a.d, b.d, 480, e[0] - 0.1 * k, e[0] + 0.1 * k, e[1] - 0.15 * k, e[1] + 0.1 * k);
+    assert.ok(cheek > 100 && cheek > inEye * 1.5, `${params.age} ${expr}: the tear shows on the cheek (${cheek} px) more than inside the eye (${inEye} px)`);
+  }
+  const hat = '#d8b04a';
+  for (const age of AGES) for (const f of [1, -1]) {
+    const ref = faceAt({ age, hairStyle: 'bald', hat }, {}, f, 5), bare = faceAt({ age, hairStyle: 'bald' }, {}, f, 5), y1 = ref.r.head[1] - 0.6 * ref.k;
+    for (const hairStyle of ['short', 'long', 'ponytail', 'bun', 'braids', 'curly']) {
+      assert.ok(boxDiff(ref.d, faceAt({ age, hairStyle, hat }, {}, f, 5).d, 480, 0, 480, 0, y1) < 40, `${age} ${hairStyle} face ${f}: hair above the hat's brim`);
+      assert.ok(boxDiff(bare.d, faceAt({ age, hairStyle }, {}, f, 5).d, 480, 0, 480, 0, y1) > 1000, `${age} ${hairStyle}: (without a hat the hair shows there)`);
+    }
+  }
+  // the fall of long hair (a green no skin or cloth has): its end stays behind the neck and below the jaw at any tilt,
+  // and looking up never sweeps it forward onto the collar
+  const green = (d, i) => d[i + 1] > d[i] + 60 && d[i + 1] > d[i + 2] + 60;
+  for (const age of AGES) for (const f of [1, -1]) {
+    const low = {};
+    for (const tilt of [0, 1, -1]) {
+      const { d, W, r, k } = faceAt({ age, hairStyle: 'long', hair: '#10c010', scarf: false }, { tilt }, f, 4);
+      let maxY = -1, endX = 0, front = -Infinity;
+      for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+        if (!green(d, (y * W + x) * 4)) continue;
+        if (y > maxY) { maxY = y; endX = ((x - r.head[0]) * f) / k; }
+        if (y > r.head[1] + 0.6 * k) front = Math.max(front, ((x - r.head[0]) * f) / k);
+      }
+      low[tilt] = (maxY - r.head[1]) / k;
+      const tag = `${age} face ${f} tilt ${tilt}`;
+      assert.ok(endX < -0.3, `${tag}: the hair's end lies behind the neck (${endX.toFixed(2)})`);
+      assert.ok(low[tilt] > 1.1, `${tag}: the hair's end hangs below the jaw (${low[tilt].toFixed(2)})`);
+      assert.ok(front < 0.3, `${tag}: no hair in front of the throat (${front.toFixed(2)})`);
+    }
+    assert.ok(low[1] > low[0] - 0.05, `${age} face ${f}: looking up, the hair still hangs (${low[1].toFixed(2)} vs ${low[0].toFixed(2)})`);
+  }
+});

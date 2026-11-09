@@ -15,17 +15,17 @@ time range, reported at its worst moment. The command prints every issue and exi
 least one error (warnings alone exit 0):
 
 ```
-lint     2 errors, 3 warnings → films/lintdemo/out/lint.json, lint.jpg    5.3 s
-  error  offscreen-speaker s01-03     0:17.9  hare speaks "Only me. I was having a nap." from outside the frame (mark the line "vo": true or frame the speaker) (17.9–20.9 s)
-  error  offscreen-speaker s01-04     0:21.9  pip speaks "Then wake up! Race you to the pond!" but only 38% of their face is visible: 62% is outside the frame
-  warn   cut-jump          s01-04     0:21.4  the cut s01-03 → s01-04 joins two nearly identical framings (zoom ×1.00, shift 0% of the frame): change the size, the subject or the angle
-  warn   subject-size      s01-04     0:21.9  extreme-close shot on pip, but pip's face region is not in frame
-  warn   timing            s01-04b    0:26.1  shot s01-04b lasts 0.79 s (shorter than 1.2 s)
+lint     2 errors, 3 warnings → films/lintdemo/out/lint.json, lint.jpg    2.9 s
+  error  offscreen-speaker 1.3        0:17.9  hare speaks "Only me. I was having a nap." from outside the frame (mark the line "vo": true or frame the speaker) (17.9–20.9 s)
+  error  offscreen-speaker 1.4        0:21.9  pip speaks "Then wake up! Race you to the pond!" but only 37% of their face is visible: 63% is outside the frame
+  warn   cut-jump          1.4        0:21.4  the cut 1.3 → 1.4 joins two nearly identical framings (zoom ×1.00, shift 0% of the frame): change the size, the subject or the angle
+  warn   subject-size      1.4        0:21.9  extreme-close shot on pip, but pip's face region is not in frame
+  warn   timing            1.4b       0:26.1  shot 1.4b lasts 0.79 s (shorter than 1.2 s)
 cinecode lint: lint found 2 errors
 ```
 
 That is the starter film broken on purpose: two extreme close-ups of Pip in a row while the hare speaks, and a
-0.8 s shot. Sampling every 0.5 s, it took 5 s for 40 s of film; at the default step a few-minute film takes minutes.
+0.8 s shot (`1.4b`). Sampling every 0.5 s, it took 3 s for 40 s of film; at the default step a few-minute film takes minutes.
 
 ## The report
 
@@ -112,6 +112,14 @@ track with fast runners, a subject still entering or leaving, a static shot whos
 push-in or pull-out to another size (judged at its starting size), and a small cast member the closest zoom can't
 enlarge. Fix: change the size, stage the subjects closer together, or cut between singles.
 
+A `zoom` rarely clears it: the accepted range scales with `zoom` too (`"zoom": 1.12` on a full shot accepts 34%–91%),
+so a zoom only helps when the camera can't reach the size's framing (its closest zoom, or the edge of the set). A
+subject that is too small usually shares the frame with something: a partner, an anchor in `on`, a walk across a
+static shot, or a later moment of its own. A frame is composed for everything its subjects do in the shot, so a mouse
+that sits up halfway through a pull-out (or gets a rider on its head) is framed for that taller figure from the first
+frame and looks small until it happens. Start the shot in the final pose (`{ "do": "set", "who": "tilly", "pose":
+"alert" }` as its first beat, or the pose change at the end of the shot before), or keep the warning and say why.
+
 ### caption-face
 
 A burned-in caption overlaps a speaking actor's face (the middle of the head) by more than 20% of the smaller of the
@@ -151,7 +159,8 @@ second. Fix: hold the shot longer (`hold`, `dur`), space the lines (`after`), sh
 
 Lint after the contact sheets look right and again after voicing (real line lengths move the staging). It is not a
 replacement for looking: it measures boxes and points, so it can't see a character hidden in shadow, a confusing
-eyeline or a dull shot. Some warnings are deliberate (a wide shot of a tiny mouse); keep those and say so.
+eyeline, a caption that jumps from the bottom to the top of the frame in the middle of a line, or a dull shot. Some
+warnings are deliberate (a wide shot of a tiny mouse); keep those and say so.
 
 From code, `lintPlan(plan, { step, occlusion, rules })` in `engine/lint/lint.mjs` runs the same checks on a compiled
 plan (`occlusion: false` ignores what hides a speaker; `rules` limits the run to the named rules), and

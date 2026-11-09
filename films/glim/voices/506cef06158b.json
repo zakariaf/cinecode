@@ -1,0 +1,34 @@
+{
+ "id": "506cef06158b",
+ "who": "glim",
+ "text": "Don't be scared. Follow me!",
+ "voice": "Puck",
+ "tone": "bright, kind, warm",
+ "prompt": "[bright, kind, warm] Don't be scared. Follow me!",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 2,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0.206,0.997,1,0.964,0.694,0.997,1,0.966,0.697,0.29,0,0,0.541,0.538,0.74,0.954,0.953,0.951,0.986,0.981,0.921,0.948,0.769,0.365,0,0,0,0.816,0.949,0.875,0.823,0.94,0.939,0.892,0.985,1,1,1,0.984,0.995,1,0.998,0.94,0.721,0.348,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Don't be scared. Follow me.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "bright, kind, warm",
+    "wer": 0,
+    "transcript": "Don't be scared. Follow me.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 2
+   }
+  ]
+ }
+}

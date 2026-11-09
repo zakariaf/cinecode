@@ -41,9 +41,21 @@ Every actor also gets **idle life** without being asked: it breathes, blinks eve
 the same), glances at whoever starts speaking, and moves its mouth from the voice's loudness while it speaks.
 
 `perch` rigs (owl, songbird, squirrel, butterfly) can stand on a set's `perch` anchors (branches); `flies` rigs (owl,
-songbird, butterfly) can `fly`. Any actor can carry a rider ([riding](storyboard.md#riding)); the tortoise has a
-riding point on its shell, other rigs carry riders on the top centre of their drawing. In water, only the frog may
-stand without wading (lint `in-water`).
+songbird, butterfly) can `fly`. A flight always ends standing somewhere (the ground, a surface, a perch, a hollow, or
+riding another actor): no rig hovers ([fliers](storyboard.md#do-actions)). Any actor can carry a rider
+([riding](storyboard.md#riding)); the tortoise has a riding point on its shell, other rigs carry riders on the top
+centre of their drawing. In water, only the frog may stand without wading (lint `in-water`).
+
+`look` `to` `up`, `sky` or `down` tilts the head of every rig except the beetle, the butterfly and the songbird. On a
+small rig in a wide or full shot the tilt is only a few pixels: a pose reads better there (the mouse's `alert`).
+
+**An animal the engine doesn't have.** Writing a rig is a big job ([adding a rig](#adding-a-rig)); for a short film,
+reskin the nearest rig with `params` and cast `scale`, and draw what it lacks as an overlay that follows the actor
+(`api.actor(id).box` in [effects.md](effects.md)): light on the `grade` layer, anything else on `world`. Some
+substitutions that read well: a firefly is a small butterfly with dark wings and a yellow body (`scale` 0.6) plus a
+glow overlay; a crow a near-black songbird (`scale` 1.3; loosely, a bat); a rabbit a hare at `scale` 0.7; a rat a
+mouse; a wolf or a dog a grey or brown fox; a ladybird a red beetle (no spots); a turtle a tortoise. Look at it on a
+contact sheet before you commit, and name the substitution in the screenplay.
 
 **Cast scale vs. size.** Use the cast's `scale` (0.1–10) to make one actor bigger or smaller than the rig's default.
 The framing, routing and lint all account for it.
@@ -74,7 +86,7 @@ problem on `emote`, `pose` and `set` beats, and a warning on `say` lines and sce
 
 ![Human variants at true relative size](images/humans.jpg)
 
-One parametric rig for children, teens, adults and elders, drawn in a three-quarter side view. Height 141 units
+One parametric rig for children, teens, adults and elders, drawn side-on: a true profile head (one eye, the nose on the face edge, the ear mid-head) on a three-quarter body. Height 141 units
 for the default child; the age sets the proportions (an adult is about 215 units, an elder about 205 and a little
 stooped). Speeds depend on age and build (a child walks about 92 units/s; an elder walks slower and shorter).
 
@@ -115,7 +127,8 @@ stooped). Speeds depend on age and build (a child walks about 92 units/s; an eld
 | `socks` | colour | cream |
 | `scarf`, `glasses`, `hat`, `apron`, `backpack` | `true` (default colour), a colour, or `false` | `false` |
 | `scarfLength` | 0.4–2.5 (a child in an adult's scarf trails it) | 1 |
-| `tear` | 0..1: a wet highlight on the lower lids | 0 |
+| `tear` | 0..1: a bead on the lower lid; from 0.7 a wet streak down the cheek | 0 |
+| `view` | `profile` (one eye, nose on the face edge), `three-quarter` (the older head with both eyes) | `profile` |
 
 ## Animal rigs
 

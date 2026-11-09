@@ -1,6 +1,6 @@
 # Cast reference (rigs)
 
-Generated from the rig registry by `node .claude/skills/cinecode/scripts/inventory.mjs cast` (add `films/<slug>` to include that film's custom rigs). Rerun it when the engine changes; the live registry wins over this snapshot. `node bin/cinecode.mjs cast-sheet <kinds> -o out/<name>.jpg` draws every pose, gesture and expression.
+Generated from the rig registry by `node .claude/skills/cinecode/scripts/inventory.mjs cast` (add `films/<slug>` to include that film's custom rigs). Rerun it when the engine changes; the live registry wins over this snapshot. The notes at the end are by hand. `node bin/cinecode.mjs cast-sheet <kinds> -o out/<name>.jpg` draws every pose, gesture and expression.
 
 Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s, where s = set.scaleAt(x, y) × cast `scale`. "300 px" = seconds to walk 300 world px at s 1.3.
 
@@ -91,7 +91,7 @@ Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s
 - gaits: walk, run
 - gestures: wave, nod, shake-head, shrug, laugh, jump-for-joy, point, point-up, point-down, bow, gasp, beckon, clap
 - expressions: neutral, happy, sad, surprised, angry, sleepy, worried, laughing, curious
-- params: age, build, height, seed, skin, blush, eyes, hairStyle, hair, beard, shirt, sleeves, bottom, pants, dress, shoes, socks, scarf, glasses, hat, apron, backpack, tear, hem, scarfLength, dressStyle, top, under
+- params: age, build, height, seed, skin, blush, eyes, hairStyle, hair, beard, shirt, sleeves, bottom, pants, dress, shoes, socks, scarf, glasses, hat, apron, backpack, tear, hem, scarfLength, dressStyle, top, under, view (profile | three-quarter)
 
 ### mouse
 
@@ -142,3 +142,17 @@ Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s
 - **owl**: expression `one-eye` (a dozing owl peeking). Perches on `perch` anchors; can fly.
 - Cast-level `scale` multiplies the set's perspective scale; lint divides by it, so a big or tiny character isn't a `scale` error.
 - `do: set` changes params mid-shot (`{ "do": "set", "who": "fidget", "params": { "coat": "#8e3c1e", "tail": 0.45 } }`), e.g. wet fur after a wade.
+- **Fliers** (owl, songbird, butterfly) can't hover: every flight ends standing on the ground, a surface, a perch, a
+  hollow, or another actor (`hop` to `on:<actor>`: a butterfly rides a mouse's head). `enter` flies in from above
+  only to a perch, a surface, a hollow or `on:<actor>`; to a ground place it comes along the ground in its `gait`.
+  Land a small flier with an explicit `x:` a body length away: `near:` can put its wings over the other's face.
+- **Head tilt** (`look` `to` up / sky / down): every rig but the beetle, butterfly and songbird. On a small rig in a
+  wide or full shot it is a few pixels; a pose reads better (mouse `alert`, human `look-up`).
+- **Gestures vs. poses in close shots.** Close and extreme-close shots frame the resting head, not a gesture's peak:
+  the mouse's `gasp` gesture sits her up out of the top of a close-up. Use the pose of the same name there (mouse
+  poses `gasp`, `cheer`, `alert`).
+- **No rig for the animal?** Reskin the nearest rig (`params`, cast `scale`) and draw what it lacks as an overlay that
+  follows `api.actor(id).box` (light on the `grade` layer). Seen to read well: firefly = butterfly `scale` 0.6, dark
+  wings (`col`, `col2`, `tip`), yellow `body` + a glow overlay; crow (loosely, a bat) = near-black songbird `scale`
+  1.3; rabbit = hare `scale` 0.7; rat = mouse; wolf or dog = grey or brown fox (`coat`, `cream`, `sock`); ladybird =
+  red beetle (`shell`); turtle = tortoise. Name the substitution in the screenplay and the report.

@@ -1165,18 +1165,18 @@ function curls(P, a, step = 0.15) {                // an open edge broken into r
   }
   return out;
 }
-// An open edge broken into tufts: uneven flicks leaning back toward the start of the edge (a fringe's upper edge, drawn
-// from the back of the head forward), pointing away from the skull.
+// An open edge broken into tufts: uneven pointed flicks standing up toward the crown (a fringe's upper edge, drawn from
+// the back of the head forward), each leaning back: a steep side toward the back, a long tail toward the front.
 function tufts(P, a, step, seed) {
   const S = [P[0]]; let acc = 0;
   for (let i = 1; i < P.length; i++) { acc += len(sub(P[i], P[i - 1])); if (acc >= step) { S.push(P[i]); acc = 0; } }
   if (S[S.length - 1] !== P[P.length - 1]) S.push(P[P.length - 1]);
   const out = [S[0]], fr = x => x - Math.floor(x);
   for (let i = 0; i < S.length - 1; i++) {
-    const A = S[i], B = S[i + 1], d = sub(B, A), L = len(d) || 1e-3, t = mul(d, 1 / L), m = mid(A, B);
-    let n = [-t[1], t[0]]; if (m[0] * n[0] + (m[1] + 0.12) * n[1] < 0) n = mul(n, -1);
-    const h = a * (0.35 + 0.65 * fr(Math.sin((i + 1) * 12.9898 + seed * 78.233) * 43758.5453)) * (i === S.length - 2 ? 0.4 : 1);
-    out.push(add(mid(A, B, 0.2), mul(n, h * 0.2)), add(mid(A, B, 0.38), mul(n, h)), add(mid(A, B, 0.62), mul(n, h * 0.25)), B);
+    const A = S[i], B = S[i + 1], d = sub(B, A), L = len(d) || 1e-3, t = mul(d, 1 / L);
+    let n = [-t[1], t[0]]; if (n[1] > 0) n = mul(n, -1);
+    const h = a * (0.45 + 0.55 * fr(Math.sin((i + 1) * 12.9898 + seed * 78.233) * 43758.5453)) * (i === S.length - 2 ? 0.4 : 1);
+    out.push(add(mid(A, B, 0.12), mul(n, h * 0.3)), add(mid(A, B, 0.3), mul(n, h)), add(mid(A, B, 0.42), mul(n, h * 0.55)), add(mid(A, B, 0.7), mul(n, h * 0.18)), B);
   }
   return out;
 }

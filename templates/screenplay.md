@@ -14,7 +14,8 @@ later with a new meaning (a line said early that pays off at the end).>
 ## Characters
 
 ### <Name>, <what they are> (lead)
-- **Rig:** `<rig>` <!-- hare, tortoise, fox, owl, squirrel, songbird, mouse, hedgehog, badger, deer, frog, beetle, butterfly, human -->
+- **Rig:** `<rig>` <!-- hare, tortoise, fox, owl, squirrel, songbird, mouse, hedgehog, badger, deer, frog, beetle, butterfly, human.
+     No rig for the animal? The nearest one reskinned, plus an overlay for what it lacks (docs/cast.md). -->
 - **Look:** <colours as hex, size (cast `scale`), rig params: e.g. human `age`, `hairStyle`, `glasses`, `scarf`>
 - **Personality:** <how they move and talk; what they want; how they change>
 - **Voice:** `<Gemini voice>`, tone "<two or three delivery adjectives>" <!-- adjectives only: nouns in a tone get read aloud -->
@@ -35,7 +36,8 @@ later with a new meaning (a line said early that pays off at the end).>
 | 1 | <place> (`meadow`) | `morning` | `stump_front`, `pond_edge` | <what happens here> | 30 s |
 | 2 | <place> (`<kit>`) | `<time>` | `<anchor>`, `<anchor>` | <…> | <seconds> |
 
-**Length target:** <total>. <About 15 shots and 15 lines a minute; shots average 4 s.>
+**Length target:** <total, title cards included>. <About 15 shots and 15 lines a minute; shots average 4 s. Under
+30 s: 5–7 shots, 3–5 lines, title cards of 2–2.5 s.>
 
 <!-- kits: forest, hill, meadow, stream, valley, village, wayside. times: dawn, morning, noon, afternoon, golden,
      sunset, twilight, night (or a change across a scene: from golden to twilight). -->

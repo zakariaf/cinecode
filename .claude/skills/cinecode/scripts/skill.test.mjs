@@ -4,7 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -48,6 +49,37 @@ test('warnings.mjs and takes.mjs run on a film without the network', () => {
   assert.match(t.stdout, /^\d+ lines, \d+ flagged\./m);
   assert.equal(run('takes.mjs').status, 2, 'usage error without a film');
   assert.equal(run('warnings.mjs').status, 2, 'usage error without a film');
+});
+
+test('takes.mjs flags a kept take whose tone was cut, and lists unused takes', async () => {
+  const { loadPlan } = await import(join(ROOT, 'engine/render/film-source.mjs'));
+  const { resolveLine } = await import(join(ROOT, 'engine/audio/voice.mjs'));
+  const { encodeWav } = await import(join(ROOT, 'engine/audio/wav.mjs'));
+  const dir = mkdtempSync(join(tmpdir(), 'cinecode-takes-'));
+  try {
+    const text = readFileSync(join(SKILL, 'references/storyboard-quick.md'), 'utf8');
+    writeFileSync(join(dir, 'film.json'), /```json\n([\s\S]*?)\n```/.exec(text)[1]);
+    const { film, plan } = await loadPlan(dir), voices = join(dir, 'voices');
+    mkdirSync(voices);
+    const take = (id, L, takes, keep) => {
+      writeFileSync(join(voices, `${id}.wav`), encodeWav([new Float32Array(24000).fill(0.1)], 48000, 16));
+      const k = takes[keep - 1];
+      writeFileSync(join(voices, `${id}.json`), JSON.stringify({ id, who: L.who, text: L.text, voice: L.voice, tone: L.tone, prompt: k.direction ? `[${k.direction}] ${L.text}` : L.text, qa: { wer: 0, transcript: L.text, leading: 0, pass: true, take: keep, takes } }));
+    };
+    const [a, b] = plan.lines.slice(1, 3).map(l => resolveLine(film, l));
+    take(a.id, a, [{ attempt: 1, direction: a.tone, wer: 0.5, transcript: `${a.tone} ${a.text}`, directionSpoken: true }, { attempt: 2, direction: '', wer: 0, transcript: a.text }], 2);
+    take(b.id, b, [{ attempt: 1, direction: b.tone, wer: 0, transcript: b.text }], 1);
+    take('0123456789ab', b, [{ attempt: 1, direction: b.tone, wer: 0, transcript: b.text }], 1);
+    const t = run('takes.mjs', dir);
+    assert.equal(t.status, 0, t.stderr);
+    assert.match(t.stdout, new RegExp(`^! ${a.id} .*TONE-CUT`, 'm'));
+    assert.match(t.stdout, /kept take 2 of 2, sent with no direction instead of "old, dry, slow"/);
+    assert.match(t.stdout, /try 1 \[old, dry, slow\]: old, dry, slow Mine, I think\./);
+    assert.doesNotMatch(t.stdout, new RegExp(`^! ${b.id}`, 'm'), 'a first-try take is not flagged');
+    assert.match(t.stdout, /^3 lines, 2 flagged\./m, 'the unvoiced narrator line is MISSING, the cut take TONE-CUT');
+    assert.match(t.stdout, /^1 unused take .*: 0123456789ab$/m);
+    assert.match(t.stdout, /^ {2}rm \S*voices\/0123456789ab\.wav \S*voices\/0123456789ab\.json$/m);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('every documented cinecode command line names a real command with valid options', async () => {

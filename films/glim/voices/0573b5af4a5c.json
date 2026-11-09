@@ -1,0 +1,52 @@
+{
+ "id": "0573b5af4a5c",
+ "who": "tilly",
+ "text": "Thank you, Glim.",
+ "voice": "Leda",
+ "tone": "small, high, grateful",
+ "prompt": "[small, high, grateful] Thank you, Glim.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.95,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0.434,0.989,0.977,0.934,0.806,0.48,0.975,0.997,0.969,0.837,0.523,0.929,0.988,0.998,1,1,1,1,1,0.992,0.5,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Thank you, Glim.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 3,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "small, high, grateful",
+    "wer": 0.333,
+    "transcript": "Thank you, Clem.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.08
+   },
+   {
+    "attempt": 2,
+    "direction": "small, high, grateful",
+    "wer": 0.333,
+    "transcript": "Thank you, Glem.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.34
+   },
+   {
+    "attempt": 3,
+    "direction": "small, high, grateful",
+    "wer": 0,
+    "transcript": "Thank you, Glim.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 0.95
+   }
+  ]
+ }
+}

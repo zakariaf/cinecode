@@ -63,17 +63,18 @@ compile  0:38.8, 6 shots, 0/5 lines voiced                        0.4 s
 My Film — 0:38.8 · 6 shots · 1 scene · 1920×1080 @ 24 fps
 
 shot      set       size             start    dur   lines
-s01-01    meadow    establishing    0:04.0   7.8s   ~narrator: "At the edge of the old forest, a girl named…
-s01-02    meadow    full            0:11.8   5.8s   ~pip: "Hello? Is anybody out here?"
-s01-03    meadow    medium          0:17.6   3.8s   ~hare: "Only me. I was having a nap."
-s01-04    meadow    full            0:21.4   4.3s   ~pip: "Then wake up! Race you to the pond!"
-s01-05    meadow    wide            0:25.7   2.3s
-s01-06    meadow    full            0:28.0   6.8s   ~narrator: "And that is how the summer began."
+1.1       meadow    establishing    0:04.0   7.8s   ~narrator: "At the edge of the old forest, a girl named…
+1.2       meadow    full            0:11.8   5.8s   ~pip: "Hello? Is anybody out here?"
+1.3       meadow    medium          0:17.6   3.8s   ~hare: "Only me. I was having a nap."
+1.4       meadow    full            0:21.4   4.3s   ~pip: "Then wake up! Race you to the pond!"
+1.5       meadow    wide            0:25.7   2.3s
+1.6       meadow    full            0:28.0   6.8s   ~narrator: "And that is how the summer began."
 
 5 lines (5 estimated, marked ~) · 17 sfx · 1 music cues · 5 captions
 ```
 
-The first shot starts at 0:04 because the opening title card comes first.
+The first shot starts at 0:04 because the opening title card comes first; the total (0:38.8) includes both title
+cards, 4 s each here, so for a short film they are a big share of its length.
 
 ### voice
 
@@ -99,10 +100,10 @@ Each tile is labelled with its shot id, time and the caption or line at that mom
 For closer work there is a second tool with shot ids, points inside a shot, a debug overlay and full-size stills:
 
 ```sh
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/s01.jpg --shots=s01-02,s01-03 --cols=2 --tile=640
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/strip.jpg --shots=s01-05@0.1,s01-05@0.5,s01-05@0.9 --cols=3
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/debug.jpg --shots=s01-04 --debug
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/still.jpg --shots=s01-06 --frame
+node engine/film/sheet.mjs films/<slug> films/<slug>/out/s01.jpg --shots=1.2,1.3 --cols=2 --tile=640
+node engine/film/sheet.mjs films/<slug> films/<slug>/out/strip.jpg --shots=1.5@0.1,1.5@0.5,1.5@0.9 --cols=3
+node engine/film/sheet.mjs films/<slug> films/<slug>/out/debug.jpg --shots=1.4 --debug
+node engine/film/sheet.mjs films/<slug> films/<slug>/out/still.jpg --shots=1.6 --frame
 ```
 
 `--shots=` takes shot ids, each at its middle or at `@u` (0..1 through the shot; `--u=` changes the default);

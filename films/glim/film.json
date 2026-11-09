@@ -1,0 +1,331 @@
+{
+  "title": "Glim",
+  "logline": "A little mouse, caught out in the forest after dark and too frightened to find her way, is led home by a firefly.",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "captions": "dialogue"
+  },
+  "titles": {
+    "open": {
+      "title": "Glim",
+      "dur": 2.5
+    },
+    "end": {
+      "lines": [
+        "The End"
+      ],
+      "dur": 2.5
+    }
+  },
+  "score": {
+    "key": "C",
+    "motif": "G4:1 C5:0.5 E5:0.5 D5:1 C5:2"
+  },
+  "voices": {
+    "tilly": {
+      "voice": "Leda",
+      "tone": "small, high"
+    },
+    "glim": {
+      "voice": "Puck",
+      "tone": "bright, kind"
+    }
+  },
+  "cast": {
+    "tilly": {
+      "rig": "mouse",
+      "name": "Tilly",
+      "voice": "tilly",
+      "scale": 1.15
+    },
+    "glim": {
+      "rig": "butterfly",
+      "name": "Glim",
+      "voice": "glim",
+      "scale": 0.6,
+      "params": {
+        "col": "#4a3a2c",
+        "col2": "#5e4632",
+        "tip": "#2a1e18",
+        "spot": "#f3e3a0",
+        "body": "#f6d94a"
+      },
+      "note": "a firefly: the butterfly rig in dark wings with a yellow body, plus the firefly-glow overlay"
+    }
+  },
+  "sets": {
+    "forest": {
+      "kit": "forest"
+    }
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "set": "forest",
+      "time": "night",
+      "music": {
+        "mood": "night",
+        "intensity": 0.3
+      },
+      "ambience": "auto",
+      "rim": {
+        "dir": "upper-left",
+        "color": "#c8d6ff",
+        "strength": 0.6
+      },
+      "overlays": [
+        {
+          "name": "firefly-glow",
+          "params": {
+            "who": "glim"
+          }
+        },
+        {
+          "name": "firefly-swarm",
+          "params": {
+            "mark": "lights",
+            "at": "den"
+          }
+        }
+      ],
+      "actors": {
+        "tilly": {
+          "at": "x:1820",
+          "face": "left"
+        },
+        "glim": {
+          "offstage": "left"
+        }
+      },
+      "shots": [
+        {
+          "id": "1.1",
+          "camera": {
+            "size": "wide",
+            "on": [
+              "tilly"
+            ],
+            "zoom": 0.45,
+            "move": "push-in"
+          },
+          "note": "the dark forest; a tiny mouse alone on the path; an owl hoots",
+          "beats": [
+            {
+              "sfx": "owl-hoot",
+              "at": 0.9,
+              "gain": 0.8
+            }
+          ],
+          "dur": 2.6
+        },
+        {
+          "id": "1.2",
+          "camera": {
+            "size": "close",
+            "on": [
+              "tilly"
+            ],
+            "zoom": 0.75,
+            "offset": [
+              0,
+              0.2
+            ]
+          },
+          "note": "she flinches at the hoot, then says she can't find home",
+          "beats": [
+            {
+              "do": "emote",
+              "who": "tilly",
+              "expr": "scared"
+            },
+            {
+              "do": "gesture",
+              "who": "tilly",
+              "name": "gasp"
+            },
+            {
+              "sfx": "mouse-squeak",
+              "with": "prev",
+              "gain": 0.6
+            },
+            {
+              "say": "tilly",
+              "text": "It's so dark. Where's home?",
+              "tone": "scared",
+              "expr": "scared",
+              "after": 0.2
+            }
+          ],
+          "hold": 0.4
+        },
+        {
+          "id": "1.3",
+          "camera": {
+            "size": "full",
+            "on": [
+              "tilly",
+              "glim"
+            ]
+          },
+          "note": "a warm light floats in from the left (the way home) and settles beside her",
+          "beats": [
+            {
+              "do": "enter",
+              "who": "glim",
+              "from": "left",
+              "to": "x:1760",
+              "gait": "fly"
+            },
+            {
+              "music": "sting",
+              "name": "magic",
+              "with": "prev",
+              "after": 0.3
+            },
+            {
+              "do": "look",
+              "who": "tilly",
+              "to": "glim",
+              "with": "prev",
+              "after": 0.6
+            },
+            {
+              "do": "emote",
+              "who": "tilly",
+              "expr": "surprised",
+              "with": "prev",
+              "after": 0.6
+            },
+            {
+              "say": "glim",
+              "text": "Don't be scared. Follow me!",
+              "tone": "warm",
+              "expr": "happy"
+            }
+          ],
+          "hold": 0.3
+        },
+        {
+          "id": "1.4",
+          "camera": {
+            "size": "wide",
+            "on": [
+              "tilly",
+              "glim"
+            ],
+            "move": "track"
+          },
+          "note": "Glim flies left toward the great oak; Tilly runs after him, all the way to her den",
+          "music": {
+            "mood": "tender",
+            "intensity": 0.4,
+            "motif": 3,
+            "motifVoice": "flute"
+          },
+          "beats": [
+            {
+              "do": "fly",
+              "who": "glim",
+              "to": "x:1530,y:1050",
+              "speed": 2.4
+            },
+            {
+              "do": "run",
+              "who": "tilly",
+              "to": "den",
+              "with": "prev",
+              "after": 0.8
+            }
+          ],
+          "hold": 0.3
+        },
+        {
+          "id": "1.5",
+          "camera": {
+            "size": "close",
+            "on": [
+              "tilly"
+            ]
+          },
+          "note": "single on Tilly in her doorway, looking down at Glim (off frame, his glow at the edge)",
+          "beats": [
+            {
+              "do": "turn",
+              "who": "tilly",
+              "face": "right"
+            },
+            {
+              "do": "look",
+              "who": "tilly",
+              "to": "glim"
+            },
+            {
+              "say": "tilly",
+              "text": "Thank you, Glim.",
+              "tone": "grateful",
+              "expr": "happy",
+              "after": 0.1
+            }
+          ],
+          "hold": 0.4
+        },
+        {
+          "id": "1.6",
+          "camera": {
+            "size": "full",
+            "on": [
+              "tilly"
+            ],
+            "move": "pull-out",
+            "zoomTo": 0.22,
+            "zoom": 1.12
+          },
+          "note": "pull back from Tilly in her doorway; Glim flies up to sit on her; fireflies wake all around the oak; she looks up, unafraid",
+          "music": {
+            "mood": "tender",
+            "intensity": 0.45,
+            "motif": 5,
+            "motifVoice": "music-box",
+            "hold": true
+          },
+          "beats": [
+            {
+              "mark": "lights"
+            },
+            {
+              "do": "hop",
+              "who": "glim",
+              "to": "on:tilly",
+              "speed": 1.5
+            },
+            {
+              "do": "pose",
+              "who": "tilly",
+              "pose": "alert",
+              "dur": 0.6,
+              "with": "prev",
+              "after": 0.3
+            },
+            {
+              "do": "look",
+              "who": "tilly",
+              "to": "sky",
+              "with": "prev",
+              "after": 0.3
+            },
+            {
+              "say": "tilly",
+              "text": "The dark has lights in it.",
+              "tone": "soft",
+              "expr": "happy",
+              "after": 0.1
+            }
+          ],
+          "hold": 0.8
+        }
+      ]
+    }
+  ]
+}

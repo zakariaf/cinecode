@@ -13,7 +13,6 @@ This document is the contract between modules. **If you build a module, implemen
 - **Style.** Match the existing hand-painted look: wobbly hand-inked outlines (`ink`, `wobble`), cel shading with one hard lavender multiply shadow (`cel()` in the rigs), gouache dabs (`clump`, `foliage`), paper texture, grain. Light comes from the upper left unless a set says otherwise.
 - **Tests.** Each module ships `test/<module>.test.mjs` runnable with `node --test test/`. Tests must not need network or API keys (mock `fetch`).
 - **Units.** World coordinates are pixels in set space. A character's `(x, y)` is its **contact point** (feet on the ground, or the perch point). `y` grows downward. `face = 1` looks right, `-1` looks left. Time is in seconds.
-- The reference implementation of the previous film lives in `engine/_legacy/` (`cast.mjs` = animal rigs, `sets.mjs` = six painted locations, `engine.mjs` = shots/grades/effects, `acts/` = hand-written shots, `paperboat.mjs` = a human child rig). **Port from it; don't import it from new code.** It will be deleted at the end.
 
 ## 1. Repository layout and ownership
 
@@ -84,7 +83,7 @@ export default {
 `engine/cast/rig.mjs` exports: `register(rig)`, `getRig(kind)`, `listRigs()`, `mixPose(a, b, u)`, `idle(rig, t, seed)` → `{ breath, blink }` (seeded blink every 2.5–5 s, 0.15 s long), and `RIG_KINDS`.
 `engine/cast/index.mjs` imports every rig file and registers it, then re-exports `getRig`, `listRigs`, `register`. Other modules import rigs **only** through `engine/cast/index.mjs`.
 `engine/cast/sheet.mjs` exports `castSheet(kinds, outPath)` (every pose, gait phase, gesture key frame and expression of each rig, labelled).
-**Rigs required (port from `_legacy/cast.mjs`):** hare, tortoise, fox, owl, squirrel, songbird, mouse, hedgehog, badger, deer, frog, beetle, butterfly. **New:** `human` (child/adult/elder variants via params). Every rig must support `talk`, `blink` and `expr` (rigs with no visible mouth may ignore `talk`).
+**Rigs required:** hare, tortoise, fox, owl, squirrel, songbird, mouse, hedgehog, badger, deer, frog, beetle, butterfly. **New:** `human` (child/adult/elder variants via params). Every rig must support `talk`, `blink` and `expr` (rigs with no visible mouth may ignore `talk`).
 
 `engine/core/style.mjs` exports `SHADE`, `cel(ctx, P, col, sh, w, seed)`, `darken(hex, f)`, `lighten(hex, f)`, `groundShadow(ctx, x, y, w, lift, a)`, `eye(ctx, x, y, rx, ry, state, iris, look)`.
 
@@ -133,7 +132,7 @@ export default function kit(params = {}) {          // engine/set/kits/meadow.mj
 
 `engine/set/kits/index.mjs` exports `getKit(name)`, `listKits()`, `registerKit(name, fn)`; other modules import kits **only** through it. `engine/set/sheet.mjs` exports `setSheet(kitNames, outPath)` (each kit at a wide view with anchors, solid footprints, walk region, water and routes drawn as a debug overlay).
 
-**Kits required (port from `_legacy/sets.mjs`):** `valley`, `meadow`, `forest`, `stream`, `wayside`, `hill`. **New:** `village` (cottage with door and window, fence, well, path, garden) and `night-sky` variants of skies. Every kit defines at least 4 anchors and its ambience names.
+**Kits required:** `valley`, `meadow`, `forest`, `stream`, `wayside`, `hill`. **New:** `village` (cottage with door and window, fence, well, path, garden) and `night-sky` variants of skies. Every kit defines at least 4 anchors and its ambience names.
 
 ## 4. The storyboard file (`films/<slug>/film.json`)
 
@@ -354,7 +353,7 @@ Overlay and custom-beat `api`: `{ t, st /* s since scene start */, su /* 0..1 sc
 - Tortoise params: `star` (opacity 0..1 of a pale five-point natural marking, off-centre on a rear scute; 0 = none), `starCol`, `moss` (colour or `null`: moss patches on the shell top), `seam` (scute seam colour), `lids` (0..1 resting lid closure for an old animal), `wet` (0..1: darker, glossier shell and skin with a few falling drips animated by `st.t`), `iris`.
 - Squirrel params: `tail` (tail size multiplier, 0.4..1.8; < 0.7 also flattens it like a wet paintbrush).
 - Owl: an expression `one-eye` (one eye open, one shut).
-- Human (`human.mjs`): `hairStyle: 'braids'`; `glasses` may be a frame colour (true = default) and gets one small glint highlight on the near lens; `tear` param 0..1 (one extra wet highlight on the lower lid); `build: 'slight'`; `draw()` must accept `ctx = null` (bounds only, like the animal rigs); `jump-for-joy` must set `pose.lift`; `st.tilt`.
+- Human (`human.mjs`): `hairStyle: 'braids'`; `glasses` may be a frame colour (true = default) and gets one small glint highlight on the near lens; `tear` param 0..1 (one extra wet highlight on the lower lid); `build: 'slight'`; `draw()` must accept `ctx = null` (bounds only, like the animal rigs); `jump-for-joy` must set `pose.lift`; `st.tilt`; `view`: `'profile'` (default: one eye, the nose on the face edge) or `'three-quarter'` (the older head with both eyes).
 
 ### 9.3 Audio additions (owners: voice, sfx, music)
 

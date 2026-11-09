@@ -36,7 +36,7 @@ if (what !== 'sets') {
 
 if (what !== 'cast') {
   const { listKits, getKit } = await imp('engine/set/kits/index.mjs');
-  out.push('## Kits', '', 'Anchor types: ground (stand here), surface (stand on a prop top), perch (branch; perch rigs only), hollow (inside a prop, clipped), view (a far landmark to frame or look at, not to stand on). s = actor scale there.', '');
+  out.push('## Kits', '', 'Anchor types: ground (stand here), surface (stand on a prop top: walk there and the actor jumps up), perch (branch; perch rigs only), hollow (an opening in a prop: the actor jumps in and is drawn clipped to it, in front of a dark hole), view (a far landmark to frame or look at, not to stand on). s = actor scale there.', '');
   for (const k of listKits()) {
     const name = typeof k === 'string' ? k : k.id ?? k.name, S = getKit(name)({});
     const b = S.bounds, amb = S.ambience ?? S.def?.ambience ?? {};

@@ -78,7 +78,7 @@ field.
 
 ## The demo: Seventy-Six Summers
 
-`films/seventy-six-summers/` is a 3:43 film made with cinecode: 12 scenes, 57 shots, 56 voiced lines. A
+`films/seventy-six-summers/` is a 3:43 film made with cinecode: 12 scenes, 56 shots, 56 voiced lines. A
 hundred-year-old tortoise has one day to cross the valley and keep a promise he made to a six-year-old girl the last
 time the comet came, with a squirrel riding on his shell. Its screenplay, storyboard, custom effects and voice cache
 are all in the folder, so it renders without a key:
@@ -116,9 +116,9 @@ engine/
   audio/                    voices (Gemini TTS + QA + cache), music, synthesis, effects, ambience, the mix
   lint/                     the staging and editing checks and their report
   render/                   CLI commands, contact sheets, parallel encoding, subtitles
-  _legacy/                  an earlier prototype, not used by the CLI
 films/
   seventy-six-summers/      the demo film
+  glim/                     a 27 s film a fresh agent made from one sentence with the skill
   _test/                    a small film used by the tests
 templates/                  what `cinecode new` copies: film.json, screenplay.md, custom.mjs
 docs/                       the reference

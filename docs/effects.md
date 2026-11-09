@@ -80,6 +80,10 @@ A scene's `overlays` list holds custom overlay names or the built-in fields (`le
 `mist`), as a name or `{ "name", "params" }`; an unknown name is a check error. The overlay's `params` arrive in
 `api.params`.
 
+An overlay can follow an actor through the scene, which is how a reskinned rig gets what it lacks (a firefly is a
+butterfly plus a glow, [cast.md](cast.md)): on the `grade` layer, take `api.actor(id)` (null while it isn't drawn), its
+world `box`, and draw at `api.toScreen` of its centre, sized by `api.cam.zoom` × the actor's `s`.
+
 ## Layers
 
 Overlays and custom beats name the layer they draw on. In the order a frame is drawn:
@@ -178,7 +182,7 @@ The full file is `templates/custom.mjs`. After writing an effect, run `check`, t
 of frames across the shot:
 
 ```sh
-node engine/film/sheet.mjs films/<slug> films/<slug>/out/strip.jpg --shots=s01-06@0.2,s01-06@0.4,s01-06@0.6,s01-06@0.8 --cols=4 --tile=480
+node engine/film/sheet.mjs films/<slug> films/<slug>/out/strip.jpg --shots=1.6@0.2,1.6@0.4,1.6@0.6,1.6@0.8 --cols=4 --tile=480
 ```
 
 and make sure it never covers a face or makes a speaker hard to read.

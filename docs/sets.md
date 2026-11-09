@@ -47,10 +47,23 @@ never shows past the painted area.
 | type | meaning |
 |---|---|
 | `ground` | a spot on the ground. An actor sent here stands on it, or on the nearest walkable spot that is not inside a solid prop or another actor. |
-| `surface` | the top of a prop (a stump, a rock, a bench seat, a stepping stone). Walking there walks to the foot of the prop and jumps up. |
-| `perch` | a point on a branch, for rigs that perch (owl, songbird, squirrel, butterfly). Others are warned. |
-| `hollow` | inside a prop (the owl's hollow, the fox's den): the actor is clipped to the opening. |
-| `view` | a far landmark (the valley's): frame it with the camera's `on`, or `look` at it. |
+| `surface` | the top of a prop (a stump, a rock, a bench seat, a stepping stone). Walking there walks to the foot of the prop and jumps up; leaving jumps down first. Fliers fly there. Stepping stones are also hopped across on routes over water. |
+| `perch` | a point on a branch, for rigs that perch (owl, songbird, squirrel, butterfly). Fliers fly there; the squirrel jumps up from the foot of the tree. Others are warned. |
+| `hollow` | an opening in a prop (the owl's hollow, the fox's den), see below. |
+| `view` | a far landmark (the valley's): frame it with the camera's `on`, or `look` at it. Not a place to stand. |
+
+Any anchor can be a camera subject (`"on": ["den"]`): it is framed as a box of about 120 × 110 world px (× the scale
+there), roughly a standing hare, so a small actor framed together with an anchor comes out small.
+
+**Hollows.** An actor sent into a hollow (`"do": "run", "to": "den"`) runs to the foot of the prop and jumps up into
+the opening (a flier flies in); `enter` with `"from": "den"` appears in it and walks out. Inside, the actor is drawn
+clipped to the opening, in front of a dark hole (by day too): by day the occupant stands out against it, at night it shows
+only by the scene's `rim` light or a glow you draw. The openings are small and fixed: the forest's `den` is about 60 × 44
+world px at the foot of the oak (a mouse, a hedgehog, a frog fit; anything taller is cut by the opening); the meadow's
+`owl_hollow` is about 68 × 92 px, 360 px up the owl tree (for the owl, or another flier). The nearest ground is right
+in front of the prop: give it with a `y` (in front of the den, about `x:1490–1550,y:1028`); `x:` alone is the main
+lane, further down. A two-shot of someone in a hollow and someone on the ground in front of it works for small rigs
+(the den sits about 30 px above that ground); the owl's hollow is too high for one: cut between them.
 
 ## Times of day
 
