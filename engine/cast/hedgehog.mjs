@@ -1,8 +1,9 @@
 // The Hedgehog. Legacy spiny dome and pointed face as a full rig: tiny legs that trot under the skirt with planted
 // feet, spines that bristle, a curl into a ball (face and legs tucked away), sniffing, talking and expressions.
+// Round 2 (DESIGN §9.2): st.tilt pitches the face (not when curled); the pupils follow (+1 up, -1 down).
 import { clamp, lerp, ell, rpoly, arcPts } from '../core/lib.mjs';
 import { cel, darken, lighten, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
-import { makeRig, quadFeet, leg, mixPose, plus, jumpAt, ease } from './rig.mjs';
+import { makeRig, quadFeet, leg, mixPose, plus, jumpAt, ease, pitchPose, gaze } from './rig.mjs';
 
 const SH = 1.4;
 // Pose: by body drop, br pitch, ball 0..1 (curl), sp spines raised 0..1, head (hx, hy, hr), paws f1/f2/h1/h2.
@@ -53,13 +54,14 @@ function face(T, p, F, P, o) {
   } else line(T, [[9.6, 2.3], [7.4, 2.9], [5.2, 2.8 - 0.9 * sm]], 0.55, { seed: 235 });
   dot(T, 11.2, 1.1, 1.5, '#1a1210'); dot(T, 11.5, 0.6, 0.45, 'rgba(255,255,255,.5)');
   if (sm > 0.5) fillP(T, ell(2.6, 1.6, 2, 1.1, 236, 0.05), rgba('#e08a80', 0.35 * (sm - 0.4)));
-  eye(T, 3, -1.4, 1.25, 1.55, F.eye, '#1a1210', F.look * 0.3, F.lid, F.tilt, { w: 0.75 });
+  eye(T, 3, -1.4, 1.25, 1.55, F.eye, '#1a1210', gaze(F, 0.3, 1.55), F.lid, F.tilt, { w: 0.75 });
   brow(T, 2.9, -3.9, 3, F.browY * 0.7, F.browT * 0.75, darken(P.face, 0.5), 0.75, 237);
   cel(T, ell(-2.6, -4.8, 2, 1.8, 238, 0.1), darken(P.face, 0.85), SH, 0.75, 238);          // ear
   o.out.head = T.map(2, -0.5); o.out.mouth = T.map(7.4, 2.6 + op * 0.6);
   T.restore();
 }
-function paint(T, p, F, o) {
+function paint(T, p0, F, o) {
+  const p = clamp(p0.ball) > 0.55 ? p0 : pitchPose(p0, F.pitch, { hr: -0.45, hy: -1.5 }, { hr: 0.3 * clamp((-p0.hy - 5) / 3.5), hy: 0.6 * clamp((-p0.hy - 5) / 3.5) });   // st.tilt (not when curled; a low snout can't dip)
   const { P } = o, R = roots(p), b = clamp(p.ball);
   const LG = (near, k, root) => ({ l1: 2.6 * (1 - b * 0.5), l2: 2.4 * (1 - b * 0.5), meta: 0, bend: k[0] === 'f' ? -1 : 1, w: [2.2, 1.7, 1.4], col: near ? P.skin : darken(P.skin, 0.8), paw: [1.7, 0.95], pawCol: near ? darken(P.skin, 0.6) : darken(P.skin, 0.5), sh: SH * 0.5, seed: 240 + k.length, curl: p[k + 'u'], curlA: k[0] === 'f' ? -1 : 0.8, ink: 0.7 });
   if (b < 0.98) { leg(T, R.h2, [p.h2x, p.h2y], LG(false, 'h2')); leg(T, R.f2, [p.f2x, p.f2y], LG(false, 'f2')); leg(T, R.h1, [p.h1x, p.h1y], LG(true, 'h1')); leg(T, R.f1, [p.f1x, p.f1y], LG(true, 'f1')); }

@@ -1,8 +1,9 @@
 // The Badger. Legacy grey body and striped wedge head as a full rig: waddling walk and lumbering bound with
 // planted paws, sits, stands up to cheer, digs, sniffs; pale brows on the black stripe and a hinged dark chin.
+// Round 2 (DESIGN §9.2): st.tilt pitches the head; the pupils follow (+1 up, -1 down).
 import { clamp, lerp, ell, rpoly } from '../core/lib.mjs';
 import { cel, darken, lighten, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
-import { makeRig, quadFeet, leg, spine, mixPose, plus, jumpAt, ease } from './rig.mjs';
+import { makeRig, quadFeet, leg, spine, mixPose, plus, jumpAt, ease, pitchPose, gaze } from './rig.mjs';
 
 const rot = (v, a) => [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a)];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
@@ -60,13 +61,14 @@ function head(T, p, F, P, o) {
   T.restore(); line(T, [...hd, hd[0]], 1.1, { seed: 270, taper: false });
   if (op <= 0.03) line(T, [[16.5, 3.6], [8, 5.6 + Math.max(0, -sm) * 0.4], [3, 6 - 0.3 * sm], [1.2, 5.6 - 1.6 * sm]], 0.8, { seed: 273, color: '#1a1414' });
   dot(T, 19.4, 0.6, 2.3, '#141010'); dot(T, 19.9, -0.1, 0.6, 'rgba(255,255,255,.45)');
-  eye(T, 5, -0.6, 1.5, 1.8, F.eye, '#9a7048', F.look * 0.4, F.lid, F.tilt, { pupilCol: '#140e0c', ink: '#d8d2ca', w: 0.8 });
+  eye(T, 5, -0.6, 1.5, 1.8, F.eye, '#9a7048', gaze(F, 0.4, 1.8), F.lid, F.tilt, { pupilCol: '#140e0c', ink: '#d8d2ca', w: 0.8 });
   brow(T, 4.8, -3.35, 4.6, F.browY * 0.45, F.browT * 0.8, '#d8d2ca', 1.05, 274);
   T.save(); T.translate(-7.5, -8.4); T.rotate(p.ea - 0.2); cel(T, ell(0, -1.6, 3.4, 3, 275, 0.1), P.dark, SH, 0.9, 275); line(T, [[-2.6, -3], [0, -4.6], [2.6, -3]], 0.8, { seed: 276, color: P.face }); T.restore();
   o.out.head = T.map(3, -1); o.out.mouth = T.map(10, 5 + op * 2.5);
   T.restore();
 }
-function paint(T, p, F, o) {
+function paint(T, p0, F, o) {
+  const p = pitchPose(p0, F.pitch, { hr: -0.45, hy: -4, hx: -1 }, { hr: 0.35, hy: 2 });   // st.tilt: a short neck, a modest pitch
   const { P, t } = o, R = roots(p);
   const sp = spine(R.Tb, p.ta + 0.1 * Math.sin(t * 2), 0.4, 11, u => 3.6 - u * 1.6, { n: 8 });
   cel(T, sp.poly, P.coat, SH, 1, 257);

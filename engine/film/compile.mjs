@@ -1,12 +1,18 @@
 // compile(film, { voices }) → plan. Turns the storyboard into timed shots, actor performances (blocking along
 // set routes, poses, gestures, looks, lip sync, idle life), cameras, captions, sound cues and music cues.
 // Times are seconds from the film start; shot boundaries land on frames.
+// Round 2 (DESIGN §9.1): say beats carry `tts` (what is spoken; `text` stays the caption) and `trimEnd`; lines get
+// speak / nonverbal / trimEnd and their id hashes `speak`. `{ "mark": name }` beats fill plan.marks. Riding:
+// hop / place "to": "on:<actor>" and scene actors { "on": "<actor>" }. Wading: walk / run "wade": true, "depth".
+// Look "to": "up" | "sky" | "down" tilts the head. Shots may override "time" and "grade" (with "gradeTo"); a shot's
+// "music" is a cue at its start. Scene "overlays" (built-in fields or custom.mjs overlays) → plan.overlays; scene
+// "rim" → plan.scenes[i].rim. plan.score = film.score, plan.sounds = custom.mjs sounds.
 import { Actor, RouteLeg, JumpLeg, FlyLeg, groundPos, anchorPos } from './actor.mjs';
 import { buildCamera, frameSubjects, clampFrame } from './camera.mjs';
-import { skyList, mixGrade, STORY, isNight } from './grade.mjs';
+import { skyList, mixGrade, mixStory, spanU, STORY, isNight } from './grade.mjs';
 import { chunkCaption } from './text.mjs';
 import { FX_DUR, ONE_SHOT } from './fx.mjs';
-import { MOODS, STINGS } from './validate.mjs';
+import { moodNames, stingNames, MUSIC_EXTRAS, RIM_DEFAULTS } from './validate.mjs';
 import { clamp, hash32, shortHash, parseTarget, rigPose, profile, probe } from './util.mjs';
 
 export const DEFAULT_HOLD = 0.5;
@@ -33,6 +39,7 @@ class Compiler {
     const fmt = film.format || {};
     Object.assign(this, { film, voices, R: film.resolved, W: fmt.width || 1920, H: fmt.height || 1080, fps: fmt.fps || 24, captionMode: fmt.captions || 'dialogue' });
     this.lines = []; this.rawSfx = []; this.fx = []; this.captions = []; this.shots = []; this.scenes = []; this.cards = []; this.custom = []; this.warnings = [];
+    this.marks = {};
   }
   q(t) { return Math.round(t * this.fps) / this.fps; }
   warn(msg) { this.warnings.push(msg); }
@@ -67,22 +74,34 @@ class Compiler {
       return actors.get(id);
     };
     this.rec = rec;
-    // starting places: absolute targets first, then those relative to other actors
-    const entries = Object.entries(sc.actors || {});
+    // starting places in dependency order: absolute targets and offstage actors first, then riders whose carrier and
+    // relative places whose actor is already placed, and so on (a cycle or a missing actor reports itself in place())
     const rel = v => ['near', 'left-of', 'right-of', 'behind', 'front-of'].includes(parseTarget(v).kind);
-    for (const pass of [0, 1]) for (const [id, a] of entries) {
-      if (a.offstage) { if (pass === 0) this.initOff(rec, this.ensure(id), a.offstage, T0, a); continue; }
-      if (rel(a.at) !== !!pass) continue;
-      const A = this.ensure(id), pos = this.place(rec, A, a.at, T0);
-      let face = faceVal(a.face) || faceVal(pos.face) || (pos.faceTo ?? (pos.x < S.refX ? 1 : -1));
-      const poseName = a.pose ?? (pos.mode === 'perch' ? (rigPose(A.rig, 'perch')?.name || 'stand') : 'stand');
-      A.init(T0, pos, face, poseName, { expr: a.expr ?? 'neutral' });
+    const dep = a => (a.offstage ? null : a.on !== undefined ? a.on : rel(a.at) ? parseTarget(a.at).who : null);
+    let left = Object.entries(sc.actors || {});
+    while (left.length) {
+      const ready = left.filter(([, a]) => { const d = dep(a); return d == null || actors.get(d)?.place0 || !sc.actors[d]; }), batch = ready.length ? ready : left;
+      for (const [id, a] of batch) {
+        if (a.offstage) { this.initOff(rec, this.ensure(id), a.offstage, T0, a); continue; }
+        if (a.on !== undefined) {
+          const A = this.ensure(id), C = actors.get(a.on);
+          if (!C?.place0) throw new Error(`scene ${sc.id}: ${id} rides "${a.on}", which is not in the scene`);
+          A.init(T0, C.mountAt(T0, A), faceVal(a.face) || C.faceAt(T0), a.pose ?? (rigPose(A.rig, 'sit')?.name || 'stand'), { expr: a.expr ?? 'neutral', mount: C });
+          continue;
+        }
+        const A = this.ensure(id), pos = this.place(rec, A, a.at, T0);
+        let face = faceVal(a.face) || faceVal(pos.face) || (pos.faceTo ?? (pos.x < S.refX ? 1 : -1));
+        const poseName = a.pose ?? (pos.mode === 'perch' ? (rigPose(A.rig, 'perch')?.name || 'stand') : 'stand');
+        A.init(T0, pos, face, poseName, { expr: a.expr ?? 'neutral' });
+      }
+      left = left.filter(e => !batch.includes(e));
     }
     let t = T0;
     sc.shots.forEach((sh, i) => { t = this.shot(rec, sh, i, t); });
     rec.t1 = t;
-    // music: scene cue (inherited if absent), split by music beats
-    const m = sc.music === undefined ? (prev ? prev.music : undefined) : normMusic(sc.music);
+    // music: scene cue (inherited if absent, as a continuation: mood and intensity only, so it merges into the
+    // previous cue instead of restating the motif or cutting on a downbeat), split by music beats
+    const pm = prev?.music, m = sc.music === undefined ? (pm?.mood ? { mood: pm.mood, intensity: pm.intensity } : pm) : normMusic(sc.music);
     rec.music = m;
     this.scenes.push(rec);
     this.glances(rec);
@@ -103,6 +122,7 @@ class Compiler {
     let gStart = 0, gEnd = 0, maxEnd = 0;
     const byId = {}, srec = { def: sh, id: sh.id, index, t0: T, beats: [], refs: new Set() };
     rec.shots.push(srec); this.srec = srec;
+    if (sh.music !== undefined) { const m = normMusic(sh.music); if (m) rec.musicEv.push({ t: T, m }); }
     for (const b of beats) {
       const pinned = timeAt(b);
       const base = pinned != null ? pinned : b.with === 'prev' ? gStart : b.with ? (byId[b.with]?.start ?? gStart) : gEnd;
@@ -125,6 +145,7 @@ class Compiler {
   beat(rec, srec, b, t) {
     if (b.say !== undefined) return this.say(rec, srec, b, t);
     if (b.wait !== undefined) return b.wait;
+    if (b.mark !== undefined) { this.marks[b.mark] = t; return 0; }
     if (b.sfx !== undefined) {
       const where = b.on ?? b.who ?? (typeof b.at === 'string' ? b.at : null);
       this.rawSfx.push({ t, name: b.sfx, gain: b.gain ?? 1, pan: b.pan, params: { ...(b.params || {}), ...(b.dur ? { dur: b.dur } : {}) }, seed: b.seed, shot: srec.id, where: where ? this.where(rec, where, t) : null });
@@ -154,11 +175,12 @@ class Compiler {
   say(rec, srec, b, t) {
     const film = this.film, who = b.say, narrator = who === 'narrator';
     const key = narrator ? 'narrator' : (film.cast[who]?.voice && film.voices?.[film.cast[who].voice] ? film.cast[who].voice : film.voices?.[who] ? who : film.cast[who]?.voice);
-    const cfg = film.voices?.[key] || {}, text = normText(b.text), tone = joinTones(cfg.tone, b.tone);
-    const id = shortHash(who, cfg.voice ?? '', text, tone);
+    const cfg = film.voices?.[key] || {}, text = normText(b.text), speak = normText(b.tts ?? b.text), tone = joinTones(cfg.tone, b.tone);
+    const id = shortHash(who, cfg.voice ?? '', speak, tone), trimEnd = Math.max(0, Number(b.trimEnd) || 0);
     const v = this.voices.get(id);
-    const dur = Number.isFinite(v?.dur) && v.dur > 0 ? v.dur : estimateLine(text);
-    const line = { id, who, voice: key, tone: b.tone ?? '', text, t0: t, t1: t + dur, vo: !!b.vo, narrator, shot: srec.id, scene: rec.id, estimated: !v };
+    // the voice module returns the trimmed take's length; before voicing, estimate the spoken words minus the cut
+    const dur = Number.isFinite(v?.dur) && v.dur > 0 ? v.dur : Math.max(0.25, estimateLine(speak) - trimEnd);
+    const line = { id, who, voice: key, tone: b.tone ?? '', text, speak, nonverbal: text.startsWith('['), trimEnd, t0: t, t1: t + dur, vo: !!b.vo, narrator, shot: srec.id, scene: rec.id, estimated: !v };
     this.lines.push(line);
     const A = narrator ? null : rec.actors.get(who);
     if (A && A.place0) {
@@ -174,7 +196,7 @@ class Compiler {
     const d = b.do, S = rec.S;
     if (d === 'custom') {
       const dur = b.dur ?? 1, def = this.film.custom?.custom?.[b.name];
-      this.custom.push({ name: b.name, t0: t, t1: t + dur, beat: b, scene: rec.id, shot: srec.id, def });
+      this.custom.push({ name: b.name, t0: t, t1: t + dur, beat: b, scene: rec.id, shot: srec.id, def, params: { ...b, ...(b.params || {}) }, seed: hash32(`${srec.id}|${b.name}|${t.toFixed(3)}`) });
       for (const e of def?.sfx || []) this.rawSfx.push({ t: t + (e.at ?? 0), name: e.name, gain: e.gain ?? 1, pan: e.pan, params: e.params || {}, shot: srec.id, where: null });
       return dur;
     }
@@ -199,7 +221,7 @@ class Compiler {
         return dur;
       }
       case 'look': {
-        const tgt = typeof b.at === 'string' ? b.at : b.to;
+        const tgt = b.to !== undefined ? b.to : typeof b.at === 'string' ? b.at : undefined;
         const target = this.lookTarget(rec, tgt);
         A.lookEv.push({ t, target }); A.lookEv.sort((a, c) => a.t - c.t);
         // turn to face the target if it is behind
@@ -234,7 +256,8 @@ class Compiler {
       }
       case 'place': {
         const where = b.to ?? (typeof b.at === 'string' ? b.at : null), pos = this.place(rec, A, where, t);
-        A.addMove({ t0: t, t1: t, place: pos, legs: [], kind: 'place' });
+        if (pos.mode === 'mount') A.addMove({ t0: t, t1: t, mount: rec.actors.get(pos.carrier), legs: [], kind: 'place' });
+        else A.addMove({ t0: t, t1: t, place: pos, legs: [], kind: 'place' });
         const f = faceVal(b.face) || faceVal(pos.face) || A.faceAt(t);
         A.faceEv.push({ t, face: f }); A.faceEv.sort((a, c) => a.t - c.t);
         if (b.pose) A.setPose(t, b.pose, 0, 'beat');
@@ -258,7 +281,7 @@ class Compiler {
   }
 
   lookTarget(rec, tgt) {
-    if (!tgt || ['none', 'camera', 'left', 'right', 'up', 'sky'].includes(tgt)) return tgt || 'none';
+    if (!tgt || ['none', 'camera', 'left', 'right', 'up', 'sky', 'down'].includes(tgt)) return tgt || 'none';
     if (rec.actors.has(tgt) || this.film.cast[tgt]) return tgt;
     const T = parseTarget(tgt);
     if (T.kind === 'name') { const a = rec.S.anchor(T.name); return { x: a.x, y: a.y }; }
@@ -299,6 +322,12 @@ class Compiler {
   }
   place(rec, A, target, t, from = null) {
     const S = rec.S, T = parseTarget(target);
+    if (T.kind === 'on') {
+      const C = rec.actors.get(T.who);
+      if (!C || !C.place0) throw new Error(`"${T.who}" is not in scene ${rec.id}`);
+      if (C === A || C.carrierAt(t) === A) throw new Error(`${A.id} cannot ride ${C === A ? 'itself' : `its own rider ${C.id}`}`);
+      return { ...C.mountAt(t, A), faceTo: C.faceAt(t) };
+    }
     if (T.kind === 'name') {
       if (S.anchorNames.includes(T.name)) {
         const pos = anchorPos(S, T.name, A.k);
@@ -313,8 +342,10 @@ class Compiler {
       return groundPos(S, x, yy, A.k);
     }
     if (['near', 'left-of', 'right-of', 'behind', 'front-of'].includes(T.kind)) {
-      const O = rec.actors.get(T.who);
+      let O = rec.actors.get(T.who);
       if (!O || !O.place0) throw new Error(`"${T.who}" is not in scene ${rec.id}`);
+      // beside a rider = beside its carrier (the pair stands on the carrier's feet)
+      const C = O.carrierAt(t); if (C && C !== A) { O = C; T.who = C.id; }
       const q = O.posAt(t), oy = q.mode === 'ground' ? q.y : S.laneAt(q.x), sA = S.scaleAt(q.x, oy) * A.k, sO = q.s;
       const gap = this.footprint(A, sA).front + this.footprint(O, sO).front + 0.42 * (A.sz.height * sA + O.sz.height * sO) / 2;
       const fx = from ? from.x : A.place0 ? A.posAt(t).x : q.x - 1;
@@ -449,7 +480,7 @@ class Compiler {
     const endFace = faceVal(b.face) || end.faceTo || moveFace;
     A.faceEv.push({ t: mv.t1, face: endFace, src: mv, flip: endFace !== moveFace });
     A.faceEv.sort((a, c) => a.t - c.t);
-    const endPose = b.pose ?? b.end ?? (end.mode === 'perch' ? (rigPose(A.rig, 'perch')?.name || 'stand') : 'stand');
+    const endPose = b.pose ?? b.end ?? (end.mode === 'perch' ? (rigPose(A.rig, 'perch')?.name || 'stand') : end.mode === 'mount' ? (rigPose(A.rig, 'sit')?.name || 'stand') : 'stand');
     A.setPose(mv.t1, endPose, 0, mv);
     A.sleepEv.push({ t, asleep: false }); A.sleepEv.sort((a, c) => a.t - c.t);
     return total;
@@ -458,10 +489,72 @@ class Compiler {
     this.tNow = t;
     const p0 = A.posAt(t), mult = b.speed ?? 1;
     const gait = b.gait && A.rig.gaits?.[b.gait] ? b.gait : this.gaitFor(A, kind);
+    if (parseTarget(b.to).kind === 'on') return this.hopOn(rec, A, b, t, p0, mult);
+    if (p0.mode === 'mount' && kind !== 'fly') {
+      if (kind !== 'hop') throw new Error(`${A.id} is riding ${p0.carrier}: it can only hop off (do: hop) or be placed`);
+      return this.hopOff(rec, A, b, t, p0, gait, mult);
+    }
+    if (b.wade && (kind === 'walk' || kind === 'run') && p0.mode === 'ground') return this.wade(rec, A, b, t, p0, gait, mult);
     const dest = this.place(rec, A, b.to, t, p0);
     if (Math.hypot(dest.x - p0.x, dest.y - p0.y) < 2 && dest.mode === p0.mode) return this.addMove(A, t, [], kind, dest, b);
     const { legs, end } = this.path(rec, A, p0, dest, kind, gait, mult, { face0: A.faceAt(t) });
     return this.addMove(A, t, legs, kind, end, b, { framing: 'all', from: p0 });
+  }
+  // Hop onto a carrier: hop over to it first if it is out of reach, then jump onto its riding point, which keeps
+  // moving with it during the jump. The rider lands facing the way the carrier faces (unless "face" is given).
+  hopOn(rec, A, b, t, p0, mult) {
+    const C = rec.actors.get(parseTarget(b.to).who), legs = [];
+    this.place(rec, A, b.to, t);                                  // validates the carrier
+    let cur = p0, tj = t;
+    const cp = C.posAt(t), reach = A.sz.height * p0.s * 2.6 + C.sz.width * cp.s * 0.5;
+    if (p0.mode === 'ground' && Math.hypot(cp.x - p0.x, cp.y - p0.y) > reach) {
+      const near = this.place(rec, A, `near:${C.id}`, t, p0), r = this.path(rec, A, p0, near, 'hop', this.gaitFor(A, 'hop'), mult, { face0: A.faceAt(t) });
+      legs.push(...r.legs); cur = groundPos(rec.S, r.end.x, r.end.y, A.k); tj = t + legs.reduce((a, L) => a + L.T, 0);
+    }
+    const Afn = cur.mode === 'mount' && cur.carrier ? (O => τ => O.mountAt(tj + τ, A))(rec.actors.get(cur.carrier)) : null;
+    let J = new JumpLeg({ A: cur, B: C.mountAt(tj + 0.6, A), rig: A.rig, sz: A.sz });
+    const B = C.mountAt(tj + J.T * 0.78, A);
+    J = new JumpLeg({ A: cur, B, rig: A.rig, sz: A.sz, Afn, Bfn: τ => C.mountAt(tj + τ, A) });
+    legs.push(J);
+    return this.addMove(A, t, legs, 'hop', { ...B, faceTo: C.faceAt(tj + J.T) }, b, { framing: 'all', from: p0, mount: C });
+  }
+  // Hop off a carrier: a jump from its (moving) riding point to the target, or to the ground beside the carrier on
+  // the target's side and on from there.
+  hopOff(rec, A, b, t, p0, gait, mult) {
+    const C = rec.actors.get(p0.carrier), S = rec.S, cp = C.posAt(t);
+    const dest = this.place(rec, A, b.to, t, p0), reach = A.sz.height * dest.s * 2.6 + C.sz.width * cp.s * 0.5;
+    let land = dest;
+    if (dest.mode !== 'ground' || Math.hypot(dest.x - cp.x, dest.y - cp.y) > reach) {
+      const side = Math.sign(dest.x - cp.x) || A.faceAt(t), fc = this.footprint(C, cp.s), fa = this.footprint(A, dest.s);
+      const [x, y] = this.walkable(rec, A, cp.x + side * (Math.max(fc.front, fc.back) + fa.w * 0.7 + 8), cp.y, t);
+      land = groundPos(S, x, y, A.k);
+    }
+    const J = new JumpLeg({ A: p0, B: land, rig: A.rig, sz: A.sz, Afn: τ => C.mountAt(t + τ, A) }), legs = [J];
+    let end = land;
+    if (land !== dest) { const r = this.path(rec, A, land, dest, 'hop', gait, mult, { face0: J.face1 }); legs.push(...r.legs); end = r.end; }
+    return this.addMove(A, t, legs, 'hop', end, b, { framing: 'all', from: p0 });
+  }
+  // A walk that may cross water: straight to the target (around actors standing in the way), sinking while in the
+  // water. A target in the water is kept there. Falls back to the dry route when a solid prop is in the way.
+  wade(rec, A, b, t, p0, gait, mult) {
+    const S = rec.S, T = parseTarget(b.to);
+    const dest = T.kind === 'x' || T.kind === 'xy' ? groundPos(S, T.x, T.kind === 'xy' ? T.y : S.laneAt(T.x), A.k) : this.place(rec, A, b.to, t, p0);
+    if (dest.mode !== 'ground') { const r = this.path(rec, A, p0, dest, 'walk', gait, mult, { face0: A.faceAt(t) }); return this.addMove(A, t, r.legs, 'walk', r.end, b, { framing: 'all', from: p0 }); }
+    const s0 = (p0.s + dest.s) / 2, rx = Math.max(10, A.sz.width * s0 * 0.3) * 0.5;
+    const L = Math.hypot(dest.x - p0.x, dest.y - p0.y), n = Math.max(1, Math.ceil(L / 6));
+    for (let i = 1; i < n; i++) {
+      const x = p0.x + (dest.x - p0.x) * i / n, y = p0.y + (dest.y - p0.y) * i / n;
+      if (insideCollider(S, x, y, rx, rx * 0.3)) {
+        this.warn(`${A.id}: a solid prop is in the way of the wade in ${rec.id}; taking the dry route`);
+        const r = this.path(rec, A, p0, this.place(rec, A, b.to, t, p0), 'walk', gait, mult, { face0: A.faceAt(t) });
+        return this.addMove(A, t, r.legs, 'walk', r.end, b, { framing: 'all', from: p0 });
+      }
+    }
+    if (L < 2) return this.addMove(A, t, [], 'walk', dest, b);
+    const P = this.detour(rec, A, [[p0.x, p0.y], [dest.x, dest.y]], s0, t);
+    const speed = (A.sz.speeds[gait] ?? A.sz.speeds.walk ?? 40) * mult, stride = A.sz.stride[gait] ?? A.sz.stride.walk ?? 30;
+    const leg = new RouteLeg({ S, pts: P, k: A.k, gait, speed, stride, face0: A.faceAt(t), rig: A.rig, wade: { depth: b.depth ?? null, height: A.sz.height, sink0: p0.sink || 0 } });
+    return this.addMove(A, t, [leg], b.do === 'run' ? 'run' : 'walk', { ...leg.at(leg.T), faceTo: dest.faceTo }, b, { framing: 'all', from: p0, wade: true });
   }
   // A provisional camera for the shot at time t (used to know where "off screen" is before cameras exist).
   provisional(rec, srec, t, override = {}) {
@@ -520,6 +613,7 @@ class Compiler {
   exit(rec, srec, A, b, t) {
     this.tNow = t;
     const S = rec.S, p0 = A.posAt(t), mult = b.speed ?? 1, T = parseTarget(b.to);
+    if (p0.mode === 'mount') throw new Error(`${A.id} is riding ${p0.carrier}: hop off before it exits`);
     const kind = b.run ? 'run' : 'walk', gait = b.gait && A.rig.gaits?.[b.gait] ? b.gait : this.gaitFor(A, kind);
     let legs, end;
     if (T.kind !== 'side') {
@@ -558,7 +652,8 @@ class Compiler {
     }
     return A.posAt(t);
   }
-  subject(rec, id, t, override) {
+  // win: [t0, t1] of the shot being framed; velocity samples stay inside it (a teleport in the next shot is not motion)
+  subject(rec, id, t, override, win = null) {
     const A = rec.actors.get(id), S = rec.S;
     if (A) {
       if (!A.place0) return null;
@@ -571,32 +666,51 @@ class Compiler {
       const g = moving ? null : A.gest.find(G => t >= G.t0 && t < G.t1);
       const pr = g ? gestureProfile(A, g, t) : profile(A.rig, moving ? 'stand' : A.basePoseName(t), A.paramsAt(t)), s = pos.s;
       const yb = pos.y - (pos.lift || 0) * s, b = pr.box;
-      const box = face > 0 ? [pos.x + b[0] * s, yb + b[1] * s, pos.x + b[2] * s, yb + b[3] * s] : [pos.x - b[2] * s, yb + b[1] * s, pos.x - b[0] * s, yb + b[3] * s];
-      const p1 = A.posAt(t + 0.15), p_ = A.posAt(Math.max(rec.t0, t - 0.15));
-      return { id, box, head: [pos.x + face * pr.head[0] * s, yb + pr.head[1] * s], hh: A.sz.headHeight * s, face, vx: (p1.x - p_.x) / 0.3 };
+      let box = face > 0 ? [pos.x + b[0] * s, yb + b[1] * s, pos.x + b[2] * s, yb + b[3] * s] : [pos.x - b[2] * s, yb + b[1] * s, pos.x - b[0] * s, yb + b[3] * s];
+      // a carrier is framed with its riders (one figure); they move with its framing position (an entrance's end)
+      if (!override) {
+        const real = A.posAt(t), dx = pos.x - real.x, dy = pos.y - real.y;
+        for (const [rid, R] of rec.actors) {
+          if (R === A || !R.place0 || R.carrierAt(t) !== A) continue;
+          const r = this.subject(rec, rid, t, null, win);
+          if (r) box = [Math.min(box[0], r.box[0] + dx), Math.min(box[1], r.box[1] + dy), Math.max(box[2], r.box[2] + dx), Math.max(box[3], r.box[3] + dy)];
+        }
+      }
+      const ta = Math.max(win ? win[0] : rec.t0, t - 0.15), tb = win ? Math.max(ta, Math.min(t + 0.15, win[1] - 1e-3)) : t + 0.15;
+      const p1 = A.posAt(tb), p_ = A.posAt(ta), vx = tb - ta > 0.02 ? (p1.x - p_.x) / (tb - ta) : 0;
+      // the resting head (base pose, on the ground): what close shots compose, ignoring jump and gesture apexes
+      const rest = moving || !g ? pr : profile(A.rig, A.basePoseName(t), A.paramsAt(t)), y0 = A.actionAt(t) === 'fly' ? yb : pos.y;
+      return { id, box, head: [pos.x + face * pr.head[0] * s, yb + pr.head[1] * s], rest: [pos.x + face * rest.head[0] * s, y0 + rest.head[1] * s], hh: A.sz.headHeight * s, face, vx };
     }
     const T = parseTarget(id);
-    let x, y, s;
-    if (T.kind === 'name' && S.anchorNames.includes(T.name)) { const a = S.anchor(T.name); x = a.x; y = a.y; s = a.s; }
+    let x, y, s, raised = false;
+    if (T.kind === 'name' && S.anchorNames.includes(T.name)) { const a = S.anchor(T.name); x = a.x; y = a.y; s = a.s; raised = a.type !== 'ground'; }
     else if (T.kind === 'x' || T.kind === 'xy') { x = T.x; y = T.kind === 'xy' ? T.y : S.laneAt(T.x); s = S.scaleAt(x, y); }
     else return null;
-    return { id, box: [x - 60 * s, y - 110 * s, x + 60 * s, y], head: [x, y - 75 * s], hh: 40 * s, face: 0, vx: 0 };
+    // a ground point is framed like a figure standing there; a raised anchor (a stone's top, a branch, a hollow)
+    // is itself the thing to look at, so close shots centre on it
+    if (raised) return { id, box: [x - 60 * s, y - 60 * s, x + 60 * s, y + 50 * s], head: [x, y], rest: [x, y], hh: 40 * s, face: 0, vx: 0 };
+    return { id, box: [x - 60 * s, y - 110 * s, x + 60 * s, y], head: [x, y - 75 * s], rest: [x, y - 75 * s], hh: 40 * s, face: 0, vx: 0 };
   }
 
   camera(rec, srec) {
     const spec = srec.def.camera || {}, ids = this.subjectIds(rec, srec);
     const size = spec.size || (ids.length ? 'wide' : 'establishing');
     const W = this.W, H = this.H;
-    const cam = buildCamera({ spec, size, ids, subjectsAt: (t, list) => list.map(id => this.subject(rec, id, t)).filter(Boolean), t0: srec.t0, t1: srec.t1, S: rec.S, W, H, seed: hash32(srec.id) });
+    const cam = buildCamera({ spec, size, ids, subjectsAt: (t, list) => list.map(id => this.subject(rec, id, t, null, [srec.t0, srec.t1])).filter(Boolean), t0: srec.t0, t1: srec.t1, S: rec.S, W, H, seed: hash32(srec.id) });
     // depth of field: true/false, a blur radius, or 'auto' (blur grows as the painted set gets enlarged)
     const dof = spec.dof !== undefined ? spec.dof : (size === 'close' || size === 'extreme-close') ? true : 'auto';
-    const t0s = rec.t0, t1s = rec.t1, time = rec.time, story = rec.story, fallback = rec.S.defaultSky;
+    // a shot may override the scene's time of day (blended across the shot) and grade (blended to gradeTo)
+    const def = srec.def, own = def.time !== undefined, fallback = rec.S.defaultSky;
+    const time = own ? def.time : rec.time, t0s = own ? srec.t0 : rec.t0, t1s = own ? srec.t1 : rec.t1;
+    const story = def.grade !== undefined ? STORY[def.grade] ?? null : rec.story, storyTo = def.gradeTo !== undefined ? STORY[def.gradeTo] ?? null : undefined;
+    const skyAt = t => skyList(time, t0s, t1s, t, fallback);
     srec.out = {
       id: srec.id, scene: rec.id, t0: srec.t0, t1: srec.t1, size, move: cam.move, angle: cam.angle, on: ids, set: rec.S, setId: rec.sc.set,
-      cameraAt: cam.cameraAt, dof, frames: cam.frames,
-      skyAt: t => skyList(time, t0s, t1s, t, fallback),
-      gradeAt: t => ({ ...mixGrade(skyList(time, t0s, t1s, t, fallback)), story }),
-      fadeIn: srec.def.fadeIn ?? 0, fadeOut: srec.def.fadeOut ?? 0,
+      cameraAt: cam.cameraAt, dof, frames: cam.frames, time, grade: def.grade ?? rec.gradeName ?? null, gradeTo: def.gradeTo ?? null,
+      skyAt,
+      gradeAt: storyTo === undefined ? t => ({ ...mixGrade(skyAt(t)), story }) : t => ({ ...mixGrade(skyAt(t)), story: mixStory(story, storyTo, spanU(srec.t0, srec.t1, t)) }),
+      fadeIn: def.fadeIn ?? 0, fadeOut: def.fadeOut ?? 0,
     };
     this.shots.push(srec.out);
   }
@@ -621,9 +735,15 @@ class Compiler {
     for (const [id, A] of rec.actors) {
       const rig = A.rig, weight = clamp(Math.sqrt(A.sz.height * A.sz.width) / 90 * A.k, 0.08, 1);
       const out = [];
-      const contact = (t, x, y, s, kind, gait) => {
+      const contact = (t, x, y, s, kind, gait, deep = 0) => {
         if (!A.visibleAt(t)) return;
-        const water = S.inWater(x, y) && !S.onStone(x, y), surf = water ? 'water' : S.surfaceAt(x, y);
+        const water = kind !== 'mount' && S.inWater(x, y) && !S.onStone(x, y), surf = kind === 'mount' ? 'wood' : water ? 'water' : S.surfaceAt(x, y);
+        if (kind === 'mount') { out.push({ t, name: 'land', gain: 0.3 + 0.4 * weight, params: { weight, surface: 'wood' }, x, y, who: id }); return; }
+        if (kind === 'wade') {
+          // feet in the water: soft sloshes that fade as the actor goes under
+          if (deep < 0.6) out.push({ t, name: 'splash', gain: (0.18 + 0.25 * weight) * (1 - deep), params: { size: 0.2 + 0.2 * weight }, x, y, who: id });
+          return;
+        }
         if (kind === 'step') {
           if (water) { out.push({ t, name: 'splash', gain: 0.35 + 0.4 * weight, params: { size: 0.3 + 0.4 * weight }, x, y, who: id }); this.fx.push({ name: 'splash', t0: t, t1: t + 1.2, x, y, s: s * 0.5, seed: hash32(`${id}${t}`), scene: rec.id }); return; }
           out.push({ t, name: FOOT[surf] || 'footstep-grass', gain: 0.3 + 0.45 * weight, params: { weight }, x, y, who: id });
@@ -652,12 +772,15 @@ class Compiler {
               const p0 = L.phaseAt(0), p1 = L.phaseAt(Tm);
               if (steps) for (let n = Math.floor(p0); n <= Math.ceil(p1); n++) for (const st of steps) {
                 const ph = n + st; if (ph <= p0 + 1e-6 || ph > p1) continue;
-                const τ = L.timeOfPhase(ph), p = L.at(τ); contact(t0 + τ, p.x, p.y, p.s, 'step', L.gait);
+                const τ = L.timeOfPhase(ph), p = L.at(τ);
+                if (p.sink > 0) contact(t0 + τ, p.x, p.y, p.s, 'wade', L.gait, p.sink / (A.sz.height * p.s));
+                else contact(t0 + τ, p.x, p.y, p.s, 'step', L.gait);
               }
             }
           } else if (L.type === 'jump') {
-            if (0.27 * L.T <= Tm) contact(t0 + 0.27 * L.T, L.A.x, L.A.y, L.A.s, 'hop');
-            if (0.78 * L.T <= Tm) contact(t0 + 0.78 * L.T, L.B.x, L.B.y, L.B.s, 'land');
+            const a = L.at(0.27 * L.T - 1e-6), b = L.at(0.78 * L.T + 1e-6);
+            if (0.27 * L.T <= Tm) contact(t0 + 0.27 * L.T, a.x, a.mode === 'mount' ? a.ground : a.y, a.s, 'hop');
+            if (0.78 * L.T <= Tm) contact(t0 + 0.78 * L.T, b.x, b.y, b.s, b.mode === 'mount' ? 'mount' : 'land');
           } else if (L.type === 'fly' && (rig.kind === 'owl' || rig.kind === 'songbird')) {
             const n = Math.floor(L.d / L.stride);
             for (let i = 1; i <= n; i += 2) { const τ = (i / Math.max(1, n)) * L.T * 0.8; if (τ <= Tm) { const p = L.at(τ); contact(t0 + τ, p.x, p.y, p.s, 'flap'); } }
@@ -696,12 +819,12 @@ class Compiler {
       for (const e of rec.musicEv) if (e.m?.sting) stings.push({ t: e.t, sting: e.m.sting });
       ev.forEach((e, i) => {
         const t1 = i + 1 < ev.length ? ev[i + 1].t : rec.t1;
-        if (e.m && e.m !== 'none' && e.m.mood && t1 > e.t + 1e-3) out.push({ t0: e.t, t1, mood: e.m.mood, intensity: e.m.intensity ?? 0.5, scene: rec.id });
+        if (e.m && e.m !== 'none' && e.m.mood && t1 > e.t + 1e-3) out.push({ t0: e.t, t1, mood: e.m.mood, intensity: e.m.intensity ?? 0.5, scene: rec.id, ...extras(e.m) });
       });
     }
     // merge touching cues with the same mood and intensity; title cards ride on the first and last cues
     const merged = [];
-    for (const c of out) { const p = merged[merged.length - 1]; if (p && p.mood === c.mood && p.intensity === c.intensity && Math.abs(p.t1 - c.t0) < 1e-3) p.t1 = c.t1; else merged.push({ ...c }); }
+    for (const c of out) { const p = merged[merged.length - 1]; if (p && p.mood === c.mood && p.intensity === c.intensity && !Object.keys(extras(c)).length && Math.abs(p.t1 - c.t0) < 1e-3) p.t1 = c.t1; else merged.push({ ...c }); }
     const open = this.cards.find(c => c.kind === 'open'), end = this.cards.find(c => c.kind === 'end');
     if (merged.length && open && Math.abs(merged[0].t0 - open.t1) < 1e-3) merged[0].t0 = 0;
     if (merged.length && end && Math.abs(merged[merged.length - 1].t1 - end.t0) < 1e-3) merged[merged.length - 1].t1 = end.t1;
@@ -750,20 +873,33 @@ class Compiler {
 
   plan() {
     const scenes = this.scenes, shots = this.shots.sort((a, b) => a.t0 - b.t0), fps = this.fps;
-    const fx = this.fx.map(e => ({ ...e, t1: e.t1 ?? scenes.find(s => s.id === e.scene)?.t1 }));
-    for (const rec of scenes) for (const n of [...(rec.sc.fx || []), ...(rec.sc.overlays || [])]) if (FX_DUR[n] && !ONE_SHOT.has(n)) fx.push({ name: n, t0: rec.t0, t1: rec.t1, scene: rec.id, seed: hash32(`${rec.id}|${n}`), density: 1, fade: false });
+    const fx = this.fx.map(e => ({ ...e, t1: e.t1 ?? scenes.find(s => s.id === e.scene)?.t1 })), overlays = [], custom = this.film.custom?.overlays || {};
+    const field = (rec, n, p = {}) => { if (FX_DUR[n] && !ONE_SHOT.has(n)) fx.push({ name: n, t0: rec.t0, t1: rec.t1, scene: rec.id, seed: hash32(`${rec.id}|${n}`), density: p.density ?? p.n ?? 1, color: p.color, fade: false }); };
+    for (const rec of scenes) {
+      for (const n of rec.sc.fx || []) field(rec, n);
+      (rec.sc.overlays || []).forEach((o, i) => {
+        const name = typeof o === 'string' ? o : o?.name, params = (o && typeof o === 'object' && o.params) || {}, def = custom[name];
+        if (def && typeof def.draw === 'function') overlays.push({ scene: rec.id, name, params, layer: def.layer || 'world', def, seed: hash32(`${rec.id}|${name}|${i}`), t0: rec.t0, t1: rec.t1 });
+        else field(rec, name, params);
+      });
+      // rim light: start is a mark (film time) or seconds from the scene start
+      const r = rec.sc.rim;
+      if (r) rec.rim = { ...RIM_DEFAULTS, ...r, t0: typeof r.start === 'string' ? this.marks[r.start] ?? rec.t0 : rec.t0 + (r.start ?? 0) };
+    }
     const sceneAt = t => scenes.find(s => t >= s.t0 && t < s.t1) ?? null;
     const shotAt = t => { let lo = 0, hi = shots.length - 1, r = null; while (lo <= hi) { const m = (lo + hi) >> 1; if (shots[m].t0 <= t) { r = shots[m]; lo = m + 1; } else hi = m - 1; } return r && t < r.t1 ? r : null; };
     const plan = {
       W: this.W, H: this.H, fps, duration: this.duration, title: this.film.title ?? '', captionMode: this.captionMode,
-      scenes: scenes.map(s => ({ id: s.id, t0: s.t0, t1: s.t1, set: s.sc.set, time: s.time, grade: s.gradeName ?? null, transition: s.transition })),
+      scenes: scenes.map(s => ({ id: s.id, t0: s.t0, t1: s.t1, set: s.sc.set, time: s.time, grade: s.gradeName ?? null, transition: s.transition, rim: s.rim ?? null })),
       shots, lines: this.lines.sort((a, b) => a.t0 - b.t0), sfx: [], ambience: this.ambienceBeds(), music: this.musicCues(),
-      captions: this.captions, cards: this.cards, fx: fx.sort((a, b) => a.t0 - b.t0), custom: this.custom, warnings: this.warnings,
+      captions: this.captions, cards: this.cards, fx: fx.sort((a, b) => a.t0 - b.t0), custom: this.custom, overlays, warnings: this.warnings,
+      marks: { ...this.marks }, score: this.film.score ?? null, sounds: { ...(this.film.custom?.sounds || {}) },
       shotAt, sceneAt,
-      actorsAt: t => {
-        const rec = sceneAt(t); if (!rec) return [];
-        const shot = shotAt(t), out = [];
-        for (const A of rec.actors.values()) { if (!A.place0) continue; const st = A.state(t, fps); st.shot = shot?.id ?? null; out.push(st); }
+      // actors of the scene at t, or of the given scene (the outgoing scene of a dissolve)
+      actorsAt: (t, sceneId = null) => {
+        const rec = sceneId ? scenes.find(s => s.id === sceneId) : sceneAt(t); if (!rec) return [];
+        const shot = shotAt(t), own = shot?.scene === rec.id ? shot : null, out = [];
+        for (const A of rec.actors.values()) { if (!A.place0) continue; const st = A.state(t, fps); st.shot = own?.id ?? rec.shots[rec.shots.length - 1]?.id ?? null; out.push(st); }
         return out.sort((a, b) => a.key - b.key);
       },
       cast: Object.fromEntries(Object.entries(this.film.cast || {}).map(([id, c]) => [id, { rig: c.rig, name: c.name ?? id, scale: c.scale ?? 1 }])),
@@ -789,12 +925,15 @@ function insideCollider(S, x, y, gx, gy) {
   for (const c of S.colliders()) { const dx = (x - c.x) / (c.rx + gx), dy = (y - c.y) / (c.ry + gy); if (dx * dx + dy * dy < 1) return true; }
   return false;
 }
+// A music cue: { mood, intensity, motif?, motifVoice?, hold?, downbeat?, tempo? } | { sting } | 'none'. The extras come
+// from the music object or from the beat's own fields.
+const extras = o => { const e = {}; for (const k of MUSIC_EXTRAS) if (o?.[k] !== undefined) e[k] = o[k]; return e; };
 function normMusic(v, b = {}) {
   if (v === undefined) return undefined;
   if (v === 'none' || v === null || v === false) return 'none';
   if (v === 'sting') return b.name || b.sting ? { sting: b.name ?? b.sting } : undefined;
-  if (v === true || v === 'cue') return b.mood ? { mood: b.mood, intensity: b.intensity ?? 0.5 } : b.sting ? { sting: b.sting } : undefined;
-  if (typeof v === 'string') return MOODS.includes(v) ? { mood: v, intensity: b.intensity ?? 0.5 } : STINGS.includes(v) ? { sting: v } : undefined;
-  if (typeof v === 'object') return v.sting ? { sting: v.sting } : v.mood ? { mood: v.mood, intensity: v.intensity ?? 0.5 } : undefined;
+  if (v === true || v === 'cue') return b.mood ? { mood: b.mood, intensity: b.intensity ?? 0.5, ...extras(b) } : b.sting ? { sting: b.sting } : undefined;
+  if (typeof v === 'string') return moodNames().includes(v) ? { mood: v, intensity: b.intensity ?? 0.5, ...extras(b) } : stingNames().includes(v) ? { sting: v } : undefined;
+  if (typeof v === 'object') return v.sting ? { sting: v.sting } : v.mood ? { mood: v.mood, intensity: v.intensity ?? 0.5, ...extras(b), ...extras(v) } : undefined;
   return undefined;
 }

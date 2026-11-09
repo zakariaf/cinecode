@@ -5,24 +5,24 @@
   "score": { "key": "C", "motif": "G4:1 E4:0.5 G4:0.5 A4:2 C5:3" },
   "voices": {
     "narrator":     { "voice": "Vindemiatrix", "tone": "gentle, bedtime story" },
-    "pebble":       { "voice": "Algenib",      "tone": "old, slow, dry" },
-    "young_pebble": { "voice": "Algenib",      "tone": "young, steady" },
-    "fidget":       { "voice": "Puck",         "tone": "quick, cheeky" },
-    "nell":         { "voice": "Sulafat",      "tone": "warm, elderly" },
-    "young_nell":   { "voice": "Leda",         "tone": "small girl" },
-    "hollis":       { "voice": "Enceladus",    "tone": "drowsy, dry" }
+    "pebble":       { "voice": "Algenib",      "tone": "old, dry, unhurried, few words" },
+    "young_pebble": { "voice": "Algenib",      "tone": "younger, lighter, same dry delivery" },
+    "fidget":       { "voice": "Puck",         "tone": "upbeat, rapid-fire" },
+    "nell":         { "voice": "Sulafat",      "tone": "elderly woman, slightly creaky, wry" },
+    "young_nell":   { "voice": "Leda",         "tone": "a six-year-old girl, small, serious" },
+    "hollis":       { "voice": "Enceladus",    "tone": "drowsy, clipped, academic" }
   },
   "cast": {
     "pebble":       { "rig": "tortoise", "name": "Pebble", "voice": "pebble", "scale": 1.35,
                       "params": { "shell": "#4b4630", "skin": "#8c8a6e", "rim": "#7a7056", "seam": "#2e2a1c", "moss": "#6e8b3d", "star": 0.35, "starCol": "#ede6d0", "lids": 0.6, "eye": "#3a2412", "iris": "#b07a2a" } },
-    "young_pebble": { "rig": "tortoise", "name": "Young Pebble", "voice": "young_pebble", "scale": 0.55,
+    "young_pebble": { "rig": "tortoise", "name": "Young Pebble", "voice": "young_pebble", "scale": 0.4,
                       "params": { "shell": "#9a6b32", "skin": "#a7a47f", "rim": "#d8b07a", "star": 1, "starCol": "#ede6d0", "moss": null } },
     "fidget":       { "rig": "squirrel", "name": "Fidget", "voice": "fidget",
                       "params": { "coat": "#c8562a", "cream": "#f1dec0", "tail": 1.35 } },
     "nell":         { "rig": "human", "name": "Nell", "voice": "nell",
                       "params": { "age": "elder", "build": "slight", "skin": "#c99a72", "hairStyle": "bun", "hair": "#d9d6d0", "glasses": "#b08a3a", "scarf": "#5e7b3f", "shirt": "#cdbfa3", "bottom": "skirt", "dress": "#5f6f8c", "shoes": "#4a3a2c" } },
     "young_nell":   { "rig": "human", "name": "Young Nell", "voice": "young_nell",
-                      "params": { "age": "child", "skin": "#c99a72", "hairStyle": "braids", "hair": "#3b2a20", "scarf": "#5e7b3f", "bottom": "dress", "dress": "#d9a441", "shirt": "#d9a441", "shoes": null } },
+                      "params": { "age": "child", "skin": "#c99a72", "hairStyle": "braids", "hair": "#3b2a20", "scarf": "#5e7b3f", "scarfLength": 1.6, "bottom": "dress", "dress": "#d9a441", "shirt": "#d9a441", "shoes": null } },
     "hollis":       { "rig": "owl", "name": "Hollis", "voice": "hollis", "params": { "body": "#8a6a45", "wing": "#76583a" } },
     "frog":         { "rig": "frog", "name": "Frog", "params": { "skin": "#6f8f3a" } }
   },
@@ -40,38 +40,48 @@
       "music": { "mood": "wonder", "intensity": 0.35 }, "ambience": "meadow-night",
       "actors": {
         "young_nell":   { "at": "stone_left", "face": "left", "pose": "sit-ground" },
-        "young_pebble": { "at": "x:2190", "face": "right", "pose": "rest" }
+        "young_pebble": { "at": "x:2060", "face": "right", "pose": "rest" }
       },
       "shots": [
-        { "id": "1.1", "camera": { "size": "establishing", "on": ["stone_front"], "move": "push-in" }, "fadeIn": 0.5,
+        { "id": "1.1", "note": "PROMISE WIDE (locked composition 1): the same camera in 1.1, 1.6, 1.7 and 10.4",
+          "camera": { "size": "establishing", "on": ["stone_front"], "move": "push-in", "zoomTo": 1.04 }, "fadeIn": 0.5,
           "beats": [
-            { "say": "narrator", "text": "Once in a long life, a star with a tail comes back.", "tone": "softly", "at": 0.2 }
-          ], "hold": 0.6 },
-        { "id": "1.2", "camera": { "size": "medium", "on": ["young_nell", "young_pebble"] },
+            { "say": "narrator", "text": "Once in a long life, a star with a tail comes back.", "tone": "gentle, bedtime-slow", "at": 0.17 }
+          ], "dur": 4.0 },
+        { "id": "1.2", "note": "PROMISE TWO-SHOT (locked composition 2): framed on anchors, so 1.2, 1.5, 8.1 and 10.2 are identical",
+          "camera": { "size": "full", "on": ["crest", "stone_left"], "zoom": 0.8 },
           "beats": [
-            { "do": "gesture", "who": "young_nell", "name": "point", "at": 0.2 },
-            { "say": "young_nell", "text": "When it comes back, will you be here?", "tone": "earnest", "with": "prev" },
-            { "do": "look", "who": "young_pebble", "to": "sky" },
-            { "do": "look", "who": "young_pebble", "to": "young_nell", "after": 0.5 },
-            { "say": "young_pebble", "text": "I'll be here.", "tone": "steady", "after": 0.3 }
-          ], "hold": 0.5 },
+            { "do": "look", "who": "young_nell", "to": "sky", "at": 0.7 },
+            { "do": "gesture", "who": "young_nell", "name": "point", "with": "prev" },
+            { "say": "young_nell", "text": "When it comes back, will you be here?", "tone": "small, earnest", "with": "prev", "after": 0.45 },
+            { "say": "young_pebble", "text": "I'll be here.", "tone": "steady", "after": 0.7 },
+            { "do": "look", "who": "young_pebble", "to": "sky", "at": 1.6 },
+            { "do": "look", "who": "young_nell", "to": "young_pebble", "at": 3.4 },
+            { "do": "look", "who": "young_pebble", "to": "young_nell", "at": 3.6 }
+          ], "hold": 0.4 },
         { "id": "1.3", "camera": { "size": "close", "on": ["young_nell"] },
-          "beats": [ { "say": "young_nell", "text": "Promise?", "tone": "solemn", "at": 0.2 } ], "hold": 0.5 },
+          "beats": [ { "say": "young_nell", "text": "Promise?", "tone": "solemn", "at": 0.25 } ], "hold": 0.45 },
         { "id": "1.4", "camera": { "size": "close", "on": ["young_pebble"] },
-          "beats": [ { "say": "young_pebble", "text": "Promise.", "tone": "simple", "at": 0.3 } ], "hold": 0.6 },
-        { "id": "1.5", "camera": { "size": "medium", "on": ["young_nell", "young_pebble"] },
+          "beats": [ { "say": "young_pebble", "text": "Promise.", "tone": "simple", "at": 0.3 } ], "hold": 0.5 },
+        { "id": "1.5", "camera": { "size": "full", "on": ["crest", "stone_left"], "zoom": 0.8 },
           "beats": [
-            { "do": "emote", "who": "young_nell", "expr": "angry", "at": 0.2 },
-            { "say": "young_nell", "text": "Don't be late.", "tone": "stern, bossy" },
+            { "do": "emote", "who": "young_nell", "expr": "angry", "at": 0.15 },
+            { "say": "young_nell", "text": "Don't be late.", "tone": "stern, bossy", "after": 0.35 },
             { "say": "young_pebble", "text": "I'm a tortoise.", "tone": "deadpan", "after": 0.4 },
-            { "do": "gesture", "who": "young_nell", "name": "laugh", "after": 0.2 },
-            { "say": "young_nell", "text": "[laughs]", "tts": "Hahaha!", "tone": "giggling", "with": "prev" },
-            { "do": "gesture", "who": "young_nell", "name": "point" },
-            { "do": "emote", "who": "young_nell", "expr": "happy" },
-            { "do": "pose", "who": "young_nell", "pose": "sit-ground", "dur": 0.4 },
-            { "sfx": "hum", "caption": "[hums]", "params": { "notes": "G4:1 E4:0.5 G4:0.5 A4:2 C5:3", "tempo": 100, "voice": "child" } }, { "wait": 4.6, "with": "prev" }
-          ], "hold": 0.2 },
-        { "id": "1.6", "camera": { "size": "establishing", "on": ["stone_front"] }, "time": { "from": "night", "to": "dawn" }, "grade": "memory", "gradeTo": "none",
+            { "do": "emote", "who": "young_nell", "expr": "laughing", "after": 0.1 },
+            { "say": "young_nell", "text": "[laughs]", "tts": "Hahaha!", "tone": "delighted giggle", "with": "prev" },
+            { "do": "look", "who": "young_nell", "to": "sky", "with": "prev", "after": 0.2 },
+            { "do": "gesture", "who": "young_nell", "name": "point", "with": "prev", "after": 0.2, "note": "one star in the sky" },
+            { "do": "look", "who": "young_nell", "to": "young_pebble", "with": "prev", "after": 1.45 },
+            { "do": "gesture", "who": "young_nell", "name": "point", "with": "prev", "after": 1.5, "note": "and one on his back" },
+            { "say": "young_nell", "text": "[laughs]", "tts": "Hehehe!", "tone": "still giggling", "with": "prev", "after": 2.0 },
+            { "do": "emote", "who": "young_nell", "expr": "happy", "after": 0.25 },
+            { "do": "look", "who": "young_nell", "to": "sky", "with": "prev" },
+            { "sfx": "hum", "caption": "[hums]", "params": { "notes": "G4:1 E4:0.5 G4:0.5 A4:2 C5:3", "tempo": 100, "voice": "child" }, "after": 0.25 },
+            { "wait": 4.3, "with": "prev" }
+          ], "hold": 0.15 },
+        { "id": "1.6", "note": "THE TIME-LAPSE, in PROMISE WIDE",
+          "camera": { "size": "establishing", "on": ["stone_front"] }, "time": { "from": "night", "to": "dawn" }, "grade": "memory", "gradeTo": "none",
           "beats": [
             { "do": "custom", "name": "timelapse", "dur": 4.0, "at": 0 },
             { "do": "fade", "who": "young_nell", "to": 0, "dur": 1.2, "at": 0.2 },
@@ -83,442 +93,531 @@
     },
     {
       "id": "s01b", "set": "hill", "time": "dawn", "overlays": [{ "name": "comet", "params": { "mode": "faint" } }],
-      "music": "none", "ambience": "wind-hill",
+      "music": "none", "ambience": "wind-hill", "transition": "cut",
       "actors": {},
       "shots": [
         { "id": "1.7", "camera": { "size": "establishing", "on": ["stone_front"] },
           "beats": [
             { "sfx": "birdsong", "at": 0 },
-            { "title": "SEVENTY-SIX SUMMERS", "at": 0.4, "dur": 3.0 }
-          ], "dur": 3.6 }
+            { "title": "SEVENTY-SIX SUMMERS", "at": 0.3, "dur": 3.0 }
+          ], "dur": 3.5 }
       ]
     },
     {
-      "id": "s02", "set": "meadow", "time": "dawn", "overlays": [{ "name": "far-hill", "params": { "frac": 0.04, "dayT": 0.03 } }],
-      "music": { "mood": "pastoral", "intensity": 0.35 },
+      "id": "s02", "set": "meadow", "time": "dawn",
+      "overlays": [{ "name": "far-hill", "params": { "frac": 0.04, "dayT": 0.03 } }],
+      "music": { "mood": "pastoral", "intensity": 0.35, "motif": 4, "motifVoice": "bassoon", "tempo": 46 },
       "actors": {
         "hollis": { "at": "low_branch", "face": "right", "pose": "sleep" },
         "fidget": { "at": "branch_tip", "face": "left", "pose": "perch" },
-        "pebble": { "at": "x:330,y:1050", "face": "right" }
+        "pebble": { "at": "x:-90,y:1095", "face": "right" }
       },
       "shots": [
-        { "id": "2.1", "camera": { "size": "wide", "on": ["hollis", "pebble"], "move": "pan" },
+        { "id": "2.1", "note": "Pebble's head and shell nose in at frame left: one step, a long pause, another",
+          "camera": { "size": "establishing", "zoom": 1.5, "on": ["hollis", "meadow_left"], "move": "pan", "moveAt": 0, "moveDur": 2.2 },
           "beats": [
-            { "do": "walk", "who": "pebble", "to": "x:430,y:1050", "at": 0 },
-            { "do": "hop", "who": "fidget", "to": "tree_foot", "at": 1.6 }
+            { "do": "walk", "who": "pebble", "to": "x:-55,y:1095", "at": 0.3 },
+            { "do": "hop", "who": "fidget", "to": "x:400,y:1140", "at": 1.7 },
+            { "do": "walk", "who": "pebble", "to": "x:-20,y:1095", "at": 2.2 }
           ], "dur": 3.2 },
         { "id": "2.2", "camera": { "size": "medium", "on": ["fidget", "pebble"] },
           "beats": [
-            { "do": "walk", "who": "pebble", "to": "x:480,y:1050", "at": 0 },
-            { "say": "fidget", "text": "Morning, boulder! Where you headed?", "tone": "bright", "at": 0.2, "expr": "happy" },
+            { "do": "walk", "who": "pebble", "to": "x:120,y:1095", "at": 0 },
+            { "do": "look", "who": "fidget", "to": "pebble", "at": 0 },
+            { "say": "fidget", "text": "Morning, boulder! Where you headed?", "tone": "bright, rapid-fire", "at": 0.25, "expr": "happy" },
             { "say": "pebble", "text": "The standing stone. Tonight.", "tone": "slow, gravel", "after": 0.6 }
-          ], "hold": 0.5 },
+          ], "hold": 0.4 },
         { "id": "2.3", "camera": { "size": "full", "on": ["fidget"] },
           "beats": [
-            { "say": "fidget", "text": "At this speed? You'll get there next spring!", "tone": "delighted", "at": 0.2, "expr": "laugh" },
-            { "do": "gesture", "who": "fidget", "name": "laugh" },
-            { "say": "fidget", "text": "[laughs]", "tts": "Ha! Ha ha ha!", "tone": "cackling", "with": "prev" }
-          ], "hold": 0.3 },
+            { "do": "walk", "who": "pebble", "to": "x:255,y:1095", "at": 0 },
+            { "say": "fidget", "text": "At this speed? You'll get there next spring!", "tone": "delighted", "at": 0.15, "expr": "smug" },
+            { "do": "pose", "who": "fidget", "pose": "flop", "dur": 0.3, "expr": "laugh" },
+            { "do": "gesture", "who": "fidget", "name": "laugh", "with": "prev" },
+            { "say": "fidget", "text": "[laughs]", "tts": "Ha! Ha ha ha!", "tone": "cackling", "with": "prev" },
+            { "music": { "mood": "playful", "intensity": 0.35 }, "with": "prev" }
+          ], "hold": 0.4 },
         { "id": "2.4", "camera": { "size": "full", "on": ["hollis", "fidget"] },
           "beats": [
-            { "say": "hollis", "text": "Then he'll be seventy-five years early for the next comet.", "tone": "dry, half asleep", "at": 0.3 },
+            { "do": "walk", "who": "pebble", "to": "x:400,y:1095", "at": 0 },
+            { "say": "hollis", "text": "Then he'll be seventy-five years early for the next comet.", "tone": "bone-dry, drowsy, eyes shut", "at": 0.3 },
             { "do": "pose", "who": "fidget", "pose": "alert", "dur": 0.3 },
-            { "do": "look", "who": "fidget", "to": "hollis" }
+            { "do": "look", "who": "fidget", "to": "up", "with": "prev" }
           ], "hold": 0.5 },
         { "id": "2.5", "camera": { "size": "close", "on": ["hollis"] },
           "beats": [
-            { "do": "emote", "who": "hollis", "expr": "one-eye", "at": 0.3 },
-            { "say": "hollis", "text": "When the standing stone goes dark, the comet blooms.", "tone": "pedantic", "after": 0.3 }
+            { "do": "walk", "who": "pebble", "to": "x:540,y:1095", "at": 0 },
+            { "do": "pose", "who": "hollis", "pose": "sit", "at": 0.2, "dur": 0.2 },
+            { "do": "emote", "who": "hollis", "expr": "one-eye", "with": "prev" },
+            { "do": "look", "who": "hollis", "to": "pebble", "after": 0.2 },
+            { "say": "hollis", "text": "When the standing stone goes dark, the comet blooms.", "tone": "pedantic, correcting homework", "with": "prev" }
           ], "hold": 0.5 },
-        { "id": "2.6", "camera": { "size": "medium", "on": ["hollis"] },
+        { "id": "2.6", "camera": { "size": "medium", "on": ["hollis"], "zoom": 0.6 },
           "beats": [
+            { "do": "walk", "who": "pebble", "to": "x:680,y:1095", "at": 0 },
+            { "do": "emote", "who": "hollis", "expr": "sleepy", "at": 0.1 },
             { "say": "hollis", "text": "Take the stream. Now kindly go aw—", "tts": "Take the stream. Now kindly go away.", "trimEnd": 0.22, "tone": "drifting off", "at": 0.2 },
-            { "do": "emote", "who": "hollis", "expr": "sleepy" },
-            { "do": "pose", "who": "hollis", "pose": "sleep", "dur": 0.6 },
+            { "do": "sleep", "who": "hollis" },
             { "sfx": "snore", "with": "prev", "caption": "[snores]", "dur": 2.0 }
-          ], "hold": 1.2 },
-        { "id": "2.7", "camera": { "size": "wide", "on": ["pebble", "fidget"], "move": "track" },
+          ], "hold": 1.0 },
+        { "id": "2.7", "camera": { "size": "wide", "on": ["pebble", "fidget"], "move": "track", "zoom": 0.75, "angle": "low" },
           "beats": [
-            { "do": "walk", "who": "pebble", "to": "x:760,y:1050", "at": 0 },
-            { "do": "look", "who": "fidget", "to": "right", "at": 0.1 },
-            { "do": "hop", "who": "fidget", "to": "on:pebble", "at": 0.9 },
-            { "say": "fidget", "text": "Got a name, Old Shell?", "tone": "friendly", "after": 0.2 },
+            { "do": "walk", "who": "pebble", "to": "x:860,y:1095", "at": 0 },
+            { "do": "pose", "who": "fidget", "pose": "sit", "at": 0, "dur": 0.2 },
+            { "do": "look", "who": "fidget", "to": "hollis", "at": 0.05 },
+            { "do": "look", "who": "fidget", "to": "right", "at": 0.4 },
+            { "do": "look", "who": "fidget", "to": "pebble", "at": 0.75 },
+            { "do": "hop", "who": "fidget", "to": "on:pebble", "at": 1.0 },
+            { "say": "fidget", "text": "Got a name, Old Shell?", "tone": "friendly", "after": 0.1 },
             { "say": "pebble", "text": "Yes.", "tone": "flat", "after": 1.0 },
-            { "do": "emote", "who": "fidget", "expr": "surprised", "after": 0.3 }
-          ], "hold": 1.2 }
+            { "do": "look", "who": "fidget", "to": "pebble", "after": 0.3 },
+            { "do": "emote", "who": "fidget", "expr": "surprised", "with": "prev" }
+          ], "hold": 1.0 }
       ]
     },
     {
-      "id": "s03", "set": "stream", "time": "noon", "overlays": [{ "name": "far-hill", "params": { "frac": 0.07, "dayT": 0.4 } }],
+      "id": "s03", "set": "stream", "time": "noon",
+      "overlays": [{ "name": "far-hill", "params": { "frac": 0.07, "dayT": 0.4 } }],
       "music": { "mood": "playful", "intensity": 0.35 },
       "actors": {
-        "pebble": { "at": "bank_left", "face": "right", "pose": "stand" },
+        "pebble": { "at": "x:1035,y:1052", "face": "right", "pose": "stand" },
         "fidget": { "on": "pebble", "face": "right", "pose": "stand" },
         "frog":   { "at": "frog_rock", "face": "left" }
       },
       "shots": [
-        { "id": "3.1", "camera": { "size": "wide", "on": ["pebble", "stone_2"] },
+        { "id": "3.1", "camera": { "size": "wide", "on": ["pebble", "frog"], "zoom": 0.7 },
           "beats": [
+            { "do": "set", "who": "fidget", "params": { "tail": 1.35 }, "at": 0 },
             { "do": "gesture", "who": "fidget", "name": "point", "at": 0.2 },
-            { "say": "fidget", "text": "Easy! Big step!", "tone": "cheerful", "with": "prev" },
-            { "say": "fidget", "text": "Bigger step.", "tone": "less sure", "after": 0.6 },
+            { "say": "fidget", "text": "Easy! Big step!", "tone": "cheerful, useless", "with": "prev" },
+            { "do": "gesture", "who": "fidget", "name": "point", "after": 0.5 },
+            { "say": "fidget", "text": "Bigger step.", "tone": "less sure", "with": "prev" },
             { "say": "fidget", "text": "Much bigger step.", "tone": "doubtful", "after": 0.6, "expr": "worried" }
-          ], "hold": 0.5 },
-        { "id": "3.2", "camera": { "size": "close", "on": ["pebble"] },
+          ], "hold": 0.4 },
+        { "id": "3.2", "note": "the water's edge: the reflection shows him the sky; the comet glints in it on the flute's A",
+          "camera": { "size": "close", "on": ["pebble"], "offset": [0.05, -0.24] },
+          "music": { "mood": "mystery", "intensity": 0.28, "motif": 4, "motifVoice": "flute", "tempo": 72 },
           "beats": [
             { "do": "look", "who": "pebble", "to": "down", "at": 0 },
-            { "do": "custom", "name": "reflection", "dur": 2.6, "at": 0 }
+            { "do": "custom", "name": "reflection", "dur": 2.6, "at": 0, "glint": 1.67 }
           ], "dur": 2.6 },
-        { "id": "3.3", "camera": { "size": "full", "on": ["pebble"], "move": "track" },
+        { "id": "3.3", "note": "the wade: straight in beside the stones; the shell goes under, Fidget on tiptoe stays chin-deep",
+          "camera": { "size": "medium", "on": ["pebble", "frog"] },
           "beats": [
-            { "do": "walk", "who": "pebble", "to": "x:1300,y:1052", "wade": true, "at": 0 },
-            { "do": "pose", "who": "fidget", "pose": "alert", "at": 0.5, "dur": 0.3 },
-            { "sfx": "slosh", "at": 0.4 },
+            { "do": "walk", "who": "pebble", "to": "x:1620,y:1088", "wade": true, "depth": 62, "speed": 2.2, "at": 0 },
+            { "do": "pose", "who": "fidget", "pose": "alert", "at": 1.1, "dur": 0.3, "expr": "worried" },
+            { "sfx": "slosh", "at": 0.9, "dur": 1.6 },
             { "fx": "splash", "at": "pebble", "with": "prev" },
-            { "do": "look", "who": "frog", "to": "pebble", "at": 1.6 },
-            { "sfx": "bubbles", "at": 2.0 }
-          ], "dur": 3.6 },
+            { "do": "look", "who": "frog", "to": "pebble", "at": 1.8 },
+            { "sfx": "bubbles", "at": 2.6 }
+          ], "dur": 3.8 },
         { "id": "3.4", "camera": { "size": "full", "on": ["pebble", "frog"] },
           "beats": [
-            { "do": "place", "who": "pebble", "at": "bank_right", "face": "right" },
-            { "do": "set", "who": "fidget", "params": { "coat": "#8e3c1e", "tail": 0.6 }, "pose": "sit" },
-            { "do": "set", "who": "pebble", "params": { "wet": 1 } },
-            { "sfx": "drip", "with": "prev" },
-            { "sfx": "frog-croak", "at": 0.5, "caption": "[croak]" },
-            { "say": "fidget", "text": "Don't ask.", "tone": "flat, dripping", "after": 0.8, "expr": "sad" },
-            { "music": "sting", "name": "plunk", "with": "prev" }
-          ], "hold": 0.8 }
+            { "do": "place", "who": "pebble", "to": "x:1650,y:1062", "face": "right", "at": 0 },
+            { "do": "set", "who": "fidget", "params": { "coat": "#8e3c1e", "tail": 0.45 }, "pose": "sit", "expr": "sad", "at": 0 },
+            { "do": "set", "who": "pebble", "params": { "wet": 1 }, "at": 0 },
+            { "do": "look", "who": "frog", "to": "pebble", "at": 0 },
+            { "sfx": "drip", "at": 0.1 },
+            { "do": "set", "who": "pebble", "params": { "wet": 0.85 }, "at": 1.0 },
+            { "music": "sting", "name": "plunk", "at": 0.5 },
+            { "do": "gesture", "who": "frog", "name": "croak", "at": 0.7 },
+            { "sfx": "frog-croak", "with": "prev", "caption": "[croak]" },
+            { "do": "set", "who": "pebble", "params": { "wet": 0.7 }, "at": 2.0 },
+            { "say": "fidget", "text": "Don't ask.", "tone": "flat, dripping", "at": 2.0 },
+            { "do": "set", "who": "pebble", "params": { "wet": 0.55 }, "at": 3.0 }
+          ], "hold": 0.7 }
       ]
     },
     {
-      "id": "s04", "set": "wayside", "time": "afternoon", "overlays": [{ "name": "far-hill", "params": { "frac": 0.11, "dayT": 0.55 } }, "leaves"],
-      "music": { "mood": "tender", "intensity": 0.3 },
+      "id": "s04", "set": "wayside", "time": "afternoon",
+      "overlays": [{ "name": "far-hill", "params": { "frac": 0.11, "dayT": 0.55 } }, "leaves"],
+      "music": { "mood": "tender", "intensity": 0.28 },
       "actors": {
-        "pebble": { "at": "nap", "face": "right", "pose": "rest", "expr": "sleepy" },
-        "fidget": { "at": "tree_shade", "face": "right", "pose": "sit", "params": { "tail": 1.7 } }
+        "pebble": { "at": "x:1300,y:1022", "face": "right", "pose": "rest", "expr": "sleepy" },
+        "fidget": { "at": "x:1530,y:1012", "face": "left", "pose": "sit" }
       },
       "shots": [
-        { "id": "4.1", "camera": { "size": "wide", "on": ["pebble", "fidget"] }, "beats": [], "dur": 1.6 },
+        { "id": "4.1", "camera": { "size": "establishing", "on": ["pebble", "fidget"], "zoom": 1.15 },
+          "beats": [ { "do": "set", "who": "fidget", "params": { "tail": 1.6 }, "at": 0 } ], "dur": 1.6 },
         { "id": "4.2", "camera": { "size": "medium", "on": ["fidget", "pebble"], "move": "push-in" },
           "beats": [
             { "say": "fidget", "text": "So who's at the stone?", "tone": "casual", "at": 0.3 },
             { "say": "pebble", "text": "A girl.", "tone": "quiet", "after": 0.8 },
             { "say": "pebble", "text": "She showed me the last one.", "tone": "quiet", "after": 0.8 }
-          ], "hold": 0.6 },
+          ], "hold": 0.5 },
         { "id": "4.3", "camera": { "size": "close", "on": ["fidget"] },
           "beats": [
-            { "say": "fidget", "text": "Seventy-six years?", "tone": "working it out", "at": 0.4, "expr": "surprised" },
-            { "do": "emote", "who": "fidget", "expr": "worried", "after": 0.2 },
-            { "say": "fidget", "text": "Old Shell, humans forget.", "tone": "careful, kind", "after": 0.4 },
-            { "do": "look", "who": "fidget", "to": "pebble", "after": 0.2 }
+            { "do": "look", "who": "fidget", "to": "up", "at": 0.1 },
+            { "do": "look", "who": "fidget", "to": "down", "at": 0.45 },
+            { "do": "look", "who": "fidget", "to": "up", "at": 0.8 },
+            { "say": "fidget", "text": "Seventy-six years?", "tone": "working it out", "at": 0.6, "expr": "surprised" },
+            { "do": "look", "who": "fidget", "to": "none", "with": "prev" },
+            { "do": "set", "who": "fidget", "params": { "tail": 1.0 }, "after": 0.1 },
+            { "do": "emote", "who": "fidget", "expr": "worried", "with": "prev" },
+            { "say": "fidget", "text": "Old Shell, humans forget.", "tone": "careful, kinder than he means to be", "after": 0.4 },
+            { "do": "look", "who": "fidget", "to": "pebble", "after": 0.15 }
           ], "hold": 0.5 },
         { "id": "4.4", "camera": { "size": "close", "on": ["pebble"] },
           "beats": [
             { "do": "emote", "who": "pebble", "expr": "neutral", "at": 0.3 },
-            { "say": "pebble", "text": "Then I'll remember for both of us.", "tone": "quiet, final", "after": 0.6, "expr": "determined" }
+            { "do": "blink", "who": "pebble", "with": "prev" },
+            { "say": "pebble", "text": "Then I'll remember for both of us.", "tone": "quiet, final", "after": 0.6 },
+            { "music": { "mood": "tender", "intensity": 0.3, "motif": 4, "motifVoice": "cello" }, "with": "prev" }
           ], "hold": 0.8 },
-        { "id": "4.5", "camera": { "size": "wide", "on": ["pebble", "fidget"], "move": "track" },
+        { "id": "4.5", "camera": { "size": "wide", "on": ["pebble", "fidget"] },
           "beats": [
             { "do": "stand", "who": "pebble", "at": 0 },
-            { "do": "walk", "who": "pebble", "to": "x:1520,y:1040" },
-            { "do": "run", "who": "fidget", "to": "x:1440,y:1046", "at": 1.1 }
-          ], "dur": 2.2 }
+            { "do": "walk", "who": "pebble", "to": "x:1355,y:1030" },
+            { "do": "look", "who": "fidget", "to": "pebble", "at": 0.2 },
+            { "do": "run", "who": "fidget", "to": "x:1440,y:1040", "at": 1.25 }
+          ], "dur": 2.1 }
       ]
     },
     {
-      "id": "s05", "set": "valley", "time": "golden", "overlays": [{ "name": "far-hill", "params": { "frac": 0.2, "dayT": 0.7 } }, "motes"],
-      "music": { "mood": "pastoral", "intensity": 0.45 },
+      "id": "s05", "set": "valley", "time": "golden",
+      "overlays": [{ "name": "far-hill", "params": { "frac": 0.2, "dayT": [0.7, 0.76] } }, { "name": "set-patch", "params": { "k": 0.66, "poly": [[2248, 753], [2249, 707], [2264, 704], [2273, 712], [2272, 753]] } }, "motes"],
+      "music": { "mood": "pastoral", "intensity": 0.45, "motif": 4, "motifVoice": "horn" },
       "actors": {
-        "pebble": { "at": "x:1180,y:1196", "face": "right" },
-        "fidget": { "at": "x:1260,y:1196", "face": "right" }
+        "pebble": { "at": "x:1150,y:1215", "face": "right" },
+        "fidget": { "at": "x:1310,y:1218", "face": "right" }
       },
       "shots": [
         { "id": "5.1", "camera": { "size": "establishing", "on": ["view_forest", "view_stone"], "move": "pan" },
           "beats": [
-            { "do": "walk", "who": "pebble", "to": "x:1230,y:1196", "at": 0 },
-            { "do": "walk", "who": "fidget", "to": "x:1300,y:1196", "at": 0 }
+            { "do": "set", "who": "fidget", "params": { "tail": 1.35 }, "at": 0 },
+            { "do": "walk", "who": "pebble", "to": "x:1205,y:1215", "at": 0 },
+            { "do": "walk", "who": "fidget", "to": "x:1345,y:1218", "speed": 0.6, "at": 0 }
           ], "dur": 3.0 },
         { "id": "5.2", "camera": { "size": "medium", "on": ["pebble", "fidget"], "move": "track" },
           "beats": [
-            { "do": "walk", "who": "pebble", "to": "x:1300,y:1198", "at": 0 },
-            { "do": "run", "who": "fidget", "to": "x:1420,y:1196", "at": 0 },
+            { "do": "walk", "who": "pebble", "to": "x:1285,y:1215", "at": 0 },
+            { "do": "run", "who": "fidget", "to": "x:1470,y:1218", "at": 0 },
             { "do": "turn", "who": "fidget", "face": "left" },
             { "do": "pose", "who": "fidget", "pose": "sit", "dur": 0.2 },
             { "say": "fidget", "text": "How long you been walking?", "tone": "idle" },
-            { "say": "pebble", "text": "Since spring.", "tone": "steady", "after": 0.5 }
-          ], "hold": 0.4 },
-        { "id": "5.3", "camera": { "size": "close", "on": ["fidget"], "move": "push-in" },
+            { "say": "pebble", "text": "Since spring.", "tone": "not breaking stride", "after": 0.5 }
+          ], "hold": 0.3 },
+        { "id": "5.3", "camera": { "size": "medium", "on": ["fidget"], "move": "push-in", "to": "close", "moveAt": 0, "moveDur": 1.6 },
           "beats": [
+            { "do": "walk", "who": "pebble", "to": "x:1335,y:1215", "at": 0 },
             { "do": "emote", "who": "fidget", "expr": "surprised", "at": 0 },
-            { "do": "look", "who": "fidget", "to": "right", "after": 0.4 },
-            { "say": "fidget", "text": "Since SPRING?!", "tts": "Since spring?!", "tone": "stunned", "after": 0.2, "expr": "surprised" },
+            { "do": "look", "who": "fidget", "to": "right", "at": 0.5 },
+            { "say": "fidget", "text": "Since SPRING?!", "tts": "Since spring?!", "tone": "stunned, incredulous", "at": 0.9, "expr": "surprised" },
             { "music": "sting", "name": "stab", "with": "prev" },
-            { "say": "fidget", "text": "Okay. Feet! All four of them! Go, go, go!", "tone": "all in, fast", "after": 0.3, "expr": "determined" },
+            { "say": "fidget", "text": "Okay. Feet! All four of them! Go, go, go!", "tone": "all in, rapid-fire", "after": 0.3, "expr": "determined" },
             { "music": { "mood": "chase", "intensity": 0.55 }, "with": "prev" },
-            { "do": "run", "who": "fidget", "to": "x:1560,y:1196" },
-            { "do": "run", "who": "fidget", "to": "x:1360,y:1196" },
-            { "do": "run", "who": "fidget", "to": "x:1560,y:1196" }
+            { "do": "run", "who": "fidget", "to": "x:1590,y:1224", "after": 0.05 },
+            { "do": "run", "who": "fidget", "to": "x:1480,y:1212" },
+            { "do": "run", "who": "fidget", "to": "x:1600,y:1222" },
+            { "do": "run", "who": "fidget", "to": "x:1490,y:1214" }
           ], "hold": 0.2 }
       ]
     },
     {
-      "id": "s06", "set": "village", "time": { "from": "sunset", "to": "twilight" }, "overlays": [{ "name": "far-hill", "params": { "frac": 0.55, "dayT": [0.78, 0.86] } }],
+      "id": "s06", "set": "village", "time": { "from": "sunset", "to": "twilight" },
+      "overlays": [{ "name": "far-hill", "params": { "frac": 0.55, "dayT": [0.78, 0.86], "trail": 1 } }, { "name": "empty-house" }, { "name": "pressed-trail" }],
       "music": "none", "ambience": "village-night",
       "actors": {
-        "pebble": { "at": "x:640,y:1170", "face": "right" },
-        "fidget": { "at": "x:740,y:1172", "face": "right" }
+        "pebble": { "at": "x:870,y:1182", "face": "right" },
+        "fidget": { "on": "pebble", "face": "right", "pose": "sit" }
       },
       "shots": [
         { "id": "6.1", "camera": { "size": "establishing", "on": ["door_front", "gate"] },
           "beats": [
-            { "sfx": "gate-creak", "at": 0.3, "caption": "[gate creaks]" },
-            { "do": "walk", "who": "pebble", "to": "x:700,y:1170", "at": 0 },
-            { "do": "walk", "who": "fidget", "to": "x:1160,y:1166", "at": 0 }
-          ], "dur": 3.2 },
-        { "id": "6.2", "camera": { "size": "medium", "on": ["fidget", "gate"] },
+            { "do": "set", "who": "fidget", "params": { "coat": "#c8562a", "tail": 1.35 }, "at": 0 },
+            { "sfx": "wind", "at": 0, "dur": 3.0, "gain": 0.5 },
+            { "sfx": "gate-creak", "at": 0.6, "caption": "[gate creaks]" },
+            { "do": "walk", "who": "pebble", "to": "x:960,y:1182", "at": 0 }
+          ], "dur": 3.0 },
+        { "id": "6.2", "camera": { "size": "medium", "on": ["fidget", "pebble", "gate"] },
           "beats": [
-            { "do": "place", "who": "pebble", "to": "x:1010,y:1168", "face": "right", "at": 0 },
-            { "do": "turn", "who": "fidget", "face": "left", "at": 0 },
-            { "do": "pose", "who": "fidget", "pose": "sit", "dur": 0.2, "at": 0 },
-            { "say": "fidget", "text": "Is this her house?", "tone": "hopeful", "at": 0.3, "expr": "happy" },
+            { "do": "walk", "who": "pebble", "to": "x:985,y:1182", "at": 0 },
+            { "do": "look", "who": "fidget", "to": "door_front", "at": 0.1 },
+            { "say": "fidget", "text": "Is this her house?", "tone": "bright, hopeful", "at": 0.3, "expr": "happy" },
             { "do": "gesture", "who": "pebble", "name": "nod", "after": 0.3 },
-            { "do": "look", "who": "pebble", "to": "up" },
-            { "do": "look", "who": "pebble", "to": "none", "after": 0.6 },
-            { "do": "pose", "who": "pebble", "pose": "hide", "dur": 0.8, "expr": "sad" }
-          ], "hold": 0.6 },
+            { "do": "look", "who": "pebble", "to": "door_front" },
+            { "do": "look", "who": "pebble", "to": "bench_front", "after": 0.5 },
+            { "do": "pose", "who": "pebble", "pose": "droop", "dur": 1.0, "expr": "sad", "after": 0.4 }
+          ], "hold": 0.5 },
         { "id": "6.3", "camera": { "size": "close", "on": ["fidget"] },
           "beats": [
-            { "do": "emote", "who": "fidget", "expr": "worried", "at": 0 },
-            { "say": "fidget", "text": "I'm sorry.", "tone": "whisper", "at": 0.3 }
-          ], "hold": 1.0 },
+            { "do": "look", "who": "fidget", "to": "pebble", "at": 0 },
+            { "do": "emote", "who": "fidget", "expr": "worried", "at": 0.1 },
+            { "say": "fidget", "text": "I'm sorry.", "tone": "whispered, low and slow", "at": 0.35 }
+          ], "hold": 0.9 },
         { "id": "6.4", "camera": { "size": "full", "on": ["pebble"] },
           "beats": [
-            { "do": "pose", "who": "pebble", "pose": "stand", "dur": 0.8, "at": 0.2 },
+            { "do": "pose", "who": "pebble", "pose": "stand", "dur": 0.8, "expr": "neutral", "at": 0.15 },
+            { "do": "look", "who": "pebble", "to": "none", "with": "prev" },
             { "say": "pebble", "text": "I promised.", "tone": "low, plain", "after": 0.2 },
-            { "do": "walk", "who": "pebble", "to": "x:1300,y:1172", "after": 0.3 }
+            { "do": "hop", "who": "fidget", "to": "x:900,y:1196", "after": 0.15 },
+            { "do": "walk", "who": "pebble", "to": "x:1100,y:1180", "with": "prev" },
+            { "do": "look", "who": "fidget", "to": "pebble", "after": 0.1 }
           ], "dur": 3.4 },
-        { "id": "6.5", "camera": { "size": "wide", "on": ["lantern_foot", "fidget"] },
+        { "id": "6.5", "note": "the glare goes: the lantern was lit all along; the trail of pressed grass leads from the gate up the hill",
+          "camera": { "size": "wide", "on": ["gate", "lantern_foot", "fidget"], "zoom": 0.8, "angle": "low", "offset": [0, 0.08] },
           "beats": [
-            { "do": "custom", "name": "lantern-reveal", "dur": 4.0, "at": 0 },
-            { "fx": "fireflies", "on": "lantern_foot", "n": 1, "dur": 4.0, "at": 0.6 },
+            { "do": "custom", "name": "lantern-reveal", "dur": 14, "at": 0, "rise": 2.6 },
+            { "do": "walk", "who": "pebble", "to": "x:1200,y:1180", "at": 0 },
             { "do": "look", "who": "fidget", "to": "lantern_foot", "at": 1.0 },
             { "do": "look", "who": "fidget", "to": "up", "at": 2.6 },
-            { "music": { "mood": "mystery", "intensity": 0.2 }, "at": 1.2 }
+            { "music": { "mood": "mystery", "intensity": 0.12 }, "at": 1.2 }
           ], "dur": 4.0 },
-        { "id": "6.6", "camera": { "size": "establishing", "on": ["roof_ridge"], "offset": [300, -260], "move": "push-in", "zoomTo": 2.0 },
-          "beats": [ { "do": "custom", "name": "crest-figure", "dur": 3.0, "at": 0 } ], "dur": 3.0 },
+        { "id": "6.6", "note": "Fidget's POV up the hill: the figure by the stone, the last gold sliding up it",
+          "camera": { "size": "establishing", "on": ["roof_ridge"], "offset": [0, -330], "move": "push-in", "zoomTo": 2.0 },
+          "beats": [
+            { "music": { "mood": "tender", "intensity": 0.18, "motif": 4, "motifVoice": "celesta", "hold": true }, "at": 0 },
+            { "do": "custom", "name": "crest-figure", "dur": 3.0, "at": 0 }
+          ], "dur": 3.0 },
         { "id": "6.7", "camera": { "size": "medium", "on": ["fidget", "pebble"] },
           "beats": [
-            { "do": "run", "who": "fidget", "to": "x:1250,y:1172", "at": 0 },
-            { "say": "fidget", "text": "Old Shell.", "tone": "breathless", "at": 0.3 },
+            { "do": "walk", "who": "pebble", "to": "x:1245,y:1180", "at": 0 },
+            { "do": "run", "who": "fidget", "to": "x:1105,y:1192", "at": 0 },
+            { "say": "fidget", "text": "Old Shell.", "tone": "breathless", "at": 0.35 },
             { "say": "fidget", "text": "Look.", "tone": "breathless", "after": 0.6 },
-            { "do": "look", "who": "pebble", "to": "up", "after": 0.2 }
-          ], "hold": 0.8 },
-        { "id": "6.8", "camera": { "size": "extreme-close", "on": ["pebble"] },
+            { "do": "look", "who": "pebble", "to": "up", "after": 0.3 }
+          ], "hold": 1.0 },
+        { "id": "6.8", "camera": { "size": "close", "on": ["pebble"], "offset": [0, 0.22] },
           "beats": [
             { "do": "custom", "name": "eye-glint", "dur": 2.0, "at": 0 },
-            { "do": "blink", "who": "pebble", "at": 1.2 }
-          ], "dur": 2.2 }
+            { "do": "blink", "who": "pebble", "at": 1.25 }
+          ], "dur": 2.0 }
       ]
     },
     {
-      "id": "s07", "set": "hill", "time": "twilight", "overlays": [{ "name": "comet", "params": { "mode": "dim" } }, { "name": "hill-mist" }, { "name": "stone-light", "params": { "dayT": [0.87, 0.9] } }],
+      "id": "s07", "set": "hill", "time": "twilight",
+      "overlays": [{ "name": "comet", "params": { "mode": "dim" } }, { "name": "hill-mist" }, { "name": "stone-light", "params": { "dayT": [0.87, 0.9] } }],
       "music": { "mood": "tension", "intensity": 0.3 },
       "actors": {
-        "pebble": { "at": "slope_low", "face": "right" },
-        "fidget": { "at": "x:880", "face": "right" }
+        "pebble": { "at": "x:800", "face": "right" },
+        "fidget": { "at": "x:990", "face": "right" }
       },
       "shots": [
         { "id": "7.1", "camera": { "size": "establishing", "on": ["slope_low", "stone_top"] },
           "beats": [
+            { "do": "set", "who": "pebble", "params": { "star": 0.5 }, "at": 0 },
             { "do": "walk", "who": "pebble", "to": "x:860", "at": 0 },
-            { "do": "walk", "who": "fidget", "to": "x:940", "at": 0 }
-          ], "dur": 2.6 },
-        { "id": "7.2", "camera": { "size": "full", "on": ["pebble", "fidget"], "move": "track" },
+            { "do": "walk", "who": "fidget", "to": "x:1040", "speed": 0.5, "at": 0.4 }
+          ], "dur": 2.5 },
+        { "id": "7.2", "camera": { "size": "medium", "on": ["pebble", "fidget"], "move": "track" },
           "beats": [
-            { "do": "walk", "who": "pebble", "to": "x:900", "speed": 0.6, "at": 0 },
-            { "sfx": "breath", "at": 1.4, "params": { "heavy": 1 } },
-            { "do": "look", "who": "fidget", "to": "up", "at": 1.6 }
+            { "do": "walk", "who": "pebble", "to": "x:900", "speed": 0.75, "at": 0 },
+            { "do": "walk", "who": "fidget", "to": "x:1075", "speed": 0.4, "at": 0.2 },
+            { "do": "walk", "who": "pebble", "to": "x:915", "speed": 0.4 },
+            { "sfx": "breath", "at": 1.6, "params": { "heavy": 1 }, "dur": 1.4 },
+            { "do": "look", "who": "fidget", "to": "pebble", "at": 1.2 },
+            { "do": "look", "who": "fidget", "to": "up", "at": 2.1 }
           ], "dur": 3.0 },
-        { "id": "7.3", "camera": { "size": "medium", "on": ["pebble", "fidget"] },
+        { "id": "7.3", "camera": { "size": "close", "on": ["pebble", "fidget"] },
           "beats": [
             { "do": "turn", "who": "fidget", "face": "left", "at": 0.1 },
-            { "say": "fidget", "text": "Don't stop. I'll tell her you're coming.", "tone": "sincere, low and slow", "expr": "determined" },
+            { "say": "fidget", "text": "Don't stop. I'll tell her you're coming.", "tone": "sincere, low and slow, for the first time", "after": 0.1, "expr": "determined" },
             { "do": "turn", "who": "fidget", "face": "right" },
-            { "do": "run", "who": "fidget", "to": "x:1700" },
+            { "do": "run", "who": "fidget", "to": "x:1450" },
             { "music": { "mood": "chase", "intensity": 0.4 }, "with": "prev" },
             { "fx": "dust", "at": "fidget", "with": "prev" },
-            { "do": "walk", "who": "pebble", "to": "x:925", "after": 0.4 },
-            { "music": { "mood": "tension", "intensity": 0.3 }, "with": "prev" }
-          ], "hold": 0.4 }
+            { "do": "walk", "who": "pebble", "to": "x:933", "with": "prev", "after": 1.3 },
+            { "music": { "mood": "tension", "intensity": 0.28 }, "with": "prev", "after": 1.3 }
+          ], "hold": 0.3 }
       ]
     },
     {
-      "id": "s08", "set": "hill", "time": "night", "overlays": [{ "name": "comet", "params": { "mode": "dim" } }, { "name": "hill-mist" }, { "name": "stone-light", "params": { "dayT": [0.91, 0.915] } }],
-      "music": { "mood": "night", "intensity": 0.25 },
+      "id": "s08", "set": "hill", "time": "night",
+      "overlays": [{ "name": "comet", "params": { "mode": "dim" } }, { "name": "hill-mist" }, { "name": "stone-light", "params": { "dayT": [0.91, 0.915] } }],
+      "music": { "mood": "night", "intensity": 0.22 },
       "actors": {
         "nell":   { "at": "stone_left", "face": "left", "pose": "sit-ground" },
         "fidget": { "offstage": "left" }
       },
       "shots": [
-        { "id": "8.1", "camera": { "size": "medium", "on": ["nell", "crest"] },
+        { "id": "8.1", "note": "PROMISE TWO-SHOT: where the little tortoise sat there is only grass",
+          "camera": { "size": "full", "on": ["crest", "stone_left"], "zoom": 0.8 },
           "beats": [
-            { "do": "look", "who": "nell", "to": "sky", "at": 0.2 },
-            { "sfx": "hum", "caption": "[hums]", "params": { "notes": "G4:1 E4:0.5 G4:0.5 A4:2", "tempo": 72, "voice": "elder" }, "after": 0.2 }, { "wait": 4.1, "with": "prev" }
-          ], "hold": 0.4 },
-        { "id": "8.2", "camera": { "size": "full", "on": ["nell", "fidget"] },
+            { "do": "look", "who": "nell", "to": "sky", "at": 0.3 },
+            { "sfx": "hum", "caption": "[hums]", "params": { "notes": "G4:1 E4:0.5 G4:0.5 A4:2", "tempo": 72, "voice": "elder" }, "after": 0.3 },
+            { "wait": 3.4, "with": "prev" }
+          ], "hold": 0.3 },
+        { "id": "8.2", "camera": { "size": "full", "on": ["fidget"] },
           "beats": [
             { "do": "enter", "who": "fidget", "from": "left", "to": "x:2140", "run": true, "at": 0 },
+            { "do": "look", "who": "nell", "to": "fidget", "with": "prev" },
             { "fx": "dust", "at": "fidget" },
-            { "say": "fidget", "text": "He's coming! He's very slow, but he's coming!", "tone": "breathless, overjoyed", "expr": "happy" }
+            { "music": "sting", "name": "plunk", "with": "prev" },
+            { "do": "pose", "who": "fidget", "pose": "alert", "dur": 0.2, "with": "prev" },
+            { "say": "fidget", "text": "He's coming! He's very slow, but he's coming!", "tone": "breathless, overjoyed, panting", "expr": "happy" }
           ], "hold": 0.3 },
-        { "id": "8.3", "camera": { "size": "full", "on": ["nell"], "move": "pull-out" },
+        { "id": "8.3", "camera": { "size": "close", "on": ["nell"], "move": "pull-out", "to": "full", "moveAt": 1.2, "moveDur": 2.4 },
           "beats": [
             { "do": "gesture", "who": "nell", "name": "gasp", "at": 0.1 },
             { "sfx": "gasp", "with": "prev", "caption": "[gasps]" },
             { "do": "emote", "who": "nell", "expr": "surprised", "with": "prev" },
-            { "do": "emote", "who": "nell", "expr": "happy", "after": 0.4 },
-            { "do": "pose", "who": "nell", "pose": "stand", "dur": 2.0 },
-            { "do": "walk", "who": "nell", "to": "x:2050", "speed": 0.45 },
-            { "do": "run", "who": "fidget", "to": "x:1900", "with": "prev" }
-          ], "hold": 0.2 }
+            { "do": "emote", "who": "nell", "expr": "happy", "after": 0.6 },
+            { "do": "pose", "who": "nell", "pose": "crouch", "dur": 0.9, "after": 0.2 },
+            { "do": "pose", "who": "nell", "pose": "stand", "dur": 1.1 },
+            { "do": "run", "who": "fidget", "to": "x:1700", "with": "prev" },
+            { "do": "walk", "who": "nell", "to": "x:2040", "speed": 0.4 }
+          ], "dur": 5.6 }
       ]
     },
     {
-      "id": "s09", "set": "hill", "time": "night", "overlays": [{ "name": "comet", "params": { "mode": "bloom" } }, { "name": "hill-mist", "params": { "part": "bloom" } }, { "name": "stone-light", "params": { "dayT": [0.92, 1.0], "out": "bloom" } }],
+      "id": "s09", "set": "hill", "time": "night",
+      "overlays": [{ "name": "comet", "params": { "mode": "bloom" } }, { "name": "hill-mist", "params": { "part": "bloom" } }, { "name": "stone-light", "params": { "dayT": [0.92, 1.0], "out": "bloom" } }],
       "rim": { "dir": "upper-left", "color": "#fff1d6", "strength": 0.85, "start": "bloom", "rise": 1.5 },
-      "music": { "mood": "tender", "intensity": 0.22 },
+      "music": { "mood": "tender", "intensity": 0.22, "motif": 4, "motifVoice": "strings", "hold": true },
       "actors": {
         "pebble": { "at": "x:1180", "face": "right" },
-        "fidget": { "at": "x:1560", "face": "left" },
-        "nell":   { "at": "x:1660", "face": "left" }
+        "fidget": { "offstage": "right" },
+        "nell":   { "at": "x:1610", "face": "left" }
       },
       "shots": [
-        { "id": "9.1", "camera": { "size": "wide", "on": ["pebble", "nell"] },
+        { "id": "9.1", "note": "the messenger steps aside; she comes down out of the mist; they see each other and both stop",
+          "camera": { "size": "wide", "on": ["pebble", "nell"] },
           "beats": [
-            { "do": "walk", "who": "pebble", "to": "x:1215", "at": 0 },
-            { "do": "run", "who": "fidget", "to": "x:1300", "at": 0.3 },
-            { "do": "hop", "who": "fidget", "to": "x:1080", "over": "pebble" },
-            { "do": "turn", "who": "fidget", "face": "right" },
+            { "do": "set", "who": "pebble", "params": { "star": 0.55 }, "at": 0 },
+            { "do": "fade", "who": "nell", "to": 0, "dur": 0.01, "at": 0 },
+            { "do": "walk", "who": "pebble", "to": "x:1225", "at": 0 },
+            { "do": "enter", "who": "fidget", "from": "x:1950", "to": "x:1480", "run": true, "at": 0.3, "note": "out of the mist" },
+            { "do": "pose", "who": "fidget", "pose": "alert", "dur": 0.3 },
+            { "do": "look", "who": "fidget", "to": "pebble", "with": "prev" },
+            { "do": "hop", "who": "fidget", "to": "x:1520,y:850", "after": 0.35 },
+            { "do": "turn", "who": "fidget", "face": "left" },
             { "do": "pose", "who": "fidget", "pose": "sit", "dur": 0.3 },
-            { "do": "walk", "who": "nell", "to": "x:1330", "speed": 0.35, "at": 0.8 }
+            { "do": "fade", "who": "nell", "to": 1, "dur": 1.4, "at": 2.0 },
+            { "do": "walk", "who": "nell", "to": "x:1475", "speed": 0.4, "with": "prev" },
+            { "do": "look", "who": "pebble", "to": "nell", "at": 3.0 }
           ], "hold": 1.5 },
         { "id": "9.2", "camera": { "size": "full", "on": ["pebble", "nell"] },
           "beats": [
-            { "do": "pose", "who": "nell", "pose": "crouch", "dur": 1.2, "at": 0.2 },
+            { "do": "walk", "who": "nell", "to": "x:1410", "speed": 0.45, "at": 0.2 },
+            { "do": "pose", "who": "nell", "pose": "crouch", "dur": 1.2 },
             { "do": "pose", "who": "nell", "pose": "sit-ground", "dur": 1.3 }
-          ], "hold": 1.2 },
-        { "id": "9.3", "camera": { "size": "close", "on": ["pebble", "nell"] },
+          ], "hold": 1.0 },
+        { "id": "9.3", "note": "the star on the shell, caught by a moon highlight; her profile leans in from frame right",
+          "camera": { "size": "medium", "on": ["pebble", "nell"], "zoom": 1.15, "offset": [0.04, -0.13] },
           "beats": [
-            { "do": "custom", "name": "star-highlight", "dur": 3.4, "at": 0 },
-            { "do": "emote", "who": "nell", "expr": "happy", "at": 1.0 },
-            { "say": "nell", "text": "Hello, Pebble.", "tone": "soft", "after": 0.4 }
+            { "do": "custom", "name": "star-highlight", "dur": 3.6, "at": 0 },
+            { "do": "look", "who": "nell", "to": "down", "at": 0.2 },
+            { "do": "emote", "who": "nell", "expr": "happy", "at": 1.1 },
+            { "say": "nell", "text": "Hello, Pebble.", "tone": "soft, as if no time had passed", "after": 0.4 }
           ], "hold": 0.6 },
         { "id": "9.4", "camera": { "size": "close", "on": ["pebble"] },
           "beats": [
-            { "do": "look", "who": "pebble", "to": "nell", "at": 0.2 },
-            { "say": "pebble", "text": "I'm here.", "tone": "soft", "at": 1.4 },
+            { "do": "look", "who": "pebble", "to": "up", "at": 0 },
+            { "say": "pebble", "text": "I'm here.", "tone": "simple, the gravel gone soft", "at": 0.8 },
             { "mark": "bloom", "after": 0.667 }
-          ], "hold": 0.083 },
-        { "id": "9.5", "camera": { "size": "close", "on": ["stone_top"], "move": "pull-out", "to": "establishing", "toOn": ["stone_front", "pebble"], "moveAt": 0.9, "moveDur": 3.0 },
+          ], "hold": 0.084 },
+        { "id": "9.5", "note": "THE BLOOM: opens 14 frames before bloomFrame on the stone's tip, pulls back to the extreme wide",
+          "camera": { "size": "close", "on": ["stone_top"], "move": "pull-out", "to": "establishing", "toOn": ["stone_front", "pebble"], "moveAt": 0.9, "moveDur": 3.2 },
           "beats": [
-            { "music": { "mood": "triumph", "intensity": 0.75 }, "at": 0.08 },
-            { "fx": "fireflies", "at": "pebble", "dur": 5.0, "at": 2.0 }
+            { "music": { "mood": "triumph", "intensity": 0.75, "downbeat": true }, "at": 0.583 },
+            { "do": "set", "who": "nell", "pose": "sit-ground", "at": 0 },
+            { "do": "walk", "who": "fidget", "to": "x:1440,y:1000", "at": 0.6 },
+            { "fx": "fireflies", "on": "pebble", "dur": 5.0, "at": 2.0 }
           ], "dur": 5.5 },
         { "id": "9.6", "camera": { "size": "medium", "on": ["fidget", "pebble", "nell"] },
+          "music": { "mood": "tender", "intensity": 0.3 },
           "beats": [
-            { "do": "hop", "who": "fidget", "to": "x:1140", "at": 0.1 },
+            { "do": "walk", "who": "fidget", "to": "x:1405,y:990", "speed": 1.3, "at": 0.1 },
             { "do": "look", "who": "fidget", "to": "pebble" },
-            { "do": "look", "who": "fidget", "to": "nell", "after": 0.25 },
-            { "do": "look", "who": "fidget", "to": "pebble", "after": 0.2 },
+            { "do": "look", "who": "fidget", "to": "left", "after": 0.15 },
+            { "do": "look", "who": "fidget", "to": "pebble", "after": 0.25 },
+            { "do": "look", "who": "fidget", "to": "left", "after": 0.2 },
+            { "do": "look", "who": "fidget", "to": "pebble", "after": 0.15 },
             { "say": "fidget", "text": "PEBBLE?!", "tts": "Pebble?!", "tone": "squeaky disbelief", "expr": "surprised" },
-            { "say": "pebble", "text": "She was six.", "tone": "deadpan", "after": 0.9 }
-          ], "hold": 0.6, "music": { "mood": "tender", "intensity": 0.3 } },
+            { "do": "look", "who": "pebble", "to": "nell", "with": "prev" },
+            { "say": "pebble", "text": "She was six.", "tone": "deadpan, his eyes never leaving her", "after": 0.9 }
+          ], "hold": 0.6 },
         { "id": "9.7", "camera": { "size": "close", "on": ["nell"] },
           "beats": [
             { "do": "emote", "who": "nell", "expr": "laughing", "at": 0 },
             { "do": "set", "who": "nell", "params": { "tear": 1 }, "with": "prev" },
-            { "do": "emote", "who": "nell", "expr": "happy", "at": 0.6 },
-            { "say": "nell", "text": "You're late.", "tone": "teasing, voice catching" }
+            { "do": "emote", "who": "nell", "expr": "happy", "at": 0.7 },
+            { "say": "nell", "text": "You're late.", "tone": "teasing, voice catching", "after": 0.1 }
           ], "hold": 0.4 },
         { "id": "9.8", "camera": { "size": "close", "on": ["pebble"] },
           "beats": [
             { "say": "pebble", "text": "I'm a tortoise.", "tone": "deadpan", "at": 0.5 },
-            { "say": "nell", "text": "[laughs]", "tts": "Hahaha!", "tone": "laughing warmly", "vo": true, "after": 0.2 }
-          ], "hold": 1.0 },
+            { "say": "nell", "text": "[laughs]", "tts": "Hahaha!", "tone": "laughing warmly, a six-year-old's laugh still in there", "vo": true, "after": 0.2 }
+          ], "hold": 0.6 },
         { "id": "9.9", "camera": { "size": "medium", "on": ["pebble", "nell"], "move": "push-in" },
           "beats": [
-            { "say": "nell", "text": "I've climbed up here every summer. In case you got the year wrong.", "tone": "light, confiding", "at": 0.4 },
-            { "do": "look", "who": "pebble", "to": "nell", "after": 0.2 }
+            { "say": "nell", "text": "I've climbed up here every summer. In case you got the year wrong.", "tone": "light, almost confessing", "at": 0.4 },
+            { "do": "look", "who": "pebble", "to": "nell", "after": 0.1 }
           ], "hold": 0.6 },
         { "id": "9.10", "camera": { "size": "close", "on": ["pebble"] },
           "beats": [
-            { "say": "pebble", "text": "Tortoises don't get the year wrong.", "tone": "mildly offended", "at": 0.5 }
+            { "say": "pebble", "text": "Tortoises don't get the year wrong.", "tone": "gently offended", "at": 0.5 }
           ], "hold": 0.6 },
         { "id": "9.11", "camera": { "size": "close", "on": ["nell"] },
           "beats": [
-            { "say": "nell", "text": "I know.", "tone": "tender", "at": 0.3, "expr": "happy" },
+            { "say": "nell", "text": "I know.", "tone": "tender, steady", "at": 0.3, "expr": "happy" },
+            { "fx": "fireflies", "at": "nell", "dur": 6.0, "with": "prev" },
             { "say": "nell", "text": "I just couldn't let you walk all this way to an empty hill.", "tone": "tender, steady", "after": 0.8 },
-            { "fx": "fireflies", "at": "nell", "dur": 4.0, "with": "prev" }
+            { "music": { "mood": "tender", "intensity": 0.32, "motif": 5, "motifVoice": "violin" }, "with": "prev" }
           ], "hold": 0.8 },
         { "id": "9.12", "camera": { "size": "wide", "on": ["pebble", "nell"], "move": "tilt-up" },
           "beats": [
-            { "fx": "fireflies", "at": "pebble", "dur": 3.0, "count": 40, "at": 0 },
-            { "do": "hop", "who": "fidget", "to": "on:pebble", "at": 0.4 },
-            { "sfx": "sniff", "after": 0.3, "caption": "[sniffs]" },
-            { "do": "turn", "who": "fidget", "face": "left", "with": "prev" }
-          ], "dur": 3.2 }
+            { "fx": "fireflies", "on": "pebble", "dur": 3.2, "n": 2, "at": 0 },
+            { "do": "hop", "who": "fidget", "to": "on:pebble", "at": 0.3 },
+            { "sfx": "sniff", "after": 0.2, "caption": "[sniffs]" },
+            { "do": "turn", "who": "fidget", "face": "left", "after": 0.15 }
+          ], "dur": 3.0 }
       ]
     },
     {
-      "id": "s10a", "set": "hill", "time": "night", "overlays": [{ "name": "comet", "params": { "mode": "full" } }, "fireflies"], "transition": "dissolve",
+      "id": "s10a", "set": "hill", "time": "night", "transition": "dissolve",
+      "overlays": [{ "name": "comet", "params": { "mode": "full" } }, "fireflies"],
       "rim": { "dir": "upper-left", "color": "#fff1d6", "strength": 0.8 },
       "music": { "mood": "night", "intensity": 0.3 },
       "actors": {
-        "pebble": { "at": "x:1960", "face": "right" },
-        "fidget": { "on": "pebble", "face": "right", "pose": "sleep" },
-        "nell":   { "at": "x:2040", "face": "right" }
+        "pebble": { "at": "x:1930", "face": "right" },
+        "fidget": { "on": "pebble", "face": "right", "pose": "flop" },
+        "nell":   { "at": "x:1990,y:756", "face": "right" }
       },
       "shots": [
         { "id": "10.1", "camera": { "size": "wide", "on": ["pebble", "nell"] },
           "beats": [
-            { "do": "walk", "who": "pebble", "to": "x:2010", "at": 0 },
-            { "do": "walk", "who": "nell", "to": "x:2090", "speed": 0.22, "at": 0 }
-          ], "dur": 2.2 }
+            { "do": "set", "who": "pebble", "params": { "star": 0.55 }, "at": 0 },
+            { "do": "walk", "who": "pebble", "to": "x:1990", "at": 0 },
+            { "do": "walk", "who": "nell", "to": "x:2050,y:752", "speed": 0.2, "at": 0 }
+          ], "dur": 2.0 }
       ]
     },
     {
-      "id": "s10b", "set": "hill", "time": "night", "overlays": [{ "name": "comet", "params": { "mode": "full" } }, "fireflies"],
+      "id": "s10b", "set": "hill", "time": "night", "transition": "cut",
+      "overlays": [{ "name": "comet", "params": { "mode": "full" } }, "fireflies"],
       "rim": { "dir": "upper-left", "color": "#fff1d6", "strength": 0.8 },
       "music": { "mood": "night", "intensity": 0.3 },
       "actors": {
         "nell":   { "at": "stone_left", "face": "left", "pose": "sit-ground" },
-        "pebble": { "at": "x:2190", "face": "right", "pose": "rest" },
-        "fidget": { "on": "pebble", "face": "right", "pose": "sleep" }
+        "pebble": { "at": "x:2060", "face": "right", "pose": "rest" },
+        "fidget": { "on": "pebble", "face": "right", "pose": "flop" }
       },
       "shots": [
-        { "id": "10.2", "camera": { "size": "medium", "on": ["nell", "pebble"] },
+        { "id": "10.2", "note": "PROMISE TWO-SHOT, the elder cast on the young cast's marks",
+          "camera": { "size": "full", "on": ["crest", "stone_left"], "zoom": 0.8 },
           "beats": [
-            { "say": "nell", "text": "Same time next comet?", "tone": "twinkly, teasing", "at": 0.4, "expr": "happy" },
+            { "do": "set", "who": "pebble", "params": { "star": 0.55 }, "at": 0 },
+            { "say": "nell", "text": "Same time next comet?", "tone": "twinkly, teasing, not wistful", "at": 0.4, "expr": "happy" },
             { "say": "pebble", "text": "I'll start walking tomorrow.", "tone": "dry", "after": 1.0 },
             { "do": "gesture", "who": "nell", "name": "laugh", "after": 0.2 },
             { "say": "nell", "text": "[laughs]", "tts": "Hahaha!", "tone": "laughing warmly", "with": "prev" }
-          ], "hold": 0.6 },
+          ], "hold": 0.5 },
         { "id": "10.3", "camera": { "size": "close", "on": ["fidget"] },
           "beats": [
             { "say": "fidget", "text": "I'm not coming.", "tone": "flat, exhausted", "at": 0.3, "expr": "sleepy" },
-            { "say": "fidget", "text": "…I'm coming.", "tts": "I'm coming.", "tone": "quiet, certain", "after": 1.2, "expr": "happy" }
+            { "say": "fidget", "text": "…I'm coming.", "tts": "I'm coming.", "tone": "quiet, certain, lower and slower", "after": 1.2, "expr": "happy" }
           ], "hold": 0.6 },
-        { "id": "10.4", "camera": { "size": "establishing", "on": ["stone_front"], "move": "tilt-up", "moveAt": 1.5 },
+        { "id": "10.4", "note": "PROMISE WIDE in full colour, three figures at the stone; 1.5 s hold, then the crane up into the stars",
+          "camera": { "size": "establishing", "on": ["stone_front"], "move": "tilt-up", "moveAt": 1.5, "moveDur": 5.5 },
           "beats": [
-            { "say": "narrator", "text": "And this time, nobody climbed the hill alone.", "tone": "gently, smiling", "at": 0.4 },
-            { "music": { "mood": "triumph", "intensity": 0.6 }, "with": "prev" },
-            { "fx": "fireflies", "at": "pebble", "count": 60, "dur": 6.5, "with": "prev" }
+            { "say": "narrator", "text": "And this time, nobody climbed the hill alone.", "tone": "gentle, smiling", "at": 0.3 },
+            { "music": { "mood": "triumph", "intensity": 0.6, "motif": 5, "motifVoice": "tutti" }, "with": "prev" },
+            { "fx": "fireflies", "at": "pebble", "n": 3, "dur": 6.7, "with": "prev" }
           ], "dur": 7.0 },
         { "id": "10.5", "camera": { "size": "establishing", "on": ["stone_front"], "offset": [0, -700] },
           "beats": [
-            { "title": "SEVENTY-SIX SUMMERS", "sub": "Drawn, animated and scored entirely in code. Voices: Gemini TTS.", "at": 0.2, "dur": 3.4 }
-          ], "dur": 3.8, "fadeOut": 1.0 }
+            { "title": "SEVENTY-SIX SUMMERS", "sub": "Drawn, animated and scored entirely in code. Voices: Gemini TTS.", "at": 0.2, "dur": 3.3 }
+          ], "dur": 3.5, "fadeOut": 1.0 }
       ]
     }
   ]

@@ -1,13 +1,20 @@
 // The final mix: dialogue, sound effects, ambience beds and a ducked music score → stereo 48 kHz,
 // then mastering to −16 LUFS integrated / −1.5 dBTP with ffmpeg's two-pass loudnorm.
 //
-// mixFilm(plan, { voices, music, sfxGain, … }) → { L, R }
+// mixFilm(plan, { voices, music, sfxGain, sounds, … }) → { L, R }
 // writeMaster(path, mix, { lufs, tp, … }) → { path, lufs, truePeak, preGainDb, measured, result, linear }
+//
+// Effects come from sfx.mjs, or from the film's own `custom.mjs` sounds (compile copies them to plan.sounds;
+// opts.sounds is a fallback): ({ seed, dur, params }) → Float32Array, 48 kHz mono. An event's `dur` and `params` reach
+// the generator. Lines with no voice yet are skipped (one warning), so a film mixes before it is voiced. Each line plays
+// its own cut (voiceFor): two lines with the same words share a voice entry but may have different trimEnds. A hum is a
+// voice: the score ducks under it as under dialogue (params.duck: false to opt out, true to duck under any effect).
 import { spawnSync } from 'node:child_process';
 import { unlinkSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { readWav, resample, writeWav, SAMPLE_RATE as SR } from './wav.mjs';
 import { makeSfx, ambience, loudness, truePeak, reverb, filt, hashStr } from './sfx.mjs';
+import { voiceFor } from './voice.mjs';
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const db = g => Math.pow(10, g / 20);
@@ -161,12 +168,26 @@ function mergeBeds(list = []) {
 }
 const warned = new Set();
 const warnOnce = (k, msg) => { if (!warned.has(k)) { warned.add(k); console.warn(`[mix] ${msg}`); } };
+/** Effects that are voices: the score ducks under them as it does under dialogue. */
+const VOCAL_SFX = new Set(['hum']);
+
+/** A film's own sound (custom.mjs `sounds`): called with { seed, dur, params }, sanity-checked, edges softened. */
+function customSound(fn, name, seed, dur, params) {
+  const y = fn({ seed, dur, params });
+  if (!y || typeof y.length !== 'number' || (!ArrayBuffer.isView(y) && !Array.isArray(y))) throw new Error(`custom sound "${name}" must return a Float32Array (48 kHz mono)`);
+  const x = Float32Array.from(y, v => (Number.isFinite(v) ? v : 0));
+  const a = Math.min(x.length >> 1, 96), b = Math.min(x.length >> 1, 240); // 2 ms in, 5 ms out: no clicks at the edges
+  for (let i = 0; i < a; i++) x[i] *= i / a;
+  for (let i = 0; i < b; i++) x[x.length - 1 - i] *= i / b;
+  return x;
+}
 
 /**
  * Mix the film's audio.
- * plan: { duration, W?, lines: [{ id, who, t0, t1, narrator?, vo?, pan? }], sfx: [{ t, name, gain?, pan?, params?, seed? }],
- *         ambience: [{ t0, t1, name }], shots?, actorsAt? }
- * voices: Map lineId → { wav (path | Float32Array | parsed), dur } ; music: { L, R } at 48 kHz (optional).
+ * plan: { duration, W?, lines: [{ id, who, t0, t1, narrator?, vo?, pan? }], sfx: [{ t, name, gain?, pan?, dur?, params?, seed? }],
+ *         ambience: [{ t0, t1, name }], sounds?: { name: ({ seed, dur, params }) → Float32Array }, shots?, actorsAt? }
+ * voices: Map lineId → { wav (path | Float32Array | parsed), dur } ; music: { L, R } at 48 kHz (optional);
+ * sounds: custom sounds when the plan carries none.
  */
 export function mixFilm(plan, opts = {}) {
   const o = { ...MIX_DEFAULTS, ...opts, duck: { ...MIX_DEFAULTS.duck, ...(opts.duck || {}) }, bus: { ...MIX_DEFAULTS.bus, ...(opts.bus || {}) } };
@@ -175,9 +196,11 @@ export function mixFilm(plan, opts = {}) {
   const dia = stereo(N), fx = stereo(N), send = stereo(N), amb = stereo(N), mus = stereo(N), diaMono = new Float32Array(N);
 
   // dialogue: high-passed, each line normalized, placed at its time with a slight pan by screen position
+  const unvoiced = (plan.lines || []).filter(l => !voiceFor(voices, l));
+  if (unvoiced.length) warnOnce(`voices:${unvoiced.map(l => l.id).join()}`, `${unvoiced.length} of ${plan.lines.length} line${plan.lines.length > 1 ? 's have' : ' has'} no voice yet and ${unvoiced.length > 1 ? 'are' : 'is'} skipped: ${unvoiced.slice(0, 4).map(l => `${l.id} ${l.who}`).join(', ')}${unvoiced.length > 4 ? ', …' : ''}`);
   for (const line of plan.lines || []) {
-    const v = voices.get(line.id);
-    if (!v) { warnOnce(`voice:${line.id}`, `no voice for line ${line.id} — silent`); continue; }
+    const v = voiceFor(voices, line);
+    if (!v) continue;
     const x = filt(Float32Array.from(voiceSamples(v)), 'hp', 70, 0.7);
     const lu = loudness([x]), g = Number.isFinite(lu) ? clamp(db(o.dialogueLufs - lu), db(-12), db(18)) : 1, pan = linePan(plan, line, o.dialoguePan);
     place(dia, x, line.t0, pan, g);
@@ -186,12 +209,23 @@ export function mixFilm(plan, opts = {}) {
   }
 
   // effects: synthesized per event (seeded by name, time and owner so editing one event leaves the others alone)
+  const sounds = { ...(o.sounds || {}), ...(plan.sounds || {}) };
   for (const e of plan.sfx || []) {
     if (!e || !e.name || !Number.isFinite(e.t)) continue;
     let x;
-    const seed = e.seed ?? hashStr(`${e.name}|${e.t.toFixed(3)}|${e.shot ?? ''}|${e.who ?? ''}`);
-    try { x = makeSfx(e.name, { seed, ...(e.params || {}) }); } catch (err) { warnOnce(`sfx:${e.name}`, err.message); continue; }
-    place(fx, x, e.t, e.pan ?? 0, (e.gain ?? 1) * o.sfxGain, send, o.sfxReverb);
+    const seed = e.seed ?? hashStr(`${e.name}|${e.t.toFixed(3)}|${e.shot ?? ''}|${e.who ?? ''}`), params = { ...(e.dur != null ? { dur: e.dur } : {}), ...(e.params || {}) };
+    try {
+      x = typeof sounds[e.name] === 'function' ? customSound(sounds[e.name], e.name, seed, params.dur, params) : makeSfx(e.name, { seed, ...params });
+    } catch (err) { warnOnce(`sfx:${e.name}`, err.message); continue; }
+    let bad = 0; // one broken sample would poison the reverb, the limiter and everything after it
+    for (let i = 0; i < x.length; i++) if (!Number.isFinite(x[i])) { x[i] = 0; bad++; }
+    if (bad) warnOnce(`nan:${e.name}`, `sfx "${e.name}" made ${bad} non-finite samples (silenced)`);
+    const g = (e.gain ?? 1) * o.sfxGain;
+    place(fx, x, e.t, e.pan ?? 0, g, send, o.sfxReverb);
+    if (params.duck ?? VOCAL_SFX.has(e.name)) { // a sung or hummed voice: the music makes room for it too
+      const i0 = Math.round(e.t * SR);
+      for (let i = Math.max(0, -i0); i < x.length && i0 + i < N; i++) diaMono[i0 + i] += x[i] * g;
+    }
   }
   if (o.sfxReverb > 0 && (plan.sfx || []).length) {
     const wet = reverb(send.L, send.R, { room: 0.55, damp: 0.5 });

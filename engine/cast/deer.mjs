@@ -1,8 +1,9 @@
 // The Deer. The legacy far-off silhouette rebuilt as a full rig: a slender roe deer with hooves that plant, a long
 // neck that grazes, big mobile ears, a white rump flag, optional antlers (params.antlers = 1), a jaw for talking.
+// Round 2 (DESIGN §9.2): st.tilt pitches the head on the long neck; the pupils follow (+1 up, -1 down).
 import { clamp, lerp, ell, rpoly } from '../core/lib.mjs';
 import { cel, darken, lighten, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
-import { makeRig, quadFeet, leg, tube, mixPose, plus, jumpAt, ease } from './rig.mjs';
+import { makeRig, quadFeet, leg, tube, mixPose, plus, jumpAt, ease, pitchPose, gaze } from './rig.mjs';
 
 const rot = (v, a) => [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a)];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
@@ -62,14 +63,15 @@ function head(T, p, F, P, o) {
   fillP(T, ell(20.4, 1, 1.9, 2.2, 299, 0.1), '#1d1515');
   if (op <= 0.03) line(T, [[18.4, 4.5], [11, 5.3], [6.4, 5.2 - 0.3 * sm], [4.6, 4.9 - 1.6 * sm]], 0.75, { seed: 300 });
   if (sm > 0.5) fillP(T, ell(1, 2.2, 3, 1.8, 301, 0.1), rgba('#e08070', 0.3 * (sm - 0.4)));
-  eye(T, 2.6, -1.6, 2.1, 2.5, F.eye, P.eye, F.look * 0.6, F.lid, F.tilt, { w: 0.9 });
+  eye(T, 2.6, -1.6, 2.1, 2.5, F.eye, P.eye, gaze(F, 0.6, 2.5), F.lid, F.tilt, { w: 0.9 });
   if (F.eye !== 'happy' && F.lid < 0.96) for (let k = 0; k < 3; k++) line(T, [[3.6 + k * 1.1, -3.6 - k * 0.1 + F.lid * 4], [4.2 + k * 1.4, -4.8 - k * 0.1 + F.lid * 4]], 0.45, { seed: 302 + k });
   brow(T, 2.4, -5.6, 5, F.browY * 0.6, F.browT * 0.7, darken(P.coat, 0.5), 0.9, 305);
   ear(-3.5, -6.5, -0.55 + ea, true);
   o.out.head = T.map(4, -1); o.out.mouth = T.map(14, 5 + op * 2);
   T.restore();
 }
-function paint(T, p, F, o) {
+function paint(T, p0, F, o) {
+  const p = pitchPose(p0, F.pitch, { hr: -0.6, hy: -7, hx: -5 }, { hr: 0.45, hy: 5, hx: 2 });   // st.tilt: the long neck lifts or lowers the head
   const { P, t } = o, R = roots(p);
   const LG = (near, fore, k) => fore
     ? { l1: 21, l2: 20, meta: 12, ma: p.fa, bend: -1, w: [6.2, 3.2, 2.2, 2], col: near ? P.coat : darken(P.coat, 0.8), paw: [2.6, 3.2], hoof: near ? P.hoof : darken(P.hoof, 0.8), sh: SH, seed: near ? 360 : 370, curl: p[k + 'u'], curlA: -1.3 }

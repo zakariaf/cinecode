@@ -1,9 +1,11 @@
 // The Owl. Front-facing, as in the legacy hollow: tufted head, pale facial disc, big amber eyes with feathered
 // lids and V-brows, a hooked beak that opens to talk and hoot, wings that fold at the sides or spread to fly,
 // feathered legs with talons gripping the perch (the contact point).
+// Round 2 (DESIGN §9.2): expression "one-eye" (the near eye peeks open under a raised brow, the other stays shut —
+// a dozing owl checking who's there); st.tilt pitches the face (features slide up or down in the disc, pupils follow).
 import { clamp, lerp, ell, rpoly, arcPts } from '../core/lib.mjs';
 import { cel, darken, lighten, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
-import { makeRig, mixPose, plus, jumpAt, ease, frac, footAt, tube } from './rig.mjs';
+import { makeRig, mixPose, plus, jumpAt, ease, frac, footAt, tube, EXPRESSIONS } from './rig.mjs';
 
 const SH = 2.2;
 // Pose: by body drop, bt body tilt (+ leans forward/right), sq puff 0..1, ht head tilt, hx head turn -1..1 (face
@@ -46,9 +48,9 @@ function talons(T, x, y, lg, P, seed) {
   }
 }
 function head(T, p, F, P, o) {
-  const hy = -44 + p.by + p.hy - F.breath * 0.5 - p.sq * 0.5;
+  const hy = -44 + p.by + p.hy - F.breath * 0.5 - p.sq * 0.5 - F.pitch * 0.8;
   T.save(); T.translate(0, hy); T.rotate(p.ht);
-  const tx = clamp(p.hx + F.look * 0.6, -1, 1) * 3.6, tu = p.tu;
+  const tx = clamp(p.hx + F.look * 0.6, -1, 1) * 3.6, ty = -F.pitch * 2.4, tu = p.tu, one = o.st.expr === 'one-eye';
   // tufts
   cel(T, [[-15, -6], [-12 - tx * 0.3, -18 - tu * 4], [-6, -9]], darken(P.body, 0.88), SH, 1, 160);
   cel(T, [[15, -6], [12 - tx * 0.3, -18 - tu * 4], [6, -9]], darken(P.body, 0.88), SH, 1, 161);
@@ -56,25 +58,30 @@ function head(T, p, F, P, o) {
   cel(T, Hd, P.body, SH, 1.2, 162);
   T.save(); T.beginPath(); Hd.forEach((q, i) => (i ? T.lineTo(q[0], q[1]) : T.moveTo(q[0], q[1]))); T.closePath(); T.clip();
   // facial disc: two pale rounds meeting at the beak, with a darker rim
-  for (const sx of [-1, 1]) { const D2 = ell(tx + sx * 6.8, 0.6, 8.6, 8.4, 163 + sx, 0.25); fillP(T, D2, P.disc); line(T, arcPts(tx + sx * 6.8, 0.6, 8.6, 8.4, sx < 0 ? Math.PI * 0.55 : -Math.PI * 0.45, sx < 0 ? Math.PI * 1.45 : Math.PI * 0.45, 2), 0.7, { seed: 165 + sx, color: rgba(darken(P.body, 0.6), 0.6) }); }
+  for (const sx of [-1, 1]) { const D2 = ell(tx + sx * 6.8, 0.6 + ty * 0.6, 8.6, 8.4, 163 + sx, 0.25); fillP(T, D2, P.disc); line(T, arcPts(tx + sx * 6.8, 0.6 + ty * 0.6, 8.6, 8.4, sx < 0 ? Math.PI * 0.55 : -Math.PI * 0.45, sx < 0 ? Math.PI * 1.45 : Math.PI * 0.45, 2), 0.7, { seed: 165 + sx, color: rgba(darken(P.body, 0.6), 0.6) }); }
   for (let i = 0; i < 6; i++) line(T, [[tx + (i < 3 ? -1 : 1) * (10 + (i % 3) * 2), 6 + (i % 3)], [tx + (i < 3 ? -1 : 1) * (12 + (i % 3) * 2), 8 + (i % 3)]], 0.5, { seed: 170 + i, color: 'rgba(120,95,70,.5)' });
   T.restore();
   const op = clamp(F.open), r = Math.max(F.round, p.round || 0);
   for (const sx of [-1, 1]) {
-    const ex = tx + sx * 6.6;
-    eye(T, ex, 0, 3.6, 3.6, F.eye === 'happy' ? 'happy' : F.eye, '#1a1410', F.look * 0.8 + p.hx * 0.6, Math.max(F.lid, 0.04), F.tilt * -sx, { sclera: P.eye, pupil: F.eye === 'wide' ? 0.42 : 0.55 * (F.pupil || 1), w: 0.9 });
-    T.save(); T.translate(ex, -6.6); if (sx > 0) T.scale(-1, 1);
-    brow(T, 0, 0, 10, F.browY * 0.7, F.browT * 0.9, darken(P.body, 0.55), 1.6, 175 + sx);
+    const ex = tx + sx * 6.6, shut = one && sx < 0;                 // one-eye: the eye on the +x side peeks, even from sleep
+    const peek = Math.max(clamp(o.st.blink || 0), p.lid > 0.5 ? 0.42 : Math.max(F.lid, 0.24));
+    const lid = one ? (shut ? 1 : peek) : Math.max(F.lid, 0.04), by = one ? (shut ? -0.35 : 0.55) : F.browY, bt = one ? (shut ? 0.5 : -0.4) : F.browT;
+    eye(T, ex, ty, 3.6, 3.6, F.eye === 'happy' ? 'happy' : F.eye, '#1a1410', [F.look * 0.8 + p.hx * 0.6, -F.pitch * 1.3], lid, one ? 0 : F.tilt * -sx, { sclera: P.eye, pupil: F.eye === 'wide' ? 0.42 : 0.55 * (F.pupil || 1), w: 0.9 });
+    T.save(); T.translate(ex, -6.6 + ty * 0.85); if (sx > 0) T.scale(-1, 1);
+    brow(T, 0, 0, 10, by * 0.7, bt * 0.9, darken(P.body, 0.55), 1.6, 175 + sx);
     T.restore();
   }
   // beak: upper hook over a lower mandible that drops
   const bx = tx, lo = op * 3.4 + r * op;
+  T.save(); T.translate(0, ty * 0.8);
   if (op > 0.03) { fillP(T, ell(bx, 6 + lo * 0.5, 2.4 + r * 0.6, 1.2 + lo * 0.55, 177, 0.1), '#5a2a20'); }
   const lower = [[bx - 2.1, 5.6 + lo * 0.3], [bx + 2.1, 5.6 + lo * 0.3], [bx, 8.6 + lo]];
   cel(T, lower, darken(P.beak, 0.85), SH * 0.4, 0.75, 178);
   const upper = [[bx - 2.6, 1.6], [bx + 2.6, 1.6], [bx + 1.2, 6.6], [bx, 8.2 - lo * 0.15], [bx - 1.2, 6.6]];
   cel(T, upper, P.beak, SH * 0.4, 0.8, 179);
-  o.out.head = T.map(tx * 0.4, 0); o.out.mouth = T.map(bx, 6.5 + lo * 0.5);
+  o.out.mouth = T.map(bx, 6.5 + lo * 0.5);
+  T.restore();
+  o.out.head = T.map(tx * 0.4, ty * 0.5);
   T.restore();
 }
 function paint(T, p, F, o) {
@@ -127,6 +134,7 @@ const g = (dur, at, keys) => ({ dur, at, keys });
 const env = (u, a = 0.2, b = 0.2) => ease(clamp(u / a)) * (1 - ease(clamp((u - 1 + b) / b)));
 export default makeRig({
   kind: 'owl', label: 'Owl',
+  expressions: [...EXPRESSIONS, 'one-eye'],
   height: 62, headHeight: 34, width: 36, shadowW: 18,
   perch: true, flies: true, breathPeriod: 3.6,
   params: { body: '#8a6a4a', belly: '#d9c4a0', disc: '#ecdcbc', wing: '#7a5a3e', beak: '#e0a840', eye: '#f2c94c', leg: '#cdb48c', toe: '#b8955a' },

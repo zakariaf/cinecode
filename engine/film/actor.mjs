@@ -1,16 +1,22 @@
 // An actor's performance over a scene, as channels evaluated at any time t (seconds from film start):
 // position (moves made of route / jump / fly legs), base pose (blended), gestures layered on top, face, head
-// look (explicit looks + glances at speakers), expression, talk (lip sync), visibility, opacity and sleep.
+// look (explicit looks + glances at speakers) and tilt (looking up / down), expression, talk (lip sync),
+// visibility, opacity and sleep.
 // Gait phase always comes from distance travelled / stride, so planted feet never slide.
+// Riding: a rider's position is its carrier's riding point (rig.mount) at every instant, so it follows the
+// carrier's walk bob, turns and wading sink; hops on and off are jump legs whose moving end tracks that point. A rider
+// is visible only while its carrier is (it exits with it) and fades with it.
+// Wading: a wade route carries a sink (world px) that grows with the distance travelled into the water.
 import { noise1 } from '../core/lib.mjs';
 import { idle } from '../cast/index.mjs';
-import { clamp, lerp, ease, rigPose, mixFor, contactKeys, rigSizes, hash32 } from './util.mjs';
+import { clamp, lerp, ease, rigPose, mixFor, contactKeys, rigSizes, hash32, mountPoint } from './util.mjs';
 
 const BLEND_IN = 0.22, BLEND_OUT = 0.28, LOOK_BLEND = 0.28;
 const frac = x => x - Math.floor(x);
 
 // ───────────── positions ─────────────
-// pos: { x, y, s, key, mode: 'ground'|'surface'|'perch'|'hollow'|'air'|'off', anchor, clip, lift (units), surface }
+// pos: { x, y, s, key, mode: 'ground'|'surface'|'perch'|'hollow'|'air'|'mount'|'off', anchor, clip, lift (units), surface,
+//        sink (world px drawn below y, wading), waterY (world y of the waterline clip), carrier (id, riders) }
 export function groundPos(S, x, y, k = 1) {
   return { x, y, s: S.scaleAt(x, y) * k, key: y, mode: 'ground', anchor: null, clip: null, lift: 0 };
 }
@@ -47,8 +53,11 @@ function profile(U, v, ta = 0.3, rampIn = true, rampOut = true) {
 
 // A walk along a polyline on the ground. Samples carry the scale so distance can be measured in rig units
 // (world length / scale): cadence = speed / stride stays constant while perspective changes the screen speed.
+// wade: { depth (units, or null for 1.1 × rig height), height (rig units), sink0 (world px at the start) } lets the
+// route cross water: inside a water polygon the actor sinks 0.6 px per px travelled from where it went in (or before
+// where it comes out), up to depth × s.
 export class RouteLeg {
-  constructor({ S, pts, k, gait, speed, stride, phase0 = 0, rampIn = true, rampOut = true, face0 = 1, rig, cycleDur }) {
+  constructor({ S, pts, k, gait, speed, stride, phase0 = 0, rampIn = true, rampOut = true, face0 = 1, rig, cycleDur, wade = null }) {
     this.type = 'route'; this.gait = gait; this.stride = stride; this.phase0 = phase0; this.rig = rig;
     const X = [], Y = [], Sc = [], U = [], F = [];
     let u = 0, face = face0;
@@ -64,6 +73,7 @@ export class RouteLeg {
     }
     if (!X.length) { const [x, y] = pts[0]; X.push(x); Y.push(y); Sc.push(S.scaleAt(x, y) * k); U.push(0); F.push(face0); }
     Object.assign(this, { X, Y, Sc, U, F, len: u });
+    if (wade) this.sink = wadeSink(S, X, Y, Sc, wade);
     if (cycleDur) {           // hop-by-hop: whole jumps, the body moves only while airborne
       const n = Math.max(1, Math.round(u / stride)); this.stride = u / n; this.hops = n; this.cycleDur = cycleDur;
       this.T = n * cycleDur;
@@ -84,7 +94,9 @@ export class RouteLeg {
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (U[m] <= u) lo = m; else hi = m; }
     const w = U[hi] > U[lo] ? clamp((u - U[lo]) / (U[hi] - U[lo])) : 0;
     const x = lerp(this.X[lo], this.X[hi], w), y = lerp(this.Y[lo], this.Y[hi], w), s = lerp(this.Sc[lo], this.Sc[hi], w);
-    return { x, y, s, key: y, mode: 'ground', lift: 0, face: this.F[w < 0.5 ? lo : hi], phase: this.phaseAt(τ) };
+    const p = { x, y, s, key: y, mode: 'ground', lift: 0, face: this.F[w < 0.5 ? lo : hi], phase: this.phaseAt(τ) };
+    if (this.sink) { p.wade = true; p.sink = lerp(this.sink[lo], this.sink[hi], w); if (p.sink > 0.05) p.waterY = y; else p.sink = 0; }
+    return p;
   }
   // time (from leg start) at which the gait reaches phase p (monotone search)
   timeOfPhase(p) {
@@ -100,10 +112,26 @@ export class RouteLeg {
   airborne(τ) { if (!this.hops) return false; const f = frac(this.phaseAt(τ)); return f > 0.27 && f < 0.78; }
 }
 
-// A jump from one place to another (onto a stump, across stepping stones, down from a ledge).
+// Sink along a wade route's samples (world px): 0.6 px per px from where the water was entered (or the starting sink)
+// and to where it is left (none if the route ends in the water), capped at depth × s.
+function wadeSink(S, X, Y, Sc, { depth = null, height = 40, sink0 = 0 }) {
+  const n = X.length, D = new Float64Array(n), wet = X.map((x, i) => S.inWater(x, Y[i])), out = new Float64Array(n);
+  for (let i = 1; i < n; i++) D[i] = D[i - 1] + Math.hypot(X[i] - X[i - 1], Y[i] - Y[i - 1]);
+  const din = new Float64Array(n), dout = new Float64Array(n);
+  // depth counts from the first wet sample (so dry ground never sinks); a route ending in the water stays down
+  let enter = -Math.max(0, sink0) / 0.6;
+  for (let i = 0; i < n; i++) { if (!wet[i]) enter = null; else { enter ??= D[i]; din[i] = D[i] - enter; } }
+  let exit = Infinity;
+  for (let i = n - 1; i >= 0; i--) { if (!wet[i]) exit = null; else { exit ??= D[i]; dout[i] = exit - D[i]; } }
+  for (let i = 0; i < n; i++) if (wet[i]) out[i] = Math.min((depth ?? 1.1 * height) * Sc[i], 0.6 * Math.min(din[i], dout[i]));
+  return out.some(v => v > 0) || sink0 > 0 ? out : null;
+}
+
+// A jump from one place to another (onto a stump, across stepping stones, down from a ledge). Afn / Bfn (τ → pos)
+// make an end move with something (a carrier's riding point); A / B are then their snapshots, used for the timing.
 export class JumpLeg {
-  constructor({ A, B, rig, sz }) {
-    this.type = 'jump'; this.A = A; this.B = B;
+  constructor({ A, B, rig, sz, Afn = null, Bfn = null }) {
+    this.type = 'jump'; this.A = A; this.B = B; this.Afn = Afn; this.Bfn = Bfn;
     const g = rig.gestures?.jump, dist = Math.hypot(B.x - A.x, B.y - A.y), hpx = sz.height * Math.max(A.s, B.s);
     this.T = (g?.dur ?? 0.8) * clamp(Math.sqrt(dist / Math.max(1, hpx * 0.9)), 0.85, 1.7);
     this.rise = A.y - B.y;                                // > 0 when jumping up
@@ -113,11 +141,15 @@ export class JumpLeg {
   }
   w(τ) { return ease(clamp((τ / this.T - 0.27) / 0.51)); }
   at(τ) {
-    const A = this.A, B = this.B, w = this.w(τ), u = τ / this.T;
+    const A = this.Afn ? this.Afn(τ) : this.A, B = this.Bfn ? this.Bfn(τ) : this.B, w = this.w(τ), u = τ / this.T;
     const air = u > 0.27 && u < 0.78, landed = u >= 0.78, P = landed ? B : A;
     const x = lerp(A.x, B.x, w), y = lerp(A.y, B.y, w), s = lerp(A.s, B.s, w);
     const alt = this.arc * Math.sin(Math.PI * w);
-    return { x, y, s, key: landed ? B.key : A.key, mode: air ? 'air' : P.mode, anchor: P.anchor, clip: landed ? B.clip : null, lift: alt / s, face: this.face1, airborne: air, surface: P.surface, ground: y };
+    // onto / off a carrier: behind it on the way up from behind, in front of it on the way down
+    const key = air && (this.Afn || this.Bfn) ? (w < 0.5 ? A.key : B.key) : landed ? B.key : A.key;
+    const p = { x, y, s, key, mode: air ? 'air' : P.mode, anchor: P.anchor, clip: landed ? B.clip : null, lift: alt / s, face: this.face1, airborne: air, surface: P.surface, ground: y };
+    if (!air && P.mode === 'mount') Object.assign(p, { carrier: P.carrier, ground: P.ground, waterY: P.waterY });
+    return p;
   }
   pose(τ, rig) {
     const u = clamp(τ / this.T), base = rig.poses.stand;
@@ -177,8 +209,8 @@ export class Actor {
     this.paramEv = []; this.blinks = []; this.place0 = null;
   }
   // ── setup ──
-  init(t, pos, face, poseName, { visible = true, expr = 'neutral' } = {}) {
-    this.place0 = { t, pos };
+  init(t, pos, face, poseName, { visible = true, expr = 'neutral', mount = null } = {}) {
+    this.place0 = { t, pos, mount };
     this.faceEv.push({ t: -1e9, face, src: 'init' });
     const rp = rigPose(this.rig, poseName) || rigPose(this.rig, 'stand');
     this.poseEv.push({ t: -1e9, name: rp.name, pose: rp.pose, blend: 0, src: 'init' });
@@ -196,7 +228,8 @@ export class Actor {
   }
   posAt(t) {
     const mv = this.moveAt(t);
-    if (!mv) return { ...this.place0.pos };
+    if (!mv) return this.place0.mount ? this.place0.mount.mountAt(t, this) : { ...this.place0.pos };
+    if (mv.mount && (!mv.legs.length || t >= this.end(mv))) return mv.mount.mountAt(t, this);
     if (mv.place) return { ...mv.place };
     const tt = Math.min(t, this.end(mv)), r = this.legAt(mv, tt);
     const p = r.L.at(r.τ);
@@ -204,6 +237,27 @@ export class Actor {
     return p;
   }
   moving(t) { const mv = this.moveAt(t); return !!(mv && !mv.place && t < this.end(mv)); }
+  // The actor this one is riding at t (an Actor), or null.
+  carrierAt(t) {
+    const mv = this.moveAt(t);
+    if (!mv) return this.place0?.mount ?? null;
+    return mv.mount && (!mv.legs.length || t >= this.end(mv)) ? mv.mount : null;
+  }
+  // As a carrier: the riding point at t (rig.mount mirrored by face, squashed with a turn, lifted with a hop, sunk
+  // with a wade) as a position for `rider`: its scale is the ground scale here times the rider's cast scale.
+  mountAt(t, rider = null) {
+    let m = this._mount;
+    if (!m || m.t !== t) {
+      if (this._mounting) throw new Error(`${this.id}: riding loop (an actor cannot carry its own carrier)`);
+      this._mounting = true;
+      try {
+        const pos = this.posAt(t), pose = this.poseAt(t), face = this.faceAt(t), q = this.squashAt(t), sink = pos.sink || 0;
+        const [ux, uy] = mountPoint(this.rig, pose, this.paramsAt(t));
+        m = this._mount = { t, x: pos.x + face * ux * q * pos.s, y: pos.y + sink + (uy - (pos.lift || 0)) * pos.s, gs: pos.s / this.k, key: pos.key + 0.01, ground: pos.ground ?? pos.y, waterY: sink > 0 ? pos.y : pos.waterY ?? null, face };
+      } finally { this._mounting = false; }
+    }
+    return { x: m.x, y: m.y, s: m.gs * (rider?.k ?? 1), key: m.key, mode: 'mount', carrier: this.id, anchor: null, clip: null, lift: 0, ground: m.ground, waterY: m.waterY, surface: 'shell', carrierFace: m.face };
+  }
   addMove(mv) {
     // a new move interrupts any move still in progress; drop the interrupted move's end events
     for (const m of this.moves) if (m.t0 <= mv.t0 && this.end(m) > mv.t0) {
@@ -258,7 +312,7 @@ export class Actor {
   poseAt(t) {
     const mv = this.moveAt(t);
     let p = this.basePoseAt(t), moving = false, gait = null;
-    if (mv && !mv.place) {
+    if (mv && !mv.place && mv.legs.length) {
       const e = this.end(mv);
       if (t < e) {
         moving = true;
@@ -308,7 +362,7 @@ export class Actor {
     if (!target || target === 'none' || target === 'camera') return 0;
     if (target === 'left') return -0.7;
     if (target === 'right') return 0.7;
-    if (target === 'up' || target === 'sky') return 0;
+    if (target === 'up' || target === 'sky' || target === 'down') return 0;
     let tx;
     if (typeof target === 'object') tx = target.x;
     else { const o = this.others?.get(target); if (!o) return 0; tx = o.posAt(t).x; }
@@ -323,12 +377,12 @@ export class Actor {
   lookAt(t, pos) {
     if (this.asleep(t)) return 0;
     const val = (tgt, tt) => this.lookValue(tgt, tt, pos);
-    // persistent target with an eased change
+    // persistent target with an eased change (slow lookers take rig.lookTime)
     let i = -1; for (let j = 0; j < this.lookEv.length; j++) if (this.lookEv[j].t <= t) i = j;
     let base = 0;
     if (i >= 0) {
       const e = this.lookEv[i], prev = i > 0 ? this.lookEv[i - 1].target : null;
-      const u = ease((t - e.t) / LOOK_BLEND);
+      const u = ease((t - e.t) / (this.rig.lookTime ?? LOOK_BLEND));
       base = lerp(val(prev, t), val(e.target, t), u);
     }
     // glances at a speaker (ease in and out) unless an explicit look came later
@@ -340,11 +394,30 @@ export class Actor {
     }
     return base;
   }
-  visibleAt(t) { let v = true; for (const e of this.visEv) if (e.t <= t) v = e.visible; return v; }
+  // Head pitch: +1 looking up ("up", "sky"), -1 looking down, 0 otherwise; each change blends from the current value
+  // over rig.lookTime (default 0.3 s).
+  tiltAt(t) {
+    if (this.asleep(t)) return 0;
+    const val = g => (g === 'up' || g === 'sky' ? 1 : g === 'down' ? -1 : 0), T = this.rig.lookTime ?? 0.3;
+    let from = 0, to = 0, t0 = -Infinity;
+    for (const e of this.lookEv) {
+      if (e.t > t) break;
+      from = t0 === -Infinity ? to : lerp(from, to, ease((e.t - t0) / T)); to = val(e.target); t0 = e.t;
+    }
+    return t0 === -Infinity ? 0 : lerp(from, to, ease((t - t0) / T));
+  }
+  // A rider is seen only while its carrier is (it leaves with a carrier that exits, and comes back with it).
+  visibleAt(t) {
+    let v = true; for (const e of this.visEv) if (e.t <= t) v = e.visible;
+    const C = v ? this.carrierAt(t) : null;
+    return C ? C.visibleAt(t) : v;
+  }
+  // A rider fades with its carrier.
   alphaAt(t) {
     let a = 1;
     for (const e of this.alphaEv) { if (t < e.t0) break; a = t >= e.t1 ? e.to : lerp(e.from, e.to, ease((t - e.t0) / (e.t1 - e.t0 || 1e-6))); }
-    return a;
+    const C = this.carrierAt(t);
+    return C ? a * C.alphaAt(t) : a;
   }
   paramsAt(t) { let p = this.params0; for (const e of this.paramEv) if (e.t <= t) p = { ...p, ...e.params }; return p; }
   blinkAt(t, idleBlink) {
@@ -365,10 +438,11 @@ export class Actor {
     const pos = this.posAt(t), face = this.faceAt(t), pose = this.poseAt(t), asleep = this.asleep(t);
     const id = idle(this.rig, asleep ? t * 0.55 : t, this.seed);
     const params = this.paramsAt(t), visible = this.visibleAt(t) && pos.mode !== 'off';
-    const lift = (pos.lift || 0);
+    const lift = (pos.lift || 0), sink = pos.sink || 0;
     const st = {
       pose, expr: this.exprAt(t), talk: this.talkAt(t, fps), blink: asleep ? 0 : this.blinkAt(t, id.blink), breath: id.breath,
-      look: this.lookAt(t, pos), lift, params, shadow: !(pos.mode === 'perch' || pos.mode === 'hollow' || pos.mode === 'air'), t,
+      look: this.lookAt(t, pos), tilt: this.tiltAt(t), lift, params, t,
+      shadow: !(pos.mode === 'perch' || pos.mode === 'hollow' || pos.mode === 'air' || pos.mode === 'mount' || sink > 0),
     };
     const mv = this.moveAt(t), r = mv && !mv.place && t < this.end(mv) ? this.legAt(mv, t) : null;
     const airborne = !!(pos.airborne || (r && r.L.airborne(r.τ)) || (pose.lift || 0) > 1.5);
@@ -376,7 +450,7 @@ export class Actor {
       id: this.id, rig: this.rig.kind, R: this.rig, x: pos.x, y: pos.y, s: pos.s, face, st, visible, key: pos.key,
       perch: pos.mode === 'perch' || pos.mode === 'hollow' ? pos.anchor : null, mode: pos.mode, anchor: pos.anchor, clip: pos.clip,
       airborne, action: this.actionAt(t), asleep, alpha: this.alphaAt(t), squash: this.squashAt(t), ground: pos.ground ?? null,
-      scale: this.k, speaking: this.speaking(t),
+      scale: this.k, speaking: this.speaking(t), sink, waterY: pos.waterY ?? null, wade: !!pos.wade, carrier: pos.carrier ?? null,
     };
   }
 }

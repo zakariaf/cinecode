@@ -1,8 +1,11 @@
 // Procedural film score: theory → form → phrase-structured melody → arrangement → humanised performance → mix.
 //
-//   composeCue({ dur, mood, intensity, key, tempo, seed, theme }) → { L, R, info }
-//   scoreFilm(plan, { seed }) → { L, R }        plan.music = [{ t0, t1, mood, intensity } | { t, sting }]
-//   makeSting(name, { key, seed }) → { L, R, hit }   name: surprise | sad | triumph | magic
+//   composeCue({ dur, mood, intensity, key, tempo, seed, theme, motif, downbeat }) → { L, R, info }
+//   scoreFilm(plan, { seed }) → { L, R, cues }   plan.music = [{ t0, t1, mood, intensity, motif?, motifVoice?, hold?,
+//                                                downbeat?, tempo?, key? } | { t0, t1, mood: 'none' } | { t, sting }]
+//                                                plan.score = { key: 'C', motif: 'G4:1 E4:0.5 G4:0.5 A4:2 C5:3' }
+//   makeSting(name, { key, seed }) → { L, R, hit }   name: one of STING_NAMES
+//   MOOD_NAMES, STING_NAMES, MOTIF_VOICES, parseMotif(text | array) → [{ note, midi, beats }]
 //
 // How a cue is built:
 //  1. Form. Bars are grouped in 4-bar phrases; phrases pair into periods (antecedent ending on a half cadence,
@@ -17,6 +20,30 @@
 //     percussion → doublings), at phrase boundaries, so low intensity is sparse and high is full.
 //  5. Performance. Seeded timing / velocity humanisation, rolled chords, phrase dynamics, a ritardando
 //     into the last cadence. Rendered with synth.mjs voices, a shared hall reverb, gain staging and a limiter.
+//
+// The film motif (plan.score). `motif` is a list of "note:beats" tokens written in `key` (major, or minor with
+// 'm' / 'minor'). It is stored as scale degrees, so a cue in a minor mood states it in the minor mode (the A of
+// a C-major motif becomes A-flat in C minor); a chromatic note (outside the written key) keeps its written
+// interval from the tonic in every mode. With a score, every cue is in the score key (unless the cue sets
+// `key`), and the procedural melodies are built from the motif's opening intervals (all but its last note,
+// which is kept for real statements). A cue with:
+//  - motif: n        (true = all) states the first n notes on `motifVoice` (bassoon | flute | cello | horn | celesta | violin |
+//                    strings | music-box | tutti; default by mood) from the cue's first bar, at the cue's `tempo`
+//                    (or the mood's). The last stated note sustains to the end of the statement's bars, then the
+//                    cue's own phrases continue. The bars under the statement are re-harmonised so that every
+//                    long or strong motif note is a chord tone (no rubs): G E G | A in C is I | IV.
+//  - hold: true      sustains the last stated note to the cue's end (a held pedal, e.g. violas on A): no melody,
+//                    accompaniment only above intensity 0.45, and a slow progression of chords that all contain the
+//                    held note, arriving on the plainest one (IV for an A in C) where the cue is cut.
+//                    Strings re-bow in two staggered desks (seamless), solo strings change bow, winds breathe,
+//                    celesta / music box re-strike once a bar.
+//  - downbeat: true  bar 1 starts exactly at the cue's t0 with no fade-in lead; the previous cue is cut there
+//                    (30 ms), and bar 1 is a struck chord (fast-bowed strings, horns, timpani, bass drum, cymbal).
+//    A cue whose motif statement enters on a cut starts exactly at t0 too; the outgoing cue overlaps it instead,
+//    holding its final chord into the statement only if that chord fits the statement's opening (no semitone rub).
+//  - mood: 'none'    the score fades out over 0.3 s at its t0 and stays silent until its t1 (the cue before it is
+//                    composed past the cut, so it is cut mid-flight rather than ending early). A gap after a cue in
+//                    plan.music (what compile leaves for a scene with music: "none") is treated the same way.
 import * as S from './synth.mjs';
 import { rng, noise1 } from '../core/lib.mjs';
 
@@ -38,6 +65,52 @@ export function keyPc(key) {
   const m = /^\s*([A-Ga-g])([#b]?)/.exec(String(key || ''));
   if (!m) throw new Error(`bad key ${key}`);
   return NOTE_PC[m[1].toUpperCase() + m[2]];
+}
+/** 'minor' for 'Am', 'A min', 'A minor', 'A aeolian'; otherwise 'major'. */
+export function keyMode(key) {
+  const rest = String(key || '').replace(/^\s*[A-Ga-g][#b]?/, '').trim().toLowerCase();
+  return rest === 'm' || rest.startsWith('min') || rest === 'aeolian' ? 'minor' : 'major';
+}
+/** MIDI number of a note name ('C4' = 60, 'F#3', 'Bb5'). */
+export function noteMidi(name) {
+  const m = /^\s*([A-Ga-g])([#b]?)(-?\d)\s*$/.exec(String(name));
+  if (!m) throw new Error(`bad note ${JSON.stringify(name)}`);
+  return 12 * (Number(m[3]) + 1) + NOTE_PC[m[1].toUpperCase() + m[2]];
+}
+/**
+ * Parse a motif: "G4:1 E4:0.5 G4:0.5 A4:2 C5:3" (beats default to 1), or an array of such tokens,
+ * [note, beats] pairs or { note, beats } objects. → [{ note, midi, beats }]
+ */
+export function parseMotif(src) {
+  if (src == null || src === '') return [];
+  const toks = Array.isArray(src) ? src : String(src).trim().split(/\s+/);
+  return toks.map(tk => {
+    let note, beats;
+    if (typeof tk === 'string') { const [a, b] = tk.split(':'); note = a; beats = b === undefined || b === '' ? 1 : Number(b); }
+    else if (Array.isArray(tk)) [note, beats = 1] = tk;
+    else if (tk && typeof tk === 'object') ({ note, beats = 1 } = tk);
+    beats = Number(beats);
+    if (!(beats > 0) || !Number.isFinite(beats)) throw new Error(`bad motif token ${JSON.stringify(tk)}`);
+    return { note: String(note).trim(), midi: noteMidi(note), beats };
+  });
+}
+/**
+ * Motif notes → scale degrees of `key` ({ d: 7·octave + degree from the tonic in octave 4, acc: semitones above
+ * that degree (0 = diatonic), rel: semitones from the tonic in octave 4 }).
+ */
+export function motifDegrees(notes, key = 'C') {
+  const ref = SCALES[keyMode(key) === 'minor' ? 'minor' : 'major'], base = 60 + keyPc(key);
+  return notes.map(nt => {
+    const rel = nt.midi - base, oct = Math.floor(rel / 12), s = rel - 12 * oct;
+    let i = 6; while (i > 0 && ref[i] > s) i--;
+    return { ...nt, d: 7 * oct + i, acc: s - ref[i], rel };
+  });
+}
+/** The interval shape the procedural melodies borrow: diatonic steps between the motif's notes, all but the last. */
+function motifSteps(deg) {
+  const use = deg.length >= 4 ? deg.slice(0, -1) : deg, steps = [];
+  for (let k = 1; k < use.length; k++) steps.push(clamp(use[k].d - use[k - 1].d, -4, 4));
+  return steps.some(x => x !== 0) ? steps : null;
 }
 const ROMAN = { I: 0, II: 2, III: 4, IV: 5, V: 7, VI: 9, VII: 11 };
 const QUAL = { '': null, maj7: [11], 7: [10], m7: [10], 6: [9], add9: [2], sus2: 'sus2', sus4: 'sus4', o: 'dim', o7: 'dim7', 'ø7': 'hdim', '+': 'aug' };
@@ -183,7 +256,7 @@ export const MOODS = {
   },
   // heroic: horns in thirds on a fanfare (interval-expanded) version of the theme, marcato string chords, timpani
   triumph: {
-    tempo: 100, meter: 4, keys: ['C', 'D', 'Bb'], scale: 'major', rit: 0.1, level: 2,
+    tempo: 100, meter: 4, keys: ['C', 'D', 'Bb'], scale: 'major', rit: 0.1, level: 0.5,
     progs: [['I', 'V', 'vi', 'IV', 'I', 'IV', 'Vsus4 V', 'I'], ['IV', 'V', 'iii', 'vi', 'IV', 'V', 'bVI bVII', 'I']],
     melody: ['horn', 'strings', 'horn'], horns2: true, fanfare: true, velBoost: 0.12, accomp: 'strings-block', blockMin: 0.3, pad: 'strings', bass: 'cello', counter: 'strings-high',
     perc: 'triumph', gliss: 0.5,
@@ -241,7 +314,38 @@ const INSTR = {
   brush: { fn: (f, d, o) => S.brush(o.vel, o), gain: 0.5, pan: -0.1, send: 0.18 },
   woodblock: { fn: (f, d, o) => S.woodblock(f, o.vel, o), gain: 0.5, pan: 0.35, send: 0.2 },
   swell: { fn: (f, d, o) => S.swell(d, o.vel, o), gain: 0.45, pan: 0, send: 0.35 },
+  cymbal: { fn: (f, d, o) => S.cymbal(o.vel, o), gain: 0.55, pan: 0.12, send: 0.3 },
+  cymbalRoll: { fn: (f, d, o) => S.cymbalRoll(d, o), gain: 0.55, pan: 0.05, send: 0.32 },
+  musicBox: { fn: (f, d, o) => S.musicBox(f, d, o), gain: 1.6, pan: 0.18, send: 0.4 },
+  bassoon: { line: 'bassoon', gain: 1.25, pan: -0.12, send: 0.26 },
+  brass: { line: 'brass', gain: 1.1, pan: -0.05, send: 0.3 },
+  cello: { bowed: 'cello', gain: 1.45, pan: 0.18, send: 0.28 },
+  viola: { bowed: 'viola', gain: 1.2, pan: 0.08, send: 0.3 },
+  violin: { bowed: 'violin', gain: 1.1, pan: -0.15, send: 0.32 },
 };
+
+// motif voices: written-octave shift, comfortable range (MIDI) and how a long note is sustained
+export const MOTIF_VOICES = ['bassoon', 'flute', 'cello', 'horn', 'celesta', 'violin', 'strings', 'music-box', 'tutti'];
+const MOTIF_VOICE = {
+  bassoon: { shift: -12, range: [43, 69], sustain: 'breath' },
+  flute: { shift: 0, range: [62, 93], sustain: 'breath' },
+  cello: { shift: -12, range: [43, 72], sustain: 'bow' },
+  horn: { shift: 0, range: [50, 74], sustain: 'breath' },
+  celesta: { shift: 12, range: [65, 96], sustain: 'strike' },
+  violin: { shift: 0, range: [55, 93], sustain: 'bow' },
+  strings: { shift: 0, range: [50, 84], sustain: 'section' },
+  'music-box': { shift: 12, range: [67, 98], sustain: 'strike' },
+  tutti: { shift: 0, range: [55, 81], sustain: 'section' },
+};
+const DEFAULT_MOTIF_VOICE = { wonder: 'celesta', pastoral: 'bassoon', tender: 'cello', playful: 'bassoon', tension: 'strings', chase: 'horn', sad: 'cello', triumph: 'tutti', night: 'celesta', mystery: 'flute' };
+// chords the motif harmoniser may use, with a small cost (plainer first)
+const HARM_CANDS = {
+  major: [['I', 0], ['IV', 0.1], ['V', 0.15], ['vi', 0.2], ['ii', 0.3], ['ii7', 0.35], ['IVmaj7', 0.35], ['V7', 0.4], ['Vsus4', 0.5], ['iii', 0.55], ['vi7', 0.6], ['Imaj7', 0.6], ['IVadd9', 0.6], ['I6', 0.7]],
+  minor: [['i', 0], ['iv', 0.1], ['V', 0.15], ['bVI', 0.2], ['bVII', 0.3], ['bIII', 0.35], ['V7', 0.4], ['iv7', 0.45], ['bVImaj7', 0.45], ['i7', 0.6], ['iio', 0.6]],
+};
+// borrowed and secondary chords, offered only for a chromatic motif note they contain (see harmCands)
+const BORROWED = ['I', 'i', 'I7', 'II', 'II7', 'ii', 'bII', 'III', 'III7', 'iii', 'bIII', 'IV', 'iv', 'V', 'v', 'VI', 'VI7', 'vi', 'bVI', 'VII', 'VII7', 'vii', 'bVII'];
+const semis = (a, b) => Math.abs(mod(a - b + 6, 12) - 6);
 
 // ================================================================ form and time
 
@@ -266,18 +370,32 @@ function timeMap(beatSec, landing, meter, rit, { intro = 0, seed = 1, landAt = n
 /**
  * Choose a form (intro bars + whole phrases, or a short 'mini' cadence, or a single 'swell' chord) and a tempo
  * close to the mood tempo such that the final chord lands with ~3 s left to ring.
+ * With a motif statement the intro is the statement's bars ('motif' = the statement then the final chord);
+ * with a held pedal ('pedal') nothing lands: just enough bars at the given tempo to cover the cue.
  */
-function chooseForm(dur, M, fixedTempo) {
+function chooseForm(dur, M, fixedTempo, { introBars = null, hold = false } = {}) {
   const meter = M.meter, base = fixedTempo || M.tempo, barSec = meter * 60 / base;
+  if (hold) {
+    const total = Math.max(introBars || 1, Math.ceil(dur / barSec) + 1);
+    return { kind: 'pedal', intro: introBars || 0, P: 0, before: total, landing: total * meter, Q: total * meter, tempo: base };
+  }
   const ring = clamp(barSec * 1.1, 3.4, 5), opts = [];
   const add = (kind, intro, P, before) => {
     const landing = before * meter, r0 = Math.max(0, landing - 2 * meter);
     const Q = landing + M.rit * (landing - r0) / 2;            // beats, including the ritardando stretch
     opts.push({ kind, intro, P, before, landing, Q });
   };
-  add('swell', 0, 0, 0); add('mini', 0, 0, 1);
-  for (let P = 1; P <= 200; P++) for (const intro of [0, 1, 2]) if (!(intro === 2 && P < 3)) add('full', intro, P, intro + 4 * P - 1);
-  const fallback = { kind: 'swell', intro: 0, P: 0, before: 0, landing: 0, tempo: base };
+  if (introBars != null) {          // the statement's bars, then 0–2 bars where it hangs over the accompaniment
+    for (const e of [0, 1, 2]) {
+      add('motif', introBars + e, 0, introBars + e);
+      for (let P = 1; P <= 200; P++) add('full', introBars + e, P, introBars + e + 4 * P - 1);
+    }
+  } else {
+    add('swell', 0, 0, 0); add('mini', 0, 0, 1);
+    for (let P = 1; P <= 200; P++) for (const intro of [0, 1, 2]) if (!(intro === 2 && P < 3)) add('full', intro, P, intro + 4 * P - 1);
+  }
+  const fallback = introBars != null ? { kind: 'motif', intro: introBars, P: 0, before: introBars, landing: introBars * meter, tempo: base }
+    : { kind: 'swell', intro: 0, P: 0, before: 0, landing: 0, tempo: base };
   if (fixedTempo) {   // fixed tempo: the longest form whose final chord still has 2.2 s to ring
     const fit = opts.filter(o => 60 / base * o.Q + 3 <= dur).sort((a, b) => b.landing - a.landing || a.intro - b.intro);
     return fit.length ? { ...fit[0], tempo: base } : fallback;
@@ -288,7 +406,8 @@ function chooseForm(dur, M, fixedTempo) {
     if (avail <= 0) break;
     const T = o.Q > 0 ? 60 * o.Q / avail : base, f = T / base;
     if (f < 0.87 || f > 1.15) continue;
-    const score = Math.abs(Math.log(f)) + (o.intro === 2 ? 0.04 : 0) + (o.intro === 0 && o.P > 1 ? 0.06 : 0) + (o.kind !== 'full' ? 0.3 : 0);
+    const extra = introBars == null ? o.intro : o.intro - introBars;
+    const score = Math.abs(Math.log(f)) + (extra === 2 ? 0.04 : 0) + (introBars == null && o.intro === 0 && o.P > 1 ? 0.06 : 0) + (o.kind !== 'full' ? 0.3 : 0);
     if (!best || score < best.score) best = { ...o, tempo: T, score, landAt: avail };
   }
   return best || fallback;
@@ -320,7 +439,7 @@ function midiToDeg(m, cs, tonicMidi) {
 }
 
 class Cue {
-  constructor({ dur, mood, intensity, key, tempo, seed, theme }) {
+  constructor({ dur, mood, intensity, key, tempo, seed, theme, themeSteps, motif, downbeat, cut }) {
     this.M = MOODS[mood];
     if (!this.M) throw new Error(`unknown mood ${mood}`);
     this.mood = mood; this.dur = dur; this.seed = seed;
@@ -329,13 +448,40 @@ class Cue {
     this.tonic = key != null ? keyPc(key) : NOTE_PC[this.M.keys[0]];
     this.tonicMidi = 60 + this.tonic;                // C4..B4
     this.scale = SCALES[this.M.scale];
-    this.theme = makeTheme(theme ?? seed);
+    this.theme = themeSteps && themeSteps.length ? { steps: Array.from({ length: 10 }, (_, k) => themeSteps[k % themeSteps.length]), seed: theme ?? seed } : makeTheme(theme ?? seed);
     this.meter = this.M.meter;
-    this.form = chooseForm(dur, this.M, tempo);
+    this.downbeat = !!downbeat;
+    this.cut = cut ?? null;                          // s: where the score will cut this cue (scoreFilm)
+    this.motif = this.prepareMotif(motif, key);
+    const mo = this.motif;
+    this.form = chooseForm(dur, this.M, tempo, mo ? { introBars: mo.R, hold: mo.hold } : {});
     this.tempo = this.form.tempo;
-    this.tm = timeMap(60 / this.tempo, this.form.landing, this.meter, this.M.rit, { intro: this.form.intro, seed: S.mixSeed(seed, mood, 'rubato'), landAt: this.form.landAt ?? null });
+    const rit = this.form.kind === 'pedal' ? 0 : this.M.rit;
+    this.tm = timeMap(60 / this.tempo, this.form.landing, this.meter, rit, { intro: this.form.intro, seed: S.mixSeed(seed, mood, 'rubato'), landAt: this.form.landAt ?? null });
     this.ev = [];
     this.lineId = 0;
+  }
+  /** Motif statement: the stated notes as cue-scale pitches on beats, how many bars they take, the voice. */
+  prepareMotif(motif, key) {
+    if (!motif || !motif.notes) return null;
+    const notes = typeof motif.notes === 'string' || !motif.notes.every?.(x => x && x.d != null) ? motifDegrees(parseMotif(motif.notes), motif.key ?? key ?? this.M.keys[0]) : motif.notes;
+    const n = clamp(Math.round(motif.n ?? notes.length), 0, notes.length);
+    if (!n) return null;
+    const voice = MOTIF_VOICE[motif.voice] ? motif.voice : DEFAULT_MOTIF_VOICE[this.mood] || 'strings';
+    const evs = [];
+    let beat = 0;
+    for (const nt of notes.slice(0, n)) {
+      // a diatonic note follows the cue's mode by scale degree; a chromatic one keeps its written interval from the
+      // tonic (a borrowed Bb stays Bb in a minor mood, where the 7th is already flat)
+      const midi = this.tonicMidi + (nt.acc ? nt.rel : 12 * Math.floor(nt.d / 7) + this.scale[mod(nt.d, 7)]);
+      evs.push({ beat, len: nt.beats, midi, pc: mod(midi - this.tonicMidi, 12) });
+      beat += nt.beats;
+    }
+    const hold = !!motif.hold, meter = this.meter;
+    const R = hold ? Math.max(1, Math.ceil(beat / meter - 1e-9)) : Math.ceil((beat + 1) / meter - 1e-9);
+    const last = evs[evs.length - 1];
+    if (!hold) last.len = Math.max(last.len, R * meter - 0.35 - last.beat);      // the last note hangs to the end of the statement
+    return { evs, R, hold, voice, beats: beat };
   }
   t(beat) { return this.tm(beat); }
   /** How long a note starting at `beat` may sustain in the final chord: it releases ~2.3 s before the cue ends, so the hall can ring out. */
@@ -347,19 +493,26 @@ class Cue {
   plan() {
     const { M, form, meter } = this, bars = [];
     const progA = M.progs[0], progsB = M.progs.slice(1);
-    const pushBar = (syms, section, phrase, pos, type, extra = {}) => {
+    const pushBar = (syms, section, phrase, pos, type, { lens: given, ...extra } = {}) => {
       const parts = syms.split(/\s+/), chords = [];
-      const lens = parts.length === 1 ? [meter] : meter === 3 ? [2, 1] : parts.map(() => meter / parts.length);
+      const lens = given || (parts.length === 1 ? [meter] : meter === 3 ? [2, 1] : parts.map(() => meter / parts.length));
       let at = bars.length * meter;
       parts.forEach((p, k) => { chords.push({ at, len: lens[k], ch: chord(p) }); at += lens[k]; });
       bars.push({ i: bars.length, start: (bars.length) * meter, chords, section, phrase, pos, type, ...extra });
     };
-    if (form.kind === 'swell') pushBar(M.unresolved ? progA[0] : M.scale === 'major' ? 'I' : 'i', 'end', 0, 3, 'final', { landing: true });
+    if (this.motif) {
+      this.harmonizeMotif().forEach(({ syms, lens }, k) => pushBar(syms, 'motif', -1, k, 'intro', { lens }));
+      if (form.kind === 'pedal') this.pedalChords(form.before - this.motif.R).forEach((syms, k) => pushBar(syms, 'pedal', -1, k, 'pedal'));
+      else for (let k = this.motif.R; k < form.intro; k++) pushBar(progA[0], 'intro', -1, k, 'intro');     // the statement hangs
+      if (form.kind === 'motif') pushBar(M.unresolved ? progA[0] : M.scale === 'major' ? 'I' : 'i', 'A', 0, 3, 'final', { landing: true });
+    }
+    if (this.motif && form.kind !== 'full') { /* planned above */ }
+    else if (form.kind === 'swell') pushBar(M.unresolved ? progA[0] : M.scale === 'major' ? 'I' : 'i', 'end', 0, 3, 'final', { landing: true });
     else if (form.kind === 'mini') {
       pushBar(progA[6].split(' ').pop(), 'A', 0, 2, 'cons');
       pushBar(progA[7], 'A', 0, 3, 'final', { landing: true });
     } else {
-      for (let k = 0; k < form.intro; k++) pushBar(progA[0], 'intro', -1, k, 'intro');
+      if (!this.motif) for (let k = 0; k < form.intro; k++) pushBar(progA[0], 'intro', -1, k, 'intro');
       const P = form.P;
       for (let ph = 0; ph < P; ph++) {
         const period = Math.floor(ph / 2), half = ph % 2;
@@ -375,9 +528,108 @@ class Cue {
     this.bars = bars;
     // final landing: the final cadence bar must be the tonic (unless the mood stays unresolved)
     const lb = bars[bars.length - 1];
-    if (!M.unresolved && lb.chords.length === 1 && lb.chords[0].ch.root !== 0) lb.chords[0].ch = chord(M.scale === 'major' ? 'I' : 'i');
+    if (lb.landing && !M.unresolved && lb.chords.length === 1 && lb.chords[0].ch.root !== 0) lb.chords[0].ch = chord(M.scale === 'major' ? 'I' : 'i');
     this.phrases = [];
     for (const b of bars) if (b.phrase >= 0) (this.phrases[b.phrase] ||= []).push(b);
+  }
+  /**
+   * Chords the harmoniser may use in this mood: the scale's plain chords plus the mood's own progressions, plus,
+   * for each motif note that none of those contains (a chromatic note, or Hungarian minor's #4), the borrowed /
+   * secondary chords that contain it and are otherwise made of tones the mood already uses (a Bb in C major: bVII,
+   * v, I7; an F#: II, II7, vii).
+   */
+  harmCands() {
+    if (this._cands) return this._cands;
+    const sc = this.scale, inProg = new Set(this.M.progs.flat().flatMap(x => x.split(/\s+/)));
+    const list = (sc[2] === 4 ? HARM_CANDS.major : HARM_CANDS.minor).filter(([sym]) => { const ch = chord(sym); return ch.pcs.every(pc => sc.includes(pc)) || inProg.has(sym); });
+    for (const sym of inProg) if (!list.some(([x]) => x === sym)) list.push([sym, 0.45]);
+    const vocab = new Set([...sc, ...list.flatMap(([sym]) => chord(sym).pcs)]);
+    const chrom = new Set((this.motif?.evs || []).map(e => e.pc).filter(pc => !list.some(([sym]) => chord(sym).pcs.includes(pc))));
+    if (chrom.size) for (const sym of BORROWED) {
+      const ch = chord(sym);
+      if (!list.some(([x]) => x === sym) && ch.pcs.some(pc => chrom.has(pc)) && ch.pcs.every(pc => vocab.has(pc) || chrom.has(pc))) list.push([sym, 0.65]);
+    }
+    return (this._cands = list.map(([sym, pref]) => ({ sym, pref, ch: chord(sym) })));
+  }
+  /**
+   * Harmonise the motif statement bar by bar (one chord, or two: 2+2 or 3+1 in 4/4, 2+1 in 3/4). Long and strong
+   * motif notes must be chord tones; short weak notes may pass. A chord tone a semitone from a sustained motif note
+   * (a rub) is penalised; keeping the previous chord while it fits is preferred; bar 1 prefers the tonic.
+   * → per bar { syms: 'I IV', lens: [2, 2] }
+   */
+  harmonizeMotif() {
+    const { meter } = this, mo = this.motif, notes = mo.evs, cands = this.harmCands(), out = [];
+    const cost = (c, a, l, prev, first) => {
+      let k = c.pref;
+      for (const nt of notes) {
+        const end = mo.hold && nt === notes[notes.length - 1] ? Infinity : nt.beat + nt.len;
+        const o0 = Math.max(a, nt.beat), o1 = Math.min(a + l, end);
+        if (o1 <= o0 + 1e-6) continue;
+        const onBeat = Math.abs(nt.beat - a) < 1e-6, longNote = nt.len >= 1, w = (o1 - o0) * (onBeat ? 1.5 : 1) * (longNote ? 1.2 : 0.7);
+        if (!c.ch.pcs.includes(nt.pc)) k += w * (!longNote && !onBeat ? 0.8 : 3.5);
+        if (longNote && c.ch.pcs.some(pc => semis(pc, nt.pc) === 1)) k += 1.5 * (o1 - o0) / l;
+        if (longNote && nt.pc === 0 && c.ch.root === 0 && nt.beat >= a - 1e-6) k -= 0.4;             // a long tonic note: tonic chord
+      }
+      if (first && c.ch.root === 0) k -= 0.35;
+      if (prev && prev.sym === c.sym) k -= 0.25;
+      return k;
+    };
+    let prev = null;
+    for (let b = 0; b < mo.R; b++) {
+      const s0 = b * meter, half = meter === 3 ? 2 : meter / 2;
+      let best = null;
+      const options = [[[s0, meter]], [[s0, half], [s0 + half, meter - half]]];
+      if (meter === 4) options.push([[s0, 3], [s0 + 3, 1]]);                     // a change on beat 4, for a long note there
+      for (const segs of options) {
+        let tot = segs.length === 1 ? 0 : segs[0][1] === half ? 0.45 : 0.6, p = prev;
+        const picks = [];
+        for (const [a, l] of segs) {
+          let bc = null, bk = Infinity;
+          for (const c of cands) { const k = cost(c, a, l, p, a === 0); if (k < bk) { bk = k; bc = c; } }
+          tot += bk; picks.push(bc); p = bc;
+        }
+        if (!best || tot < best.tot - 1e-9) best = { tot, picks, lens: segs.map(([, l]) => l) };
+      }
+      const syms = best.picks.map(c => c.sym);
+      out.push(syms.length === 2 && syms[0] === syms[1] ? { syms: syms[0], lens: [meter] } : { syms: syms.join(' '), lens: best.lens });
+      prev = best.picks[best.picks.length - 1];
+    }
+    this.motifLastChord = prev;
+    return out;
+  }
+  /**
+   * Chords under a held pedal note: every chord contains the held pitch and no other tone within a whole step of
+   * it (no friction under a long note); one per root, plainest first (for an A in C: IV, vi, ii). They change every two bars, never repeat back to back, and
+   * the plainest one (IV) arrives two bars before the cut (or the end), so the cue is cut on it.
+   */
+  pedalChords(nBars) {
+    if (nBars <= 0) return [];
+    const held = this.motif.evs[this.motif.evs.length - 1].pc, cycle = [];
+    const fits = maxRub => this.harmCands().filter(c => c.ch.pcs.includes(held) && !c.ch.pcs.some(pc => pc !== held && semis(pc, held) <= maxRub)).sort((a, b) => a.pref - b.pref);
+    for (const c of fits(2).length >= 2 ? fits(2) : fits(1)) if (!cycle.some(x => x.ch.root === c.ch.root)) cycle.push(c);
+    if (!cycle.length) cycle.push(this.motifLastChord);
+    const meter = this.meter, R = this.motif.R, tCut = this.cut ?? this.dur;
+    let cutBars = 0;
+    while (cutBars < nBars && this.t((R + cutBars) * meter) < tCut - 1e-3) cutBars++;
+    const finalStart = Math.max(0, cutBars - 2), fin = cycle[0], out = [];
+    let k = cycle.length > 1 && cycle[0].sym === this.motifLastChord?.sym ? 1 : 0, cur = null;
+    for (let b = 0; b < nBars; b++) {
+      if (b >= finalStart) cur = fin;
+      else if (b % 2 === 0) {
+        let c = cycle[k % cycle.length];
+        if (cycle.length > 1 && (c.sym === cur?.sym || (b + 2 >= finalStart && c.sym === fin.sym))) c = cycle[++k % cycle.length];
+        if (cycle.length > 2 && c.sym === fin.sym && b + 2 >= finalStart) c = cycle[++k % cycle.length];
+        cur = c; k++;
+      }
+      out.push(cur.sym);
+    }
+    return out;
+  }
+  /** Beat at a time in seconds (inverse of the time map). */
+  beatAt(sec) {
+    let lo = 0, hi = (this.bars?.length || 1) * this.meter + 64;
+    for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; if (this.t(mid) < sec) lo = mid; else hi = mid; }
+    return (lo + hi) / 2;
   }
   chordAt(beat) {
     const b = this.bars[clamp(Math.floor(beat / this.meter), 0, this.bars.length - 1)];
@@ -484,28 +736,38 @@ class Cue {
     let voicing = null, bassPrev = null, melPrev = null;
     const padInst = { strings: 'strings', 'strings-trem': 'stringsTrem', pad: 'pad', choir: 'choir' }[M.pad];
     const slots = [];
+    const held = this.motif?.hold ? this.motif.evs[this.motif.evs.length - 1] : null;   // the pad leaves a held note to its player
     for (const bar of bars) for (const c of bar.chords) {
-      voicing = voiceLead(voicing, c.ch.pcs, { lo: 55, hi: 76, voices: 4, tonic: this.tonic });
-      slots.push({ at: c.at, len: c.len, v: voicing.slice(), I: this.iAt(c.at), last: !!bar.landing, intro: bar.section === 'intro', ch: c.ch });
+      if (held && c.at >= held.beat - 1e-6) {
+        // under a held note the middle stays clear: the harmony moves low and open (root and fifth), the held note completes it
+        const root = 48 + mod(this.tonic + c.ch.root - 48, 12), fifth = c.ch.pcs.some(pc => mod(pc - c.ch.root, 12) === 7) ? root + 7 : root + mod(c.ch.pcs[1] - c.ch.root, 12);
+        voicing = [root, fifth];
+      } else voicing = voiceLead(voicing && voicing.length === 4 ? voicing : null, c.ch.pcs, { lo: 55, hi: 76, voices: 4, tonic: this.tonic });
+      // under a statement the pads step back (a solo moment); under a held pedal a little
+      const under = bar.section === 'motif' ? (this.motif.voice === 'tutti' ? 0.8 : 0.6) : bar.section === 'pedal' ? 0.5 : 1;
+      slots.push({ at: c.at, len: c.len, v: voicing.slice(), I: this.iAt(c.at), last: !!bar.landing, intro: bar.section === 'intro', ch: c.ch, under, pedal: !!held && c.at >= held.beat - 1e-6 });
     }
     const sustain = (inst, pitchOf, velOf, opts, gate = () => true) => {
       let cur = null;
-      const flush = () => { if (cur) this.note(inst, cur.at, cur.end - cur.at + 0.08, cur.m, cur.vel, { sec: cur.last ? this.ringSec(cur.at) : undefined, opts }); cur = null; };
+      const flush = () => { if (cur) this.note(inst, cur.at, cur.end - cur.at + 0.08, cur.m, cur.vel, { sec: cur.last ? this.ringSec(cur.at) : undefined, opts: cur.opts }); cur = null; };
       for (const sl of slots) {
         const m = gate(sl) ? pitchOf(sl) : null;
         if (m == null) { flush(); continue; }
         if (cur && cur.m === m && !sl.last) { cur.end = sl.at + sl.len; continue; }
         if (cur && cur.m === m && sl.last) { cur.end = sl.at + sl.len; cur.last = true; continue; }
         flush();
-        cur = { at: sl.at, end: sl.at + sl.len, m, vel: velOf(sl), last: sl.last };
+        cur = { at: sl.at, end: sl.at + sl.len, m, vel: velOf(sl), last: sl.last, opts: typeof opts === 'function' ? opts(sl) : opts };
       }
       flush();
     };
-    const padOpts = padInst === 'strings' ? { voices: 5, expr: 0.3 } : { expr: 0.3 };
-    if (padInst) for (let k = 0; k < 4; k++) sustain(padInst, sl => sl.v[k], sl => (0.28 + 0.3 * sl.I) * (k === 3 ? 1.05 : 0.95), padOpts);
-    if (padInst && M.pad2) for (let k = 1; k < 4; k++) sustain('choir', sl => sl.v[k] + 12, sl => 0.22 + 0.2 * sl.I, { expr: 0.3 }, sl => sl.I >= (M.pad2Min ?? 0.55) && !sl.intro);
+    // under a held pedal the pads chorus less (detuned unisons beat against a long note)
+    const padOpts = sl => (padInst === 'strings' ? { voices: 5, expr: 0.3, ...(sl.pedal ? { detune: 4 } : {}) } : { expr: 0.3, ...(sl.pedal ? { detune: 2.5, bright: 0.12 } : {}) });
+    if (padInst) for (let k = 0; k < 4; k++) sustain(padInst, sl => sl.v[k], sl => (0.28 + 0.3 * sl.I) * (k === 3 ? 1.05 : 0.95) * sl.under, padOpts);
+    // octave doublings of the upper voices; none under a held pedal (its voicing is only root and fifth, and the
+    // middle stays clear for the held note, which a choir or high strings would double in a beating unison)
+    if (padInst && M.pad2) for (let k = 1; k < 4; k++) sustain('choir', sl => sl.v[k] + 12, sl => 0.22 + 0.2 * sl.I, { expr: 0.3 }, sl => sl.I >= (M.pad2Min ?? 0.55) && !sl.intro && !sl.pedal);
     if (M.cluster) sustain('stringsTrem', sl => 62 + mod(this.tonic + 8 - 62, 12), sl => 0.28 + 0.22 * sl.I, { expr: 0.4 });  // b6 rubbing against the 5th
-    if (padInst === 'strings') sustain('strings', sl => sl.v[3] + 12, sl => 0.3 + 0.2 * sl.I, { voices: 5 }, sl => sl.I >= 0.75);
+    if (padInst === 'strings') sustain('strings', sl => sl.v[3] + 12, sl => 0.3 + 0.2 * sl.I, { voices: 5 }, sl => sl.I >= 0.75 && !sl.pedal);
     // --- bass
     const bassInst = M.bass;
     const bassOf = sl => {
@@ -520,7 +782,7 @@ class Cue {
     else if (bassInst !== 'none') for (const sl of slots) {
       if (sl.I < bassMin && !sl.last) continue;
       const bm = bassOf(sl), v = 0.4 + 0.3 * sl.I, fifth = bm + 7 > 52 ? bm - 5 : bm + 7;
-      if (bassInst === 'harp-low') this.note('harp', sl.at, sl.len, bm, v);
+      if (bassInst === 'harp-low') this.note('harp', sl.at, sl.len, bm, v, { opts: sl.last ? undefined : { mute: true, release: 0.45 } });   // damped at the chord change
       else if (bassInst === 'pizz' || bassInst === 'pizz2') {
         this.note('bassPizz', sl.at, 1, bm, v + 0.1);
         if (!sl.last && meter === 4 && sl.len >= 4 && (bassInst === 'pizz2' || sl.I >= 0.5)) this.note('bassPizz', sl.at + 2, 1, fifth, v - (bassInst === 'pizz2' ? 0 : 0.08));
@@ -533,8 +795,14 @@ class Cue {
         }
       }
     }
-    // --- accompaniment
-    for (const bar of bars) this.accomp(bar, this.iAt(bar.start));
+    // --- accompaniment (a statement is a solo moment: pads and bass only; under a held pedal only when loud)
+    for (const bar of bars) {
+      const I = this.iAt(bar.start);
+      if (bar.section === 'motif' || (bar.section === 'pedal' && I < 0.45)) continue;
+      this.accomp(bar, I);
+    }
+    if (this.motif) this.playMotif();
+    if (this.downbeat) this.downbeatHit();
     // --- melody, phrase by phrase
     for (let p = 0; p < this.phrases.length; p++) {
       const pb = this.phrases[p], sec = pb[0].section, I = this.iAt(pb[0].start);
@@ -551,9 +819,129 @@ class Cue {
       // doubling / counter-line at higher intensity
       if (I >= 0.62 && M.counter !== 'none') this.counter(pb, I, mel.notes);
     }
-    // --- percussion and sparkle
-    for (const bar of bars) this.perc(bar, this.iAt(bar.start));
-    this.ending();
+    // --- percussion and sparkle (none under a held pedal; bar 1 of a downbeat cue has its own hit)
+    for (const bar of bars) {
+      const I = this.iAt(bar.start);
+      if (bar.section === 'pedal' || (this.downbeat && bar.i === 0) || (bar.section === 'motif' && I < 0.6)) continue;
+      this.perc(bar, I);
+    }
+    if (bars[bars.length - 1].landing) this.ending();
+  }
+  /** Event at a time in seconds (for sustains that are laid out in real time: re-bowing, breaths, re-strikes). */
+  noteSec(inst, t, dur, midi, vel, o = {}) {
+    this.ev.push({ inst, t, dur: Math.max(0.03, dur), midi, vel: clamp(vel, 0.05, 1), line: o.line, slur: o.slur, opts: o.opts, roll: 0, beat: this.beatAt(t), tag: o.tag });
+  }
+  /**
+   * The motif statement on its voice, from bar 1: short notes slurred, long notes freshly bowed / tongued, a
+   * dynamic arc rising to the longest note. The last note sustains (to the end of the statement, or with hold to
+   * the end of the cue), laid out the way that instrument really sustains.
+   */
+  playMotif() {
+    const mo = this.motif, V = MOTIF_VOICE[mo.voice], I = this.iAt(0);
+    let shift = V.shift;
+    const lo = Math.min(...mo.evs.map(e => e.midi)), hi = Math.max(...mo.evs.map(e => e.midi));
+    while (hi + shift > V.range[1] && lo + shift - 12 >= V.range[0] - 5) shift -= 12;
+    while (lo + shift < V.range[0] && hi + shift + 12 <= V.range[1] + 5) shift += 12;
+    let peakK = 0; mo.evs.forEach((e, k) => { if (e.len >= mo.evs[peakK].len) peakK = k; });
+    const base = 0.56 + 0.3 * I, N = mo.evs.length, endSec = this.dur + 0.5;
+    const notes = mo.evs.map((e, k) => {
+      const arc = k <= peakK ? 0.88 + 0.14 * k / Math.max(1, peakK) : 1.02 - 0.08 * (k - peakK) / Math.max(1, N - 1 - peakK);
+      const t0 = this.t(e.beat), last = k === N - 1;
+      const t1 = last && mo.hold ? endSec : this.t(e.beat + e.len);
+      return { t0, t1, midi: e.midi + shift, vel: base * arc, slur: k > 0 && e.len < 1, last };
+    });
+    // a long last note: how this voice sustains it
+    const out = [];
+    for (const nt of notes) {
+      const d = nt.t1 - nt.t0;
+      if (!nt.last || d < 6.5 || V.sustain === 'section') { out.push(nt); continue; }
+      if (V.sustain === 'strike') {                                                       // re-strike once a bar, fading
+        const bar = this.meter * 60 / this.tempo;
+        for (let t = nt.t0, j = 0; t < nt.t1 - 0.3; t += bar, j++) out.push({ ...nt, t0: t, t1: Math.min(nt.t1, t + bar), vel: nt.vel * Math.max(0.55, Math.pow(0.86, j)), slur: false, strike: j > 0 });
+        continue;
+      }
+      // solo bow changes every ~5 s (contiguous, unslurred); winds breathe every ~6 s (a 0.25 s gap)
+      const seg = V.sustain === 'bow' ? 5 : 6, gap = V.sustain === 'bow' ? 0 : 0.25, r = rng(S.mixSeed(this.seed, 'sustain'));
+      let t = nt.t0, j = 0;
+      while (t < nt.t1 - 0.5) {
+        const e = Math.min(nt.t1, t + seg * (0.85 + 0.3 * r()));
+        out.push({ ...nt, t0: t, t1: nt.t1 - e < 1.5 ? nt.t1 : e - gap, vel: nt.vel * (j ? 0.9 + 0.1 * r() : 1), slur: false });
+        if (nt.t1 - e < 1.5) break;
+        t = e; j++;
+      }
+    }
+    const line = ++this.lineId, play = (inst, nt, dm, vel, o = {}) => this.noteSec(inst, nt.t0, nt.t1 - nt.t0 + (o.legato ?? 0), nt.midi + dm, vel, { ...o, tag: 'motif' });
+    const section = (nt, dm, vel, voices) => {                                            // strings: staggered desks on long notes
+      const d = nt.t1 - nt.t0;
+      if (d < 6.5) { play('strings', nt, dm, vel, { legato: 0.06, opts: { voices, attack: nt.slur ? 0.08 : 0.16 } }); return; }
+      const r = rng(S.mixSeed(this.seed, 'desks', dm));
+      for (let desk = 0; desk < 2; desk++) {
+        let t = nt.t0, j = 0;
+        if (desk === 1) { play('strings', { ...nt, t1: nt.t0 + 2.2 + r() }, dm, vel * 0.8, { opts: { voices: Math.ceil(voices / 2), attack: 0.16 } }); t = nt.t0 + 1.6 + r(); }
+        while (t < nt.t1 - 0.4) {
+          const e = Math.min(nt.t1, t + 4.2 + 1.8 * r()), endT = nt.t1 - e < 1.2 ? nt.t1 : e + 0.7;
+          play('strings', { ...nt, t0: t, t1: endT }, dm, vel * (0.78 + 0.12 * r()), { opts: { voices: Math.ceil(voices / 2), attack: j || desk ? 0.9 : 0.16, release: 0.9, expr: 0.15 } });
+          if (endT >= nt.t1) break;
+          t = e; j++;
+        }
+      }
+    };
+    // strings: a divisi section of real bowed lines (viola / violin / cello by register); on a long note each player
+    // changes bow on their own schedule, so the section never breathes at once
+    const divisi = (nt, dm, vel, players = 3) => {
+      const m = nt.midi + dm, timbre = m < 55 ? 'cello' : m <= 76 ? 'viola' : 'violin', d = nt.t1 - nt.t0, r = rng(S.mixSeed(this.seed, 'divisi', dm));
+      for (let p = 0; p < players; p++) {
+        const lid = `${line}d${p}`, off = p * 0.011, pv = vel * 0.62 * (p === 1 ? 0.9 : 1);
+        if (d < 6.5) { play(timbre, { ...nt, t0: nt.t0 + off }, dm, pv, { line: lid, slur: nt.slur }); continue; }
+        let t = nt.t0 + off, j = 0;
+        const first = 2.2 + 1.7 * p + r(), breathe = u => 1 - 0.16 * Math.sin(Math.PI * Math.min(1, u / 0.85));   // eases back, then swells to the cut
+        while (t < nt.t1 - 0.5) {
+          const e = Math.min(nt.t1, t + (j ? 4 + 2 * r() : first)), end = nt.t1 - e < 1.5 ? nt.t1 : e;
+          play(timbre, { ...nt, t0: t, t1: end }, dm, pv * (j ? 0.94 + 0.06 * r() : 1) * breathe((t - nt.t0) / Math.max(1, Math.min(nt.t1, this.cut ?? nt.t1) - nt.t0)), { line: lid, slur: false });
+          if (end >= nt.t1) break;
+          t = e; j++;
+        }
+      }
+    };
+    // a bell-like voice cannot hold: under its re-strikes, two violas sustain the held note very softly
+    const struck = out.filter(nt => nt.strike);
+    if (struck.length) { const first = out.find(nt => nt.last); divisi({ ...first, t0: first.t0 + 0.15, t1: struck[struck.length - 1].t1, slur: false }, first.midi > 76 ? -12 : 0, first.vel * 0.45, 2); }
+    for (const nt of out) {
+      const v = nt.vel;
+      switch (mo.voice) {
+        case 'bassoon': play('bassoon', nt, 0, v, { line, slur: nt.slur }); break;
+        case 'flute': play('flute', nt, 0, v * 0.95, { line, slur: nt.slur }); break;
+        case 'horn': play('horn', nt, 0, v, { line, slur: nt.slur }); play('horn', { ...nt, t0: nt.t0 + 0.015 }, -12, v * 0.6, { line: `${line}8vb`, slur: nt.slur }); break;   // broad: doubled an octave below (a synthetic unison only phases)
+        case 'cello': play('cello', nt, 0, v, { line, slur: nt.slur }); break;
+        case 'violin': play('violin', nt, 0, v, { line, slur: nt.slur }); break;
+        case 'celesta': play('celesta', nt, 0, v * 0.95); if (I >= 0.5 && !nt.strike) play('glock', nt, 12, v * 0.35); break;
+        case 'music-box': play('musicBox', nt, 0, v * 0.95); break;
+        case 'strings': divisi(nt, 0, v); break;
+        case 'tutti':
+          play('horn', nt, 0, v, { line, slur: nt.slur }); play('horn', { ...nt, t0: nt.t0 + 0.015 }, -12, v * 0.6, { line: `${line}8vb`, slur: nt.slur });
+          section(nt, 0, v * 0.9, 6); section(nt, 12, v * 0.8, 6);
+          if (nt.midi + 12 <= 96) play('flute', nt, 12, v * 0.75, { line: `${line}fl`, slur: nt.slur });
+          break;
+      }
+    }
+  }
+  /** Bar 1 of a downbeat cue: a struck chord (fast-bowed strings, horns on the lower chord tones), timpani, bass drum, cymbal. */
+  downbeatHit() {
+    const I = this.iAt(0), c0 = this.bars[0].chords[0], ch = c0.ch, sec = Math.max(0.6, this.t(this.motif ? 1 : c0.len) + 0.15);
+    const tones = ch.pcs.map(pc => mod(pc + this.tonic, 12)), v = 0.48 + 0.4 * I;
+    const rootLow = 36 + mod(this.tonic + ch.root - 36, 12);
+    const top = this.motif ? Math.min(79, this.motif.evs[0].midi - 2) : 79;            // the struck chord sits under the tune
+    const voicing = voiceLead(null, ch.pcs, { lo: Math.min(55, top - 12), hi: top, voices: 4, tonic: this.tonic });
+    for (const m of voicing) this.note('strings', 0, c0.len, m, v, { sec, opts: { attack: 0.025, release: 0.7, voices: 5 } });
+    for (const m of [rootLow, rootLow + 12]) this.note('strings', 0, c0.len, m, v * 0.9, { sec, opts: { attack: 0.03, release: 0.8, voices: 4 } });
+    if (I >= 0.4) {
+      const hornNotes = []; for (let m = 48; m <= 62 && hornNotes.length < 3; m++) if (tones.includes(mod(m, 12)) && (!hornNotes.length || m - hornNotes[hornNotes.length - 1] >= 3)) hornNotes.push(m);
+      hornNotes.forEach((m, k) => this.note('horn', 0, c0.len, m, v * (this.motif ? 0.6 : 0.85), { line: `db${k}`, sec }));
+    }
+    const timp = rootLow < 41 ? rootLow + 12 : rootLow;
+    this.note('timpani', 0, 1, 0, 0.6 + 0.35 * I, { opts: { f: mtof(timp) } });
+    this.note('concert', 0, 1, 0, 0.5 + 0.3 * I);
+    if (I >= 0.4) this.note('cymbal', 0, 1, 0, 0.35 + 0.4 * I, { opts: { decay: 3.2 } });
   }
   /** Suspense line: the dominant and its upper semitone (5–b6) in the low clarinet, answered a minor third higher. */
   tensionLine(pb, I) {
@@ -773,19 +1161,21 @@ class Cue {
   }
 
   // ---------------------------------------------------------------- performance + render
-  render() {
+  render({ normalize = true } = {}) {
     const n = Math.max(1, Math.round(this.dur * SR)), dry = S.stereo(n), send = S.stereo(n);
     const hr = rng(S.mixSeed(this.seed, 'human', this.mood));
     const lines = new Map(), echo = this.M.echo ? S.stereo(n) : null, meter = this.meter;
     for (const e of this.ev) {
       const I = INSTR[e.inst];
       // humanise: timing scatter by instrument family, velocity scatter, metric accents, rolled chords
-      const sig = I.line ? 0.012 : ['kick', 'concert', 'shaker', 'brush', 'woodblock', 'timpani'].includes(e.inst) ? 0.005 : 0.01;
+      const legato = I.line || I.bowed;
+      let sig = legato ? 0.012 : ['kick', 'concert', 'shaker', 'brush', 'woodblock', 'timpani', 'cymbal'].includes(e.inst) ? 0.005 : 0.01;
+      if (this.downbeat && e.beat < 0.01) sig = 0.003;                                       // the struck downbeat is tight
       e.t = Math.max(0, e.t + S.gauss(hr) * sig + e.roll);
       const inBar = mod(e.beat + 1e-6, meter) - 1e-6;
-      const acc = e.dur > 1.2 || I.line ? 1 : inBar < 0.01 ? 1.07 : meter === 4 && Math.abs(inBar - 2) < 0.01 ? 1.0 : Math.abs(inBar - Math.round(inBar)) < 0.01 ? 0.94 : 0.86;
+      const acc = e.dur > 1.2 || legato ? 1 : inBar < 0.01 ? 1.07 : meter === 4 && Math.abs(inBar - 2) < 0.01 ? 1.0 : Math.abs(inBar - Math.round(inBar)) < 0.01 ? 0.94 : 0.86;
       e.vel = clamp(e.vel * acc * (1 + S.gauss(hr) * 0.1), 0.05, 1);
-      if (I.line) { const k = `${e.inst}:${e.line}`; if (!lines.has(k)) lines.set(k, []); lines.get(k).push(e); continue; }
+      if (legato) { const k = `${e.inst}:${e.line}`; if (!lines.has(k)) lines.set(k, []); lines.get(k).push(e); continue; }
       const f = e.opts?.f ?? mtof(e.midi);
       const maxDur = Math.max(0.05, this.dur - e.t);
       const buf = I.fn(f, Math.min(e.dur, maxDur), { vel: e.vel, seed: S.mixSeed(this.seed, e.inst, e.t, e.midi), ...(e.opts || {}) });
@@ -800,7 +1190,7 @@ class Cue {
       // never let two notes of a monophonic line overlap after humanising
       const notes = evs.map(e => ({ t: e.t - t0, dur: e.dur, freq: mtof(e.midi) * Math.pow(2, (e.opts?.cents || 0) / 1200), vel: e.vel, slur: e.slur }));
       for (let j = 0; j + 1 < notes.length; j++) if (notes[j].t + notes[j].dur > notes[j + 1].t) notes[j].dur = Math.max(0.03, notes[j + 1].t - notes[j].t);
-      const buf = S.windLine(notes, { timbre: I.line, seed: S.mixSeed(this.seed, k) });
+      const buf = I.bowed ? S.bowedLine(notes, { timbre: I.bowed, seed: S.mixSeed(this.seed, k) }) : S.windLine(notes, { timbre: I.line, seed: S.mixSeed(this.seed, k) });
       S.mixInto(dry, buf, t0 * SR, I.gain, I.pan);
       S.mixInto(send, buf, t0 * SR, I.gain * I.send, I.pan);
     }
@@ -814,7 +1204,7 @@ class Cue {
     }
     const Iavg = this.bars.reduce((a, b) => a + this.iAt(b.start), 0) / this.bars.length;
     const target = -25 + 8 * Iavg + (this.M.level || 0), now = S.rmsDb(dry);
-    const g = now > -120 ? S.db(clamp(target - now, -30, 30)) : 1;
+    const g = now > -120 && normalize ? S.db(clamp(target - now, -30, 30)) : 1;
     for (const ch of [dry.L, dry.R]) for (let i = 0; i < n; i++) ch[i] *= g;
     S.limiter(dry, { ceilingDb: -1.3 });
     S.fade(dry.L, 0.004, 2.2); S.fade(dry.R, 0.004, 2.2);
@@ -826,9 +1216,9 @@ class Cue {
  * Compose a cue without rendering it: the form, bars (chords, sections, phrase positions), tempo and the note
  * events (inst, t, dur, midi, vel, beat). Same arguments as composeCue. Useful for tests, sheets and debugging.
  */
-export function planCue({ dur, mood = 'pastoral', intensity = 0.5, key, tempo, seed = 1, theme } = {}) {
+export function planCue({ dur, mood = 'pastoral', intensity = 0.5, key, tempo, seed = 1, theme, themeSteps, motif, downbeat, cut } = {}) {
   if (!(dur > 0)) throw new Error('composeCue: dur must be > 0');
-  const C = new Cue({ dur, mood, intensity, key, tempo, seed, theme });
+  const C = new Cue({ dur, mood, intensity, key, tempo, seed, theme, themeSteps, motif, downbeat, cut });
   C.plan(); C.arrange();
   return C;
 }
@@ -837,11 +1227,15 @@ export function planCue({ dur, mood = 'pastoral', intensity = 0.5, key, tempo, s
  * Compose and render one cue.
  * dur (s), mood (see MOODS), intensity 0..1 (or a function of cue time → 0..1), key (tonic name; mode comes
  * from the mood; default the mood's first key), tempo (bpm; default the mood tempo, nudged to fit the length),
- * seed (variation), theme (film-wide motif seed; default = seed).
+ * seed (variation), theme (film-wide motif seed; default = seed), themeSteps (diatonic steps for the melodies'
+ * motif, overriding the seeded theme), motif ({ notes: "G4:1 E4:0.5 …" | parsed, key: the key it is written in,
+ * n: notes to state, voice: one of MOTIF_VOICES, hold: sustain the last stated note to the end}), downbeat (bar 1
+ * is a struck chord at t = 0), cut (s: where the caller will cut the cue; a held pedal arrives on its last chord
+ * there).
  * → { L, R, info: { mood, key, tonic, tempo, meter, bars, form, events } }
  */
-export function composeCue({ dur, mood = 'pastoral', intensity = 0.5, key, tempo, seed = 1, theme } = {}) {
-  const C = planCue({ dur, mood, intensity, key, tempo, seed, theme });
+export function composeCue({ dur, mood = 'pastoral', intensity = 0.5, key, tempo, seed = 1, theme, themeSteps, motif, downbeat, cut } = {}) {
+  const C = planCue({ dur, mood, intensity, key, tempo, seed, theme, themeSteps, motif, downbeat, cut });
   const out = C.render();
   out.info = { mood, key: Object.keys(NOTE_PC).find(k => NOTE_PC[k] === C.tonic && k.length <= 2 && !k.includes('#')) || C.tonic, tonic: C.tonic, tempo: C.tempo, meter: C.meter, bars: C.bars.length, form: C.form.kind, events: C.ev.length };
   return out;
@@ -849,14 +1243,24 @@ export function composeCue({ dur, mood = 'pastoral', intensity = 0.5, key, tempo
 
 // ================================================================ stings
 
+export const STING_NAMES = ['surprise', 'sad', 'triumph', 'magic', 'plunk', 'stab', 'swell'];
+// loudness (RMS dBFS) each sting is normalised to, and how much the score dips around it (s before / after, dB)
+const STING_LEVEL = { plunk: -26, stab: -18, swell: -27 };
+const STING_DIP = { plunk: { pre: 0.03, post: 0.45, db: -3 }, stab: { pre: 0.05, post: 1.3, db: -9 }, swell: { pre: 2.2, post: 0, db: -3 } };
+
 /**
  * Short accents. → { L, R, hit } where `hit` is the time (s) of the accent inside the buffer, so it can be
- * placed exactly on a story beat. name: surprise | sad | triumph | magic.
+ * placed exactly on a story beat. name: one of STING_NAMES:
+ * surprise (harp run into a bright pizzicato hit), sad (iv → i sigh), triumph (horn fanfare on a timpani roll),
+ * magic (celesta shimmer, bell, choir), plunk (one low pizzicato pluck, a comic full stop), stab (timpani + brass
+ * sforzando on open fifths, fits a major or a minor cue), swell (a 2.2 s soft-mallet cymbal roll, timpani roll and
+ * strings in octaves on the tonic, cresting at `hit` with the roll's last stroke: place it on a downbeat).
  */
 export function makeSting(name, { key = 'C', seed = 1 } = {}) {
   const tonic = keyPc(key), base = 60 + tonic, r = rng(S.mixSeed(seed, name));
   const ev = [], add = (inst, t, dur, midi, vel, opts) => ev.push({ inst, t, dur, midi, vel, opts });
   let hit = 0, len = 3.5, rv = { decay: 2.6, wet: 0.32 };
+  const low = m => (m < 40 ? m + 12 : m);
   if (name === 'surprise') {
     hit = 0.32;
     const run = [0, 2, 4, 7, 9, 12, 14, 16];
@@ -891,6 +1295,28 @@ export function makeSting(name, { key = 'C', seed = 1 } = {}) {
     [base, base + 4, base + 7, base + 11].forEach(m => add('choir', hit - 0.4, 2.4, m, 0.4));
     add('glock', hit, 0.5, base + 31, 0.5);
     rv = { decay: 3.4, wet: 0.4 };
+  } else if (name === 'plunk') {
+    hit = 0.01; len = 1.8;
+    const root = base - 24 >= 33 ? base - 24 : base - 12;
+    add('bassPizz', hit, 0.35, root, 0.7, { bright: 0.45 });
+    add('pizz', hit + 0.006, 0.3, root + 12, 0.75, { t60: 0.9, bright: 0.5 });
+    rv = { decay: 1.8, wet: 0.24 };
+  } else if (name === 'stab') {
+    hit = 0.03; len = 3.2;
+    [low(base - 24), base - 17, base - 12, base - 5].forEach((m, k) => add('brass', hit + k * 0.004, 0.26, m, 0.95));
+    [base - 5, base].forEach((m, k) => add('horn', hit + 0.006 * k, 0.3, m, 0.9));
+    [base - 12, base - 5, base, base + 7].forEach(m => add('stringsShort', hit, 0.25, m, 0.9));
+    add('timpani', hit, 1, 0, 0.95, { f: mtof(low(base - 24)) });
+    add('concert', hit, 1, 0, 0.5); add('cymbal', hit, 1, 0, 0.55, { decay: 2.2 });
+    rv = { decay: 2.4, wet: 0.3 };
+  } else if (name === 'swell') {
+    hit = 2.2; len = 3.4;
+    add('cymbalRoll', 0, hit, 0, 0, { v0: 0.04, v1: 0.75, decay: 1.4 });
+    add('timpaniRoll', 0.1, hit - 0.1, 0, 0, { f: mtof(low(base - 24)), v0: 0.06, v1: 0.5 });
+    [base - 12, base].forEach(m => add('strings', 0.05, hit + 0.02, m, 0.6, { attack: hit * 1.15, release: 0.3, voices: 5 }));   // still rising at the hit
+    add('timpani', hit, 1, 0, 0.75, { f: mtof(low(base - 24)) });                                                              // the roll's terminal stroke
+    add('concert', hit, 1, 0, 0.5);
+    rv = { decay: 2.6, wet: 0.32 };
   } else throw new Error(`unknown sting ${name}`);
   const n = Math.round(len * SR), dry = S.stereo(n), send = S.stereo(n);
   const lines = [];
@@ -913,8 +1339,8 @@ export function makeSting(name, { key = 'C', seed = 1 } = {}) {
   }
   const wet = S.reverb(send, { decay: rv.decay, hfDecay: 0.42, predelay: 0.02 });
   S.mixStereo(dry, wet, 0, rv.wet * 2.2);
-  for (const ch of [dry.L, dry.R]) S.biquad(ch, 'highpass', 32, 0.7);
-  const now = S.rmsDb(dry), g = S.db(clamp(-21 - now, -30, 30));
+  for (const ch of [dry.L, dry.R]) S.biquad(ch, 'highpass', { plunk: 62, stab: 48 }[name] ?? 32, 0.7);
+  const now = S.rmsDb(dry), g = S.db(clamp((STING_LEVEL[name] ?? -21) - now, -30, 30));
   for (const ch of [dry.L, dry.R]) for (let i = 0; i < n; i++) ch[i] *= g;
   S.limiter(dry, { ceilingDb: -1.3 });
   S.fade(dry.L, 0.002, 0.5); S.fade(dry.R, 0.002, 0.5);
@@ -924,36 +1350,86 @@ export function makeSting(name, { key = 'C', seed = 1 } = {}) {
 
 // ================================================================ film score
 
-const XF = 1.5;   // cue crossfade length (s)
+const XF = 1.5;          // cue crossfade length (s)
+const CUT_FADE = 0.03;   // a downbeat cuts the previous cue with this fade (s)
+const NONE_FADE = 0.3;   // music 'none' fades the score out over this (s)
+const OVERRUN = 6;       // a cue that will be cut is composed this much longer, so it is cut mid-flight (s)
+const HOLD_INTO = 1.2;   // a final chord is held this far into the statement that follows it (s), if it fits
+const CLASH_TAIL = 0.2;  // ... or, if it would clash, is gone this soon after the statement enters (s)
 const FIFTHS = pc => mod(pc * 7, 12);
 const fifthsDist = (a, b) => { const d = mod(FIFTHS(a) - FIFTHS(b), 12); return Math.min(d, 12 - d); };
+const keyName = pc => Object.keys(NOTE_PC).find(n => NOTE_PC[n] === pc);
+// pitch classes (absolute) sounding at `sec` in a planned cue: its chord there, and a held pedal note
+const tonesAt = (C, sec) => {
+  const b = C.beatAt(sec), pcs = C.chordAt(b).pcs.slice(), held = C.motif?.hold && C.motif.evs[C.motif.evs.length - 1];
+  if (held && b >= held.beat) pcs.push(held.pc);
+  return pcs.map(pc => mod(pc + C.tonic, 12));
+};
+// pitch classes (absolute) a statement opens with: its chords and its notes in the first HOLD_INTO seconds
+const entryTones = C => {
+  const pcs = [...C.bars[0].chords.filter(c => C.t(c.at) < HOLD_INTO).flatMap(c => c.ch.pcs), ...C.motif.evs.filter(e => C.t(e.beat) < HOLD_INTO).map(e => e.pc)];
+  return [...new Set(pcs.map(pc => mod(pc + C.tonic, 12)))];
+};
+// a tone of `a` a semitone from a tone of `b` that `b` does not share (Eb under E, F under E, C under B)
+const clashes = (a, b) => a.some(p => !b.includes(p) && b.some(q => semis(p, q) === 1));
 
 /**
- * Score a compiled film plan. plan.duration = film length; plan.music = [{ t0, t1, mood, intensity } | { t, sting }].
- * Consecutive cues of the same mood merge into one continuous cue (the theme keeps going and the arrangement
- * follows the intensity changes); different moods crossfade over 1.5 s with equal-power curves; keys are chosen
- * from each mood's preferred tonics to stay close on the circle of fifths to the previous cue; stings land
- * their accent exactly on t with the score dipped underneath; silence where there is no cue.
+ * Score a compiled film plan (see the header for the cue fields). Consecutive plain cues of the same mood merge
+ * into one continuous cue (the theme keeps going and the arrangement follows the intensity changes); different
+ * moods crossfade over 1.5 s with equal-power curves; without a score key, keys are chosen from each mood's
+ * preferred tonics to stay close on the circle of fifths to the previous cue. Motif cues start exactly on their
+ * t0; the outgoing cue lands its final chord just before and holds it 1.2 s into the statement if it fits the
+ * statement's opening chord, and fades it out by t0 + 0.2 s if it would clash (a C-minor cue into a C-major
+ * statement: Eb under E). Downbeat cues cut the previous cue at their t0, 'none' fades the score out over 0.3 s
+ * and keeps it silent; stings land their accent exactly on t with the score dipped underneath.
+ * → { L, R, cues: [{ t0, t1, mood, tonic, tempo, form, motif, downbeat, themeSteps }] } (cues: where each was
+ * placed, for inspection; themeSteps: the diatonic steps its melodies were built on)
  */
 export function scoreFilm(plan, { seed = 1 } = {}) {
   const dur = Math.max(0, plan.duration || 0), n = Math.max(1, Math.round(dur * SR)), out = S.stereo(n);
   const entries = plan.music || [];
-  const cues = entries.filter(e => e.mood && e.mood !== 'none' && MOODS[e.mood] && e.t1 > e.t0).map(e => ({ ...e, t0: Math.max(0, e.t0), t1: Math.min(dur, e.t1) }))
+  const scoreKey = plan.score?.key ?? null, home = scoreKey != null ? keyPc(scoreKey) : null;
+  const motifNotes = plan.score?.motif ? motifDegrees(parseMotif(plan.score.motif), scoreKey ?? 'C') : null;
+  const themeSteps = motifNotes ? motifSteps(motifNotes) : null;
+  const clip = e => ({ ...e, t0: Math.max(0, e.t0), t1: Math.min(dur, e.t1) });
+  const silent = entries.filter(e => e.mood === 'none' && e.t1 > e.t0).map(clip).filter(e => e.t1 > e.t0);
+  const cues = entries.filter(e => e.mood && e.mood !== 'none' && MOODS[e.mood] && e.t1 > e.t0).map(clip)
     .filter(e => e.t1 - e.t0 > 0.05).sort((a, b) => a.t0 - b.t0);
+  // a gap after a cue is a 'none' too (compile leaves a gap where a scene sets music: "none")
+  cues.forEach((c, k) => {
+    const nx = cues.slice(k + 1).find(o => o.t0 > c.t0), end = nx ? nx.t0 : dur;
+    if (end - c.t1 >= 0.3 && !cues.some(o => o !== c && o.t0 <= c.t1 + 0.05 && o.t1 > c.t1 + 0.05) && !silent.some(z => Math.abs(z.t0 - c.t1) < 0.3)) silent.push({ t0: c.t1, t1: end });
+  });
+  const special = c => (c.motif > 0 && motifNotes) || c.hold || c.downbeat;
   const merged = [];
   for (const c of cues) {
     const p = merged[merged.length - 1], I = c.intensity ?? 0.5;
-    if (p && p.mood === c.mood && c.t0 - p.t1 < 0.3) { p.t1 = Math.max(p.t1, c.t1); p.pts.push([c.t0, I]); }
-    else merged.push({ t0: c.t0, t1: c.t1, mood: c.mood, pts: [[c.t0, I]] });
+    if (p && p.mood === c.mood && c.t0 - p.t1 < 0.3 && !special(c) && !p.hold && (c.tempo ?? null) === (p.tempo ?? null) && (c.key ?? null) === (p.key ?? null)) { p.t1 = Math.max(p.t1, c.t1); p.pts.push([c.t0, I]); }
+    else merged.push({ ...c, pts: [[c.t0, I]] });
   }
   let prevTonic = null;
-  const placed = [];
+  const jobs = [];
   for (let k = 0; k < merged.length; k++) {
     const c = merged[k], prev = merged[k - 1], next = merged[k + 1];
-    const xin = prev && c.t0 - prev.t1 < 0.3, xout = next && next.t0 - c.t1 < 0.3;
-    const s0 = Math.max(0, c.t0 - (xin ? XF / 2 : 0)), s1 = Math.min(dur, c.t1 + (xout ? XF / 2 : 0));
+    const touchPrev = prev && c.t0 - prev.t1 < 0.3, touchNext = next && next.t0 - c.t1 < 0.3;
+    const hasMotif = c.motif > 0 && !!motifNotes;
+    // entry: a downbeat or a motif statement starts exactly on t0; otherwise centre a crossfade on the join
+    let s0 = c.t0, fin = 0;
+    if (touchPrev && !c.downbeat) { if (hasMotif) fin = 0.08; else { s0 = Math.max(0, c.t0 - XF / 2); fin = c.t0 - s0 > 0.01 ? 2 * (c.t0 - s0) : 0; } }
+    // exit: cut by a downbeat or by silence, or overlap the next cue, or end on our own
+    const none = silent.find(z => z.t0 > c.t0 + 0.05 && z.t0 < c.t1 + 0.3);
+    let s1 = c.t1, fout = 0, cut = null, over = 0, into = false;
+    if (touchNext && next.downbeat) { cut = next.t0; fout = CUT_FADE; }
+    else if (none) { cut = none.t0; fout = NONE_FADE; }
+    else if (touchNext && next.motif > 0 && motifNotes) {
+      // the statement enters on the cut: our final chord lands just before it and is still sounding as it enters
+      s1 = Math.min(dur, next.t0 + HOLD_INTO); fout = s1 - Math.max(c.t0, next.t0 - 0.3); over = next.t0 + 2.6 - s1; into = true;
+    }
+    else if (touchNext) { s1 = Math.min(dur, c.t1 + XF / 2); fout = s1 - Math.max(c.t0, c.t1 - XF / 2); over = 1.2; }   // final chord still held as the crossfade starts
+    if (cut != null) s1 = Math.min(dur, cut + fout);
+    if (s1 - s0 < 0.05) continue;
     const keys = MOODS[c.mood].keys.map(keyPc);
-    const tonic = prevTonic == null ? keys[0] : keys.reduce((a, b) => (fifthsDist(b, prevTonic) < fifthsDist(a, prevTonic) ? b : a));
+    const tonic = c.key != null ? keyPc(c.key) : home != null ? home : prevTonic == null ? keys[0] : keys.reduce((a, b) => (fifthsDist(b, prevTonic) < fifthsDist(a, prevTonic) ? b : a));
     prevTonic = tonic;
     // intensity as a function of cue time: steps between scene values, smoothed over ~2 s
     const pts = c.pts.map(([t, v]) => [t - s0, v]);
@@ -962,27 +1438,48 @@ export function scoreFilm(plan, { seed = 1 } = {}) {
       for (let j = 1; j < pts.length; j++) { const [tj, vj] = pts[j]; v += (vj - v) * smoothstep((t - tj + 1) / 2); }
       return v;
     };
-    const cue = composeCue({ dur: s1 - s0, mood: c.mood, intensity: pts.length > 1 ? iFn : pts[0][1], key: Object.keys(NOTE_PC).find(n => NOTE_PC[n] === tonic), seed: S.mixSeed(seed, k, c.mood), theme: seed });
-    const a = Math.round(s0 * SR), len = cue.L.length, fin = xin ? Math.round(XF * SR) : 0, fout = xout ? Math.round(XF * SR) : 0;
+    const motif = hasMotif ? { notes: motifNotes, n: c.motif === true ? motifNotes.length : c.motif, voice: c.motifVoice ?? DEFAULT_MOTIF_VOICE[c.mood], hold: !!c.hold } : null;
+    const C = planCue({
+      dur: s1 - s0 + (cut != null ? OVERRUN : over), mood: c.mood, intensity: pts.length > 1 ? iFn : pts[0][1], key: keyName(tonic), tempo: c.tempo,
+      seed: S.mixSeed(seed, k, c.mood), theme: seed, themeSteps, motif, downbeat: !!c.downbeat, cut: cut != null ? cut - s0 : null,
+    });
+    jobs[k] = { c, C, s0, s1, fin, fout, into, tonic, motif };
+  }
+  // every cue is planned before any is rendered, so a final chord held into a statement can be checked against the
+  // statement's opening: if a tone of it would rub a semitone against the statement (the outgoing cue's Eb under the
+  // incoming C-major E), it is faded out by the time the statement is under way instead of held into it
+  const placed = [];
+  jobs.forEach((j, k) => {
+    const nx = jobs[k + 1];
+    if (j.into && nx && clashes(tonesAt(j.C, nx.s0 - j.s0 - 0.05), entryTones(nx.C))) {
+      j.s1 = Math.min(dur, nx.s0 + CLASH_TAIL); j.fout = j.s1 - Math.max(j.c.t0, nx.s0 - 0.35);
+    }
+    const { s0, s1, fin, fout, C } = j, cue = C.render();
+    const a = Math.round(s0 * SR), len = Math.min(cue.L.length, Math.round((s1 - s0) * SR)), fi = Math.round(fin * SR), fo = Math.round(fout * SR);
     for (let i = 0; i < len && a + i < n; i++) {
       let g = 1;
-      if (i < fin) g *= Math.sin(0.5 * Math.PI * i / fin);
-      if (i >= len - fout) g *= Math.sin(0.5 * Math.PI * (len - i) / fout);
+      if (i < fi) g *= Math.sin(0.5 * Math.PI * i / fi);
+      if (i >= len - fo) g *= Math.sin(0.5 * Math.PI * (len - i) / fo);
       out.L[a + i] += cue.L[i] * g; out.R[a + i] += cue.R[i] * g;
     }
-    placed.push({ t0: s0, t1: s1, tonic });
-  }
-  // stings: key of the cue under them; dip the score by 6 dB around the accent
-  for (const e of entries.filter(e => e.sting)) {
+    const motif = j.motif;
+    placed.push({ t0: s0, t1: s1, mood: j.c.mood, tonic: j.tonic, tempo: C.tempo, form: C.form.kind, motif: motif ? { n: motif.n, voice: motif.voice, hold: motif.hold } : null, downbeat: !!j.c.downbeat, themeSteps: C.theme.steps.slice() });
+  });
+  // 'none': silence after the 0.3 s fade, until the next cue
+  for (const z of silent) for (let i = Math.round((z.t0 + NONE_FADE) * SR); i < Math.min(n, Math.round(z.t1 * SR)); i++) { out.L[i] = 0; out.R[i] = 0; }
+  // stings: key of the cue under them; dip the score around the accent
+  for (const e of entries.filter(e => e.sting && e.t != null)) {
     const under = placed.find(p => e.t >= p.t0 && e.t <= p.t1);
-    const st = makeSting(e.sting, { key: Object.keys(NOTE_PC).find(n => NOTE_PC[n] === (under ? under.tonic : 0)), seed: S.mixSeed(seed, 'sting', e.t) });
-    const at = Math.round((e.t - st.hit) * SR), d0 = Math.round((e.t - 0.25) * SR), d1 = Math.round((e.t + 1.6) * SR), ramp = Math.round(0.2 * SR);
+    const st = makeSting(e.sting, { key: keyName(under ? under.tonic : home ?? 0), seed: S.mixSeed(seed, 'sting', e.t) });
+    const dip = STING_DIP[e.sting] || { pre: 0.25, post: 1.6, db: -6 };
+    const at = Math.round((e.t - st.hit) * SR), d0 = Math.round((e.t - dip.pre) * SR), d1 = Math.round((e.t + dip.post) * SR), ramp = Math.round(0.2 * SR), depth = 1 - S.db(dip.db);
     if (under) for (let i = Math.max(0, d0 - ramp); i < Math.min(n, d1 + ramp); i++) {
-      const u = i < d0 ? (i - (d0 - ramp)) / ramp : i > d1 ? 1 - (i - d1) / ramp : 1, g = 1 - 0.5 * smoothstep(u);
+      const u = i < d0 ? (i - (d0 - ramp)) / ramp : i > d1 ? 1 - (i - d1) / ramp : 1, g = 1 - depth * smoothstep(u);
       out.L[i] *= g; out.R[i] *= g;
     }
     S.mixStereo(out, st, at, 1);
   }
   S.limiter(out, { ceilingDb: -1.2 });
+  out.cues = placed;
   return out;
 }

@@ -7,6 +7,7 @@ import { encodeWav, readWav } from '../engine/audio/wav.mjs';
 import {
   VOICES, estimateDuration, lineId, voicePrompt, joinTones, normalizeWords, wordErrorRate,
   trimSilence, mouthEnv, voiceLine, voiceLines, resolveLine, directionLevels, directionSpoken,
+  spokenText, isNonverbal, trimTake, voiceFor, directionHeard,
 } from '../engine/audio/voice.mjs';
 
 delete process.env.GEMINI_API_KEY;   // tests never touch the network or a real key
@@ -315,5 +316,169 @@ test('concurrency limit, de-duplicated lines, raw PCM responses, failures do not
     voiceLines(film, { lines: [{ id: 'f1', who: 'pip', text: 'Bad.' }, { id: 'f2', who: 'pip', text: 'Ok then.' }] }, { cacheDir: dir, apiKey: KEY, fetch: bad.fetch, sleep, concurrency: 1 }),
     e => e.failed.length === 1 && e.failed[0].id === 'f1' && e.voices.has('f2'));
   assert.ok(existsSync(join(dir, 'f2.wav')));
+  rmSync(dir, { recursive: true });
+});
+
+// ---------------------------------------------------------------------------------- DESIGN §9.3: tts, non-verbal, trimEnd
+
+test('speak / nonverbal / trimEnd: resolveLine voices `speak`, flags non-verbal captions and carries trimEnd', () => {
+  assert.equal(spokenText({ text: '[laughs]', speak: 'Hahaha!' }), 'Hahaha!');
+  assert.equal(spokenText({ text: 'Hello.' }), 'Hello.');
+  assert.equal(isNonverbal({ text: '[laughs]' }), true);
+  assert.equal(isNonverbal({ text: ' [sighs] ' }), true);
+  assert.equal(isNonverbal({ text: 'Hello [softly]' }), false);
+  assert.equal(isNonverbal({ text: 'Hello', nonverbal: true }), true, 'compile\'s flag wins');
+  const r = resolveLine(film, { id: 'n1', who: 'pip', text: '[laughs]', speak: 'Hahaha!', tone: 'giggling', nonverbal: true });
+  assert.deepEqual(r, { id: 'n1', who: 'pip', voice: 'Puck', text: 'Hahaha!', tone: 'bright, curious child, giggling', nonverbal: true });
+  const c = resolveLine(film, { id: 'c1', who: 'pip', text: 'Now kindly go aw—', speak: 'Now kindly go away.', trimEnd: 0.22 });
+  assert.equal(c.text, 'Now kindly go away.'); assert.equal(c.trimEnd, 0.22); assert.equal(c.nonverbal, undefined);
+});
+
+test('the TTS speaks `speak`, the cache records it, and a changed `speak` re-voices', async () => {
+  const dir = tmp(), g = mockGemini({ transcripts: 'echo' });
+  const one = { fps: 24, lines: [{ id: 's1', who: 'pip', text: 'Since SPRING?!', speak: 'Since spring?!', tone: 'stunned' }] };
+  const v = await voiceLines(film, one, { cacheDir: dir, apiKey: KEY, fetch: g.fetch, sleep });
+  assert.equal(g.tts()[0].body.contents[0].parts[0].text, '[bright, curious child, stunned] Since spring?!');
+  assert.equal(v.get('s1').qa.wer, 0);
+  assert.equal(JSON.parse(readFileSync(join(dir, 's1.json'), 'utf8')).text, 'Since spring?!');
+  // a cache hit needs no network; a different `speak` under the same id is a different take
+  await voiceLines(film, one, { cacheDir: dir, apiKey: null, fetch: async () => { throw new Error('net'); } });
+  await voiceLines(film, { ...one, lines: [{ ...one.lines[0], speak: 'Since spring?' }] }, { cacheDir: dir, apiKey: KEY, fetch: g.fetch, sleep });
+  assert.equal(g.tts().length, 2);
+  rmSync(dir, { recursive: true });
+});
+
+test('non-verbal lines skip the WER gate: a laugh with no words (or none transcribed) passes first time', async () => {
+  const dir = tmp();
+  for (const [i, transcript] of ['Ha ha ha!', '', '(laughs) Hahaha'].entries()) {
+    const g = mockGemini({ transcripts: [transcript] });
+    const r = await voiceLine({ id: `nv${i}`, who: 'pip', voice: 'Leda', text: '[laughs]', speak: 'Hahaha!', tone: 'small girl, giggling' }, { cacheDir: dir, apiKey: KEY, fetch: g.fetch, sleep });
+    assert.equal(g.tts().length, 1, `"${transcript}": no retake`);
+    assert.equal(g.qa().length, 1, 'QA still transcribes');
+    assert.equal(g.tts()[0].body.contents[0].parts[0].text, '[small girl, giggling] Hahaha!');
+    assert.equal(r.qa.nonverbal, true); assert.equal(r.qa.wer, null); assert.equal(r.qa.pass, true);
+    assert.equal(r.qa.transcript, transcript);
+  }
+  rmSync(dir, { recursive: true });
+});
+
+test('non-verbal lines still fail when the direction is read aloud: retake with a simpler direction', async () => {
+  const dir = tmp();
+  const g = mockGemini({ transcripts: ['Small girl, giggling. Hahaha!', 'Hahaha!'] });
+  const r = await voiceLine({ who: 'nell', voice: 'Leda', text: '[laughs]', speak: 'Hahaha!', tone: 'small girl, giggling', nonverbal: true }, { cacheDir: dir, apiKey: KEY, fetch: g.fetch, sleep });
+  assert.deepEqual(g.tts().map(c => c.body.contents[0].parts[0].text), ['[small girl, giggling] Hahaha!', '[giggling] Hahaha!']);
+  assert.equal(r.qa.take, 2); assert.equal(r.qa.pass, true);
+  assert.equal(r.qa.takes[0].directionSpoken, true);
+  // with one take allowed and the direction read out, the take is kept but marked failing
+  const bad = mockGemini({ transcripts: ['Giggling. Ha!'] });
+  const b = await voiceLine({ who: 'x', voice: 'Leda', text: '[giggles]', speak: 'Hee hee!', tone: 'giggling' }, { cacheDir: dir, apiKey: KEY, fetch: bad.fetch, sleep, attempts: 1 });
+  assert.equal(bad.tts().length, 1);
+  assert.equal(b.qa.pass, false); assert.equal(b.qa.directionSpoken, true);
+  rmSync(dir, { recursive: true });
+});
+
+test('trimEnd cuts the take after the cache: 2-frame fade, dur and env from the cut audio, full take on disk', async () => {
+  const dir = tmp(), g = mockGemini({ transcripts: 'echo' });
+  const line = { id: 't1', who: 'pip', text: 'Take the stream. Now kindly go aw—', speak: 'Take the stream. Now kindly go away.', trimEnd: 0.3 };
+  const v = (await voiceLines(film, { fps: 24, lines: [line] }, { cacheDir: dir, apiKey: KEY, fetch: g.fetch, sleep })).get('t1');
+  const full = readWav(join(dir, 't1.wav')).channels[0];
+  assert.equal(v.fullDur, full.length / 48000, 'the cache keeps the whole take');
+  assert.equal(v.wav.length, full.length - Math.round(0.3 * 48000));
+  assert.ok(Math.abs(v.dur - (v.fullDur - 0.3)) < 1e-9);
+  assert.equal(v.env.length, Math.ceil(v.dur * 24), 'lip sync follows the cut audio');
+  assert.equal(v.env[v.env.length - 1], 0, 'mouth closed at the cut');
+  assert.equal(v.trimEnd, 0.3);
+  // 2-frame fade-out: the last sample is silent, the audio 2 frames before the end is untouched
+  const n = v.wav.length, fade = 48000 / 12;
+  assert.ok(Math.abs(v.wav[n - 1]) < 1e-6);
+  for (let i = n - fade - 200; i < n - fade - 1; i++) assert.equal(v.wav[i], full[i]);
+  for (let i = n - fade; i < n; i++) assert.ok(Math.abs(v.wav[i]) <= Math.abs(full[i]) + 1e-9);
+  // a different cut is free: same cached take, no network
+  const v2 = (await voiceLines(film, { fps: 24, lines: [{ ...line, trimEnd: 0.5 }] }, { cacheDir: dir, apiKey: null, fetch: async () => { throw new Error('net'); } })).get('t1');
+  assert.equal(g.tts().length, 1);
+  assert.ok(Math.abs(v2.dur - (v2.fullDur - 0.5)) < 1e-9);
+  // trimTake clamps: never shorter than the fade
+  const tiny = trimTake({ wav: new Float32Array(4800).fill(0.1), sampleRate: 48000, dur: 0.1 }, 5, 24);
+  assert.equal(tiny.wav.length, 48000 / 12 + 1);
+  rmSync(dir, { recursive: true });
+});
+
+test('a line said twice with the same words, once cut and once in full: each gets its own cut (either order)', async () => {
+  const dir = tmp(), g = mockGemini({ transcripts: 'echo' });
+  const cut = { id: 'dup', who: 'pip', text: 'Mind the wa—', speak: 'Mind the water.', trimEnd: 0.25 }, whole = { id: 'dup', who: 'pip', text: 'Mind the water.' };
+  for (const lines of [[cut, whole], [whole, cut]]) {
+    const v = await voiceLines(film, { fps: 24, lines }, { cacheDir: dir, apiKey: KEY, fetch: g.fetch, sleep });
+    assert.equal(g.tts().length, 1, 'one id, one cached take');
+    const c = voiceFor(v, cut), w = voiceFor(v, whole), fullLen = readWav(join(dir, 'dup.wav')).channels[0].length;
+    assert.equal(w.wav.length, fullLen, 'the full line plays the whole take');
+    assert.equal(w.trimEnd ?? 0, 0); assert.equal(w.env.length, Math.ceil(w.dur * 24));
+    assert.equal(c.wav.length, fullLen - Math.round(0.25 * 48000), 'the interrupted line is cut');
+    assert.ok(Math.abs(c.dur - (w.dur - 0.25)) < 1e-9); assert.equal(c.env.length, Math.ceil(c.dur * 24));
+    assert.equal(voiceFor(v, cut), c, 'the same object every time (compile and mix agree)');
+    assert.equal(v.size, 1);
+  }
+  // other cuts of a cut entry come from the full take; no voice → undefined; hand-made entries pass through
+  const v = await voiceLines(film, { fps: 24, lines: [cut] }, { cacheDir: dir, apiKey: null, fetch: async () => { throw new Error('net'); } });
+  assert.ok(Math.abs(voiceFor(v, { ...cut, trimEnd: 0.5 }).dur - (v.get('dup').fullDur - 0.5)) < 1e-9);
+  assert.equal(voiceFor(v, { id: 'nope' }), undefined);
+  const hand = new Map([['h', { wav: '/some/path.wav', dur: 2 }]]);
+  assert.equal(voiceFor(hand, { id: 'h', trimEnd: 0.3 }), hand.get('h'));
+  rmSync(dir, { recursive: true });
+});
+
+test('films: two plan lines sharing an id keep their own cuts through the cache loader', async () => {
+  const { cpSync, readFileSync: rf, writeFileSync, mkdirSync } = await import('node:fs');
+  const { loadPlan } = await import('../engine/render/film-source.mjs');
+  const dir = tmp(), src = new URL('../films/_test', import.meta.url).pathname;
+  cpSync(join(src, 'film.json'), join(dir, 'film.json'));
+  if (existsSync(join(src, 'custom.mjs'))) cpSync(join(src, 'custom.mjs'), join(dir, 'custom.mjs'));
+  const f = JSON.parse(rf(join(dir, 'film.json'), 'utf8'));
+  const shot = f.scenes.flatMap(sc => sc.shots).find(sh => sh.beats.some(b => b.say && b.say !== 'narrator'));
+  const i = shot.beats.findIndex(b => b.say && b.say !== 'narrator'), who = shot.beats[i].say;
+  shot.beats.splice(i + 1, 0, { say: who, text: 'Mind the wa—', tts: 'Mind the water.', trimEnd: 0.25 }, { say: who, text: 'Mind the water.' });
+  writeFileSync(join(dir, 'film.json'), JSON.stringify(f));
+  const first = await loadPlan(dir), pair = first.plan.lines.filter(l => l.speak === 'Mind the water.');
+  assert.equal(pair.length, 2); assert.equal(pair[0].id, pair[1].id, 'same words, same id');
+  // a 2 s cached take for every line (the cache format), then load again
+  mkdirSync(join(dir, 'voices'));
+  for (const l of first.plan.lines) {
+    const r = resolveLine(first.film, l), x = Float32Array.from({ length: 96000 }, (_, k) => 0.3 * Math.sin(k / 20));
+    writeFileSync(join(dir, 'voices', `${l.id}.wav`), encodeWav([x], 48000, 16));
+    writeFileSync(join(dir, 'voices', `${l.id}.json`), JSON.stringify({ id: l.id, who: r.who, text: r.text, voice: r.voice, tone: r.tone }));
+  }
+  const { plan, voices, missing } = await loadPlan(dir);
+  assert.equal(missing.length, 0);
+  const [c, w] = plan.lines.filter(l => l.speak === 'Mind the water.').map(l => voiceFor(voices, l));
+  assert.ok(Math.abs(c.dur - 1.75) < 1e-9 && c.trimEnd === 0.25, `cut line ${c.dur}`);
+  assert.ok(Math.abs(w.dur - 2) < 1e-9 && !w.trimEnd, `full line ${w.dur}`);
+  rmSync(dir, { recursive: true });
+});
+
+test('directionHeard: any content word of the direction (or of a caption bracket) that the line does not say', () => {
+  assert.equal(directionHeard('small girl, six years old, giggling', 'Hahaha!', 'Giggling. Hahaha!'), true, 'only the delivery word read out');
+  assert.equal(directionHeard('giggling', 'Hahaha!', 'Giggles! Ha ha ha.'), true, 'inflected');
+  assert.equal(directionHeard('giggling', '[laughs]', 'Laughs.'), true, 'the caption bracket voiced as-is');
+  assert.equal(directionHeard('', '[laughs]', 'Laughing.'), true, 'the bracket counts even with no direction');
+  assert.equal(directionHeard('small girl, six years old, giggling', 'Hahaha!', 'Ha ha ha!'), false);
+  assert.equal(directionHeard('giggling', 'Hahaha!', '(giggles) *laughs* Hahaha'), false, 'described sounds are not words');
+  assert.equal(directionHeard('sighing', '[sighs] Oh, sigh.', 'Oh, sigh.'), false, 'words the line really says');
+  assert.equal(directionHeard('hissing, with a lisp', 'Hss!', 'Hss, it is his.'), false, 'function words never count');
+  assert.equal(directionHeard('', 'Hahaha!', 'Giggling. Hahaha!'), false, 'no direction sent, none to read');
+});
+
+test('non-verbal QA: one direction word read aloud fails the take; a voiced caption bracket fails it too', async () => {
+  const dir = tmp(), nell = { voices: { young_nell: { voice: 'Leda', tone: 'small girl, six years old' } }, cast: { young_nell: { rig: 'human', voice: 'young_nell' } } };
+  // the film's shape: cast tone + line tone, the model reads only "giggling" → retake with the last clause, then none
+  const g = mockGemini({ transcripts: ['Giggling. Hahaha!', 'Giggling, hahaha!', 'Hahaha!'] });
+  const L = resolveLine(nell, { id: 'yn1', who: 'young_nell', text: '[laughs]', speak: 'Hahaha!', tone: 'giggling', nonverbal: true });
+  const r = await voiceLine(L, { cacheDir: dir, apiKey: KEY, fetch: g.fetch, sleep });
+  assert.deepEqual(g.tts().map(c => c.body.contents[0].parts[0].text), ['[small girl, six years old, giggling] Hahaha!', '[giggling] Hahaha!', 'Hahaha!']);
+  assert.deepEqual(r.qa.takes.map(t => !!t.directionSpoken), [true, true, false]);
+  assert.equal(r.qa.pass, true); assert.equal(r.qa.take, 3);
+  // no tts: the TTS gets "[giggling] [laughs]"; a transcript of "Laughs." is the bracket read out
+  const b = mockGemini({ transcripts: ['Laughs.'] });
+  const nb = await voiceLine({ id: 'nb', who: 'pip', voice: 'Leda', text: '[laughs]', tone: 'giggling' }, { cacheDir: dir, apiKey: KEY, fetch: b.fetch, sleep, attempts: 1 });
+  assert.equal(b.tts()[0].body.contents[0].parts[0].text, '[giggling] [laughs]');
+  assert.equal(nb.qa.pass, false); assert.equal(nb.qa.directionSpoken, true);
   rmSync(dir, { recursive: true });
 });

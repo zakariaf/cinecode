@@ -5,10 +5,11 @@
 //  oscillators polyBlep, polyBlamp, osc (sine / triangle / saw / square, band-limited), noise (white / pink / brown)
 //  envelopes   adsr (curved segments), follower
 //  filters     Biquad (RBJ: lowpass, highpass, bandpass, notch, peaking, lowshelf, highshelf), biquad, OnePole, smooth, dcBlock
-//  voices      pluck (Karplus-Strong harp / guitar / pizzicato), fm (2-op FM), celesta, bell, epiano, glock,
-//              piano (additive with hammer noise), windLine / flute (breathy legato wind line: flute, clarinet, horn, oboe),
-//              strings (detuned saw ensemble), pad (warm pad or formant choir)
-//  percussion  kick, timpani, timpaniRoll, shaker, brush, woodblock, swell (soft-mallet cymbal roll)
+//  voices      pluck (Karplus-Strong harp / guitar / pizzicato), fm (2-op FM), celesta, bell, epiano, glock, musicBox,
+//              piano (additive with hammer noise), windLine / flute (breathy legato wind line: flute, clarinet, horn, oboe,
+//              bassoon, brass), bowedLine (solo legato violin / viola / cello), strings (detuned saw ensemble),
+//              pad (warm pad or formant choir)
+//  percussion  kick, timpani, timpaniRoll, shaker, brush, woodblock, swell (noise swell), cymbal (soft-mallet strokes), cymbalRoll
 //  effects     delay (ping-pong), reverb (diffused 8-line FDN), softClip, limiter
 import { rng, noise1 } from '../core/lib.mjs';
 
@@ -349,6 +350,29 @@ export function glock(freq, dur = 0.5, { vel = 0.6, seed = 1 } = {}) {
   return fade(out, 0.0008, 0.03);
 }
 
+/**
+ * Music box: a plucked steel comb tine. Clamped-free bar modes (1 : 6.27 : 17.55), a weak pair of bending modes a
+ * fraction of a hertz apart (the slow shimmer of a real tine), a hard little pin 'tick', the box's small wooden body,
+ * and each tine a few cents out of tune.
+ */
+export function musicBox(freq, dur = 1, { vel = 0.6, seed = 1, detune = 1 } = {}) {
+  const r = rng(seed), f0 = freq * (1 + (r() - 0.5) * 9 * detune * CENT);
+  const t60 = clamp(3.4 * Math.pow(523 / f0, 0.55), 0.9, 5.5), n = len(Math.max(dur, t60) + 0.05), out = new Float32Array(n);
+  const modes = [[1, 1, t60], [1 + 0.9 / f0, 0.18, t60 * 0.8], [6.27, 0.22, t60 * 0.14], [17.55, 0.05, t60 * 0.05], [2.0, 0.025, t60 * 0.35]];
+  for (const [ratio, a, t] of modes) {
+    const f = f0 * ratio; if (f > SR * 0.45) continue;
+    const w = TAU * f / SR, cw = Math.cos(w), sw = Math.sin(w), d = Math.pow(10, -3 / (t * SR));
+    let c = 1, s = 0, e = a * (ratio > 3 ? 0.6 + 0.6 * vel : 1);
+    for (let i = 0; i < n && e > 1e-5; i++) { out[i] += s * e; const nc = c * cw - s * sw; s = s * cw + c * sw; c = nc; e *= d; }
+  }
+  const tick = noise(len(0.006), seed + 2); biquad(tick, 'highpass', 3500, 0.7); biquad(tick, 'peaking', 6500, 2, 6);
+  for (let i = 0; i < tick.length; i++) out[i] += tick[i] * 0.2 * vel * Math.exp(-i / (0.0015 * SR));
+  biquad(out, 'peaking', 420, 1.2, 4); biquad(out, 'peaking', 1300, 1.5, 2.5); biquad(out, 'highpass', 180, 0.7);
+  const A = len(0.0006);
+  for (let i = 0; i < n; i++) out[i] *= 0.38 * Math.pow(vel, 1.15) * (i < A ? i / A : 1);
+  return fade(out, 0, 0.04);
+}
+
 // ---------------------------------------------------------------- piano (additive)
 
 /**
@@ -411,6 +435,13 @@ export const TIMBRES = {
   clarinet: { h: [1, 0.03, 0.42, 0.04, 0.2, 0.03, 0.09, 0.02, 0.04], soft: 1.6, breath: 0.05, chiff: 0.15, att: 0.05, rel: 0.2, vib: 3, trem: 0.02, rate: 5.0, glide: 0.035, lp: 2900, nf: 1500, swell: 0.05 },
   oboe: { h: [0.6, 1, 0.75, 0.5, 0.42, 0.25, 0.16, 0.1, 0.06], soft: 1.0, breath: 0.04, chiff: 0.12, att: 0.05, rel: 0.1, vib: 10, trem: 0.06, rate: 5.4, glide: 0.035, lp: 5000, nf: 2000, swell: 0.08 },
   horn: { h: [1, 0.85, 0.66, 0.48, 0.34, 0.24, 0.16, 0.11, 0.07, 0.05, 0.03], soft: 1.7, breath: 0.03, chiff: 0.1, att: 0.07, rel: 0.3, vib: 2.5, trem: 0.02, rate: 4.8, glide: 0.06, lp: 2700, nf: 700, swell: 0.2, scoop: 35 },
+  // double reed: a weak fundamental, a dense harmonic series and fixed formants (~500 Hz and ~1.15 kHz) give the
+  // dark, nasal, slightly buzzy bassoon colour in every register
+  bassoon: { h: [0.8, 1, 0.78, 0.62, 0.5, 0.42, 0.34, 0.27, 0.21, 0.16, 0.12, 0.09, 0.07, 0.05], soft: 1.9, breath: 0.06, chiff: 0.45, att: 0.055, rel: 0.16, vib: 9, trem: 0.04, rate: 5.2, glide: 0.04, lp: 3000, nf: 1100, swell: 0.06, gain: 0.55,
+    formants: [['peaking', 300, 1.2, 2.5], ['peaking', 480, 1.4, 6], ['peaking', 1100, 2.2, 2.5], ['peaking', 2500, 1.5, -5], ['highpass', 70, 0.7]] },
+  // trombone-like brass for hits: very bright at forte, a hard tongued attack and a lip scoop; negative swell = fp decay
+  brass: { h: [1, 0.95, 0.9, 0.84, 0.76, 0.68, 0.6, 0.52, 0.45, 0.38, 0.32, 0.27, 0.22, 0.18, 0.15, 0.12, 0.1, 0.08], soft: 2.6, breath: 0.02, chiff: 0.4, att: 0.02, rel: 0.2, vib: 0, trem: 0, rate: 5, glide: 0.04, lp: 7000, nf: 1100, swell: -0.45, scoop: 45, gain: 0.2,
+    formants: [['peaking', 1250, 1.1, 5], ['peaking', 2600, 1.6, 3], ['peaking', 520, 1.5, 2]] },
 };
 /**
  * Monophonic legato wind line. notes: [{ t, dur, freq, vel, slur }] (seconds from the line start, sorted).
@@ -475,11 +506,116 @@ export function windLine(notes, { timbre = 'flute', seed = 1 } = {}) {
     const trem = 1 + T.trem * vib[i] * Math.sin(vph + 0.6);
     out[i] = 0.3 * tone * a * trem + breath;
   }
-  biquad(out, 'lowpass', T.lp, 0.6); dcBlock(out);
+  biquad(out, 'lowpass', T.lp, 0.6);
+  for (const [type, f, q, g] of T.formants || []) biquad(out, type, f, q, g || 0);
+  if (T.gain) for (let i = 0; i < n; i++) out[i] *= T.gain;
+  dcBlock(out);
   return fade(out, 0.002, 0.03);
 }
 /** A single breathy flute note. */
 export const flute = (freq, dur = 1, { vel = 0.6, seed = 1, timbre = 'flute' } = {}) => windLine([{ t: 0, dur, freq, vel }], { timbre, seed });
+
+// ---------------------------------------------------------------- solo bowed strings (legato line)
+
+// body: wood and air resonances [Hz, Q, dB] plus a sparse 'body impulse response' (size scales its taps): together an
+// irregular comb of peaks and dips. Vibrato sweeps each harmonic across them, so every partial flickers at the
+// vibrato rate: the shimmer that separates a real violin or cello from a filtered saw. vib (cents) / rate (Hz),
+// attack / release (s), glide (s, stepwise slurs), port (s, slurred leaps: an audible expressive shift), hp / lp (Hz),
+// noise (rosin level), bright (how far the tone opens with bow pressure)
+export const BOWED = {
+  violin: { body: [[285, 8, 5], [410, 7, -4], [480, 8, 4], [560, 9, 4], [700, 6, -3], [860, 7, 2], [1060, 6, 2.5], [1320, 7, -3], [1650, 5, 2], [2100, 4, 2.5], [2700, 3, 2], [3500, 4, -4], [4600, 3, -6]],
+    size: 1, hp: 190, lp: 6200, vib: 17, rate: 5.6, att: 0.09, rel: 0.4, glide: 0.028, port: 0.1, noise: 0.06, bright: 0.72 },
+  viola: { body: [[230, 7, 5], [330, 7, -4], [395, 8, 4], [470, 8, 3], [590, 6, -3], [730, 7, 2.5], [900, 6, 2.5], [1120, 6, -3], [1400, 5, 2], [1800, 4, 2.5], [2350, 3, 2], [3100, 4, -4], [4200, 3, -6]],
+    size: 1.25, hp: 120, lp: 5500, vib: 16, rate: 5.4, att: 0.1, rel: 0.45, glide: 0.032, port: 0.11, noise: 0.06, bright: 0.68 },
+  cello: { body: [[100, 5, 5], [150, 6, 3], [205, 7, 4], [250, 7, -3], [315, 6, 4], [410, 5, -2.5], [530, 5, 3], [690, 5, -3], [880, 4, 2], [1180, 4, 2.5], [1600, 3, 2], [2300, 3, -4], [3300, 3, -7]],
+    size: 2.3, hp: 58, lp: 4600, vib: 15, rate: 5.2, att: 0.11, rel: 0.5, glide: 0.035, port: 0.13, noise: 0.065, bright: 0.66 },
+};
+const BODY_IR = new Map();
+/** Sparse body impulse response for a timbre: [delay (samples), gain] taps, fixed per instrument. */
+function bodyIR(name, size) {
+  if (BODY_IR.has(name)) return BODY_IR.get(name);
+  const r = rng(mixSeed('body', name)), taps = [];
+  let norm = 1;
+  for (let k = 0; k < 14; k++) {
+    const ms = (0.12 + 5.2 * Math.pow(r(), 1.4)) * size, g = (r() < 0.5 ? -1 : 1) * 0.5 * Math.exp(-ms / (1.9 * size)) * (0.55 + 0.45 * r());
+    taps.push([Math.max(1, Math.round(ms * SR / 1000)), g]); norm += g * g;
+  }
+  const out = { taps, g0: 1 / Math.sqrt(norm), max: Math.max(...taps.map(t => t[0])) + 1 };
+  BODY_IR.set(name, out);
+  return out;
+}
+/**
+ * Monophonic legato bowed line (solo violin / viola / cello). notes: [{ t, dur, freq, vel, slur }] (seconds, sorted).
+ * Slurred notes keep the bow moving (finger glide for steps, a slower expressive shift for leaps); unslurred
+ * contiguous notes get a bow change (a soft dip, a little scratch and rosin). Model: band-limited Helmholtz saw with
+ * a drifting bow-position comb; a scratchy, slightly unstable onset while the Helmholtz motion establishes; cycle
+ * jitter and bow-pressure flutter; brightness that follows bow pressure; pitch-synchronous rosin noise; per-note
+ * vibrato (delayed, its own rate and depth, slightly asymmetric) that deepens with the dynamic; intonation drift;
+ * then the instrument's body (resonances + sparse body response) and a ringing release.
+ */
+export function bowedLine(notes, { timbre = 'cello', seed = 1 } = {}) {
+  const T = BOWED[timbre] || BOWED.cello;
+  if (!notes.length) return new Float32Array(1);
+  const last = notes[notes.length - 1], n = len(last.t + last.dur + T.rel * 2.5 + 0.08), rn = rng(seed + 31);
+  const fT = new Float32Array(n), aT = new Float32Array(n), vibT = new Float32Array(n), glT = new Float32Array(n).fill(T.glide), bite = new Float32Array(n), scoopT = new Float32Array(n);
+  const vRate = new Float32Array(n).fill(1), vDep = new Float32Array(n).fill(1);
+  for (let j = 0; j < notes.length; j++) {
+    const nt = notes[j], nx = notes[j + 1], pv = notes[j - 1], s = Math.round(nt.t * SR);
+    let e = Math.round((nt.t + nt.dur) * SR);
+    if (nx && nx.t - (nt.t + nt.dur) < 0.05) e = Math.round(nx.t * SR);
+    const joined = pv && pv.t + pv.dur > nt.t - 0.05, fresh = !joined, change = joined && !nt.slur;
+    const leap = joined && Math.abs(12 * Math.log2(nt.freq / pv.freq)) >= 3;
+    const delay = 0.12 + 0.16 * rn(), rf = 1 + (rn() - 0.5) * 0.1, df = 0.75 + 0.5 * rn();
+    // a long note swells a little and eases off (messa di voce); the bow speed carries the dynamic
+    for (let i = Math.max(0, s); i < Math.min(n, e); i++) {
+      const u = (i - s) / SR, w = clamp(u / Math.max(0.3, nt.dur), 0, 1);
+      fT[i] = nt.freq; aT[i] = nt.vel * (nt.dur > 0.8 ? 0.88 + 0.16 * Math.sin(Math.PI * w) - 0.06 * w : 1);
+      vibT[i] = nt.dur > 0.3 ? clamp((u - delay) / 0.45, 0, 1) : 0; vRate[i] = rf; vDep[i] = df;
+    }
+    // slurred leap: the finger slides (portamento) over the first part of the new note
+    if (joined && nt.slur && leap) for (let i = Math.max(0, s - len(0.02)); i < Math.min(n, s + len(T.port)); i++) glT[i] = T.port;
+    if (change) for (let i = Math.max(0, s - len(0.045)); i < Math.min(n, s + len(0.01)); i++) aT[i] *= 0.72;
+    if (fresh || change) for (let i = 0; i < len(0.1) && s + i < n; i++) bite[s + i] = Math.max(bite[s + i], nt.vel * Math.exp(-i / (0.022 * SR)) * (fresh ? 1 : 0.5));
+    if (fresh) for (let i = 0; i < len(0.12) && s + i < n; i++) scoopT[s + i] = -12 * Math.exp(-i / (0.035 * SR));
+  }
+  let nextF = notes[0].freq;
+  for (let i = n - 1; i >= 0; i--) { if (fT[i] > 0) nextF = fT[i]; else fT[i] = nextF; }
+  const amp = follower(aT, T.att / 3, T.rel / 2.5), vib = smooth(vibT, 3), vr = smooth(vRate, 4), vd = smooth(vDep, 2);
+  const r = rng(seed), drift = noise1(seed % 9973), wob = noise1((seed + 5) % 9973), dep = noise1((seed + 11) % 9973), bpos = noise1((seed + 17) % 9973);
+  const jit = noise1((seed + 23) % 9973), flut = noise1((seed + 29) % 9973), scr = noise1((seed + 37) % 9973);
+  const out = new Float32Array(n), w = noise(n, seed + 1), hiss = new Biquad('bandpass', 2400, 0.7), rosin = new Biquad('bandpass', 3600, 0.9);
+  const lpA = new Biquad('lowpass', 3000, 0.6), lpB = new Biquad('lowpass', 3000, 0.55);
+  let lf = Math.log2(fT[0]), ph = r(), vph = r() * TAU, rate = T.rate, depth = T.vib, dr = 0, beta = 0.11;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR, b = bite[i];
+    if ((i & 31) === 0) {
+      rate = T.rate * vr[i] * (1 + 0.06 * (wob(t * 0.7) - 0.5)); depth = T.vib * vd[i] * (0.8 + 0.4 * dep(t * 0.5)); dr = 5 * (drift(t * 0.35) - 0.5);
+      beta = 0.085 + 0.05 * bpos(t * 0.3);
+      const fc = Math.min(T.lp, Math.pow(2, lf) * (2 + 8 * T.bright * Math.pow(clamp(amp[i], 0, 1), 0.8)) + 600 + 1500 * b);
+      lpA.set('lowpass', fc, 0.6); lpB.set('lowpass', fc * 1.25, 0.55);
+    }
+    const a = amp[i] * (1 + 0.025 * (flut(t * 31) - 0.5));
+    const x = Math.log2(fT[i]), k = Math.exp(-1 / (glT[i] / 3 * SR));
+    lf = x + (lf - x) * k;
+    vph += TAU * rate / SR; if (vph > TAU) vph -= TAU;
+    const vv = Math.sin(vph) + 0.12 * Math.sin(2 * vph + 0.7);
+    const cents = depth * (0.7 + 0.5 * Math.min(1, amp[i] * 1.4)) * vib[i] * vv + dr + 3.2 * (jit(t * 85) - 0.5) + scoopT[i] + 40 * b * (scr(t * 260) - 0.5);
+    const f = Math.pow(2, lf) * (1 + cents * CENT), dt = Math.min(0.49, f / SR);
+    ph += dt; if (ph >= 1) ph -= 1;
+    const q = ph + beta - Math.floor(ph + beta);
+    const saw = 2 * ph - 1 - polyBlep(ph, dt), saw2 = 2 * q - 1 - polyBlep(q, dt);
+    const src = saw - 0.32 * saw2;                                              // bow-position comb
+    const slip = ph < 0.12 ? 1 : 0.18, nz = w[i], hs = hiss.tick(nz);
+    const noiseOut = T.noise * a * (rosin.tick(nz) * slip * 1.6 + 0.22 * hs) + T.noise * 4 * b * hs;
+    out[i] = lpB.tick(lpA.tick(src)) * a * 0.32 + noiseOut;
+  }
+  // body: sparse impulse response (in place, from the end so taps read unmodified input), then resonances
+  const ir = bodyIR(timbre, T.size), tp = ir.taps;
+  for (let i = n - 1; i >= 0; i--) { let y = out[i]; for (let k = 0; k < tp.length; k++) { const j = i - tp[k][0]; if (j >= 0) y += tp[k][1] * out[j]; } out[i] = y * ir.g0; }
+  for (const [f, q, g] of T.body) biquad(out, 'peaking', f, q, g);
+  biquad(out, 'highpass', T.hp, 0.7); biquad(out, 'lowpass', T.lp * 1.15, 0.7); dcBlock(out);
+  return fade(out, 0.002, 0.03);
+}
 
 // ---------------------------------------------------------------- bowed string ensemble and pads
 
@@ -537,21 +673,22 @@ export function strings(freq, dur = 1, { vel = 0.6, seed = 1, attack, release, v
 const VOWELS = { oo: [[320, 1], [800, 0.3], [2500, 0.08]], oh: [[450, 1], [800, 0.45], [2830, 0.1]], ah: [[730, 1], [1090, 0.5], [2440, 0.18]] };
 /**
  * Soft pad. vowel: null → warm detuned saw/triangle pad with a slowly breathing lowpass;
- * 'oo' | 'oh' | 'ah' → formant 'choir' pad.
+ * 'oo' | 'oh' | 'ah' → formant 'choir' pad. detune: cents between the oscillators (default 6 for the pad, 4 for
+ * the choir; smaller is calmer, e.g. under a held melody note).
  */
-export function pad(freq, dur = 2, { vel = 0.5, seed = 1, attack = 0.9, release = 1.2, vowel = null, bright = 0.5, expr = 0 } = {}) {
+export function pad(freq, dur = 2, { vel = 0.5, seed = 1, attack = 0.9, release = 1.2, vowel = null, bright = 0.5, expr = 0, detune = null } = {}) {
   const n = len(dur + release * 1.3 + 0.05), r = rng(seed), src = new Float32Array(n);
   const env = adsr(n, { a: attack, d: 0.6, s: 0.9, r: release, gate: dur, curve: 2.5 });
   if (expr) { const GS = dur * SR; for (let i = 0; i < n; i++) env[i] *= 1 + expr * (Math.sin(Math.PI * Math.min(1, i / GS)) - 0.5); }
   const V = vowel ? 6 : 3;
   for (let v = 0; v < V; v++) {
-    const det = (v - (V - 1) / 2) * (vowel ? 4 : 6) + (r() - 0.5) * 3, vr = 4.4 + r() * 1.4, vd = vowel ? 7 + r() * 8 : 0, von = 0.2 + r() * 0.6;
+    const dz = detune ?? (vowel ? 4 : 6), det = (v - (V - 1) / 2) * dz + (r() - 0.5) * 3 * dz / 6, vr = 4.4 + r() * 1.4, vd = vowel ? 7 + r() * 8 : 0, von = 0.2 + r() * 0.6;
     const sh = vowel ? 'saw' : v === 1 ? 'triangle' : 'saw', dr = noise1(mixSeed(seed, v, 3) % 9973);
     let p = r(), drift = 0;
     const ph0 = r() * TAU, cw = Math.cos(TAU * vr / SR), sw = Math.sin(TAU * vr / SR), saw = sh === 'saw';
     let vc = Math.cos(ph0), vs = Math.sin(ph0);
     for (let i = 0; i < n; i++) {
-      if ((i & 31) === 0) drift = det + 6 * (dr(i / SR * 0.5) - 0.5);
+      if ((i & 31) === 0) drift = det + dz * (dr(i / SR * 0.5) - 0.5);
       const nv = vs * cw + vc * sw; vc = vc * cw - vs * sw; vs = nv;
       const dt = freq * (1 + (drift + (vd ? vd * vs * clamp(i / SR - von, 0, 1) : 0)) * CENT) / SR;
       src[i] += saw ? 2 * p - 1 - polyBlep(p, dt) : (4 * Math.abs(p - 0.5) - 1) * 1.4;
@@ -684,6 +821,50 @@ export function swell(dur = 1.5, vel = 0.5, { seed = 1, decay = 1.2 } = {}) {
     out[i] = (out[i] + shim[i] * 0.6 + metal[i] * 0.012) * e * 0.35 * vel;
   }
   return fade(out, 0.01, 0.05);
+}
+
+/**
+ * Suspended cymbal struck with soft mallets. A bank of ~90 inharmonic bronze modes (log-spread 300 Hz–12 kHz, the
+ * highs dying sooner, each split into a slowly beating pair) is excited by every stroke in `strokes`
+ * ([[t (s), vel], …]; default one stroke at 0), plus a felt-mallet thump and a little high wash per stroke.
+ * decay = seconds for the body to die away. A single stroke is a soft crash; a dense train is a roll.
+ */
+export function cymbal(vel = 0.6, { seed = 1, decay = 3, strokes = null, attack = 0.006 } = {}) {
+  strokes = strokes || [[0, vel]];
+  const tEnd = Math.max(...strokes.map(s => s[0])), n = len(tEnd + decay * 1.25 + 0.1), out = new Float32Array(n), r = rng(seed + 9);
+  const hits = new Float32Array(n);
+  for (const [t, v] of strokes) { const i = Math.round(t * SR); if (i < n) hits[i] += Math.pow(clamp(v, 0, 1), 1.2); }
+  const A = Math.max(1, len(attack)), lastHit = Math.round(tEnd * SR);
+  for (let k = 0; k < 90; k++) {
+    const f = 300 * Math.pow(40, Math.pow(r(), 0.8)), am = (0.35 + r()) * Math.pow(f / 2000, -0.15) * (f < 900 ? 0.5 : 1);
+    if (f > SR * 0.45) continue;
+    const tk = decay * (0.35 + 0.65 * r()) * Math.pow(1800 / f, 0.45), dk = Math.pow(10, -3 / (tk * SR)), beat = 0.3 + 2.2 * r();
+    for (const [mul, g0] of [[1, 1], [1 + beat / f, 0.6]]) {
+      const w = TAU * f * mul / SR, cw = Math.cos(w), sw = Math.sin(w);
+      let c = Math.cos(r() * TAU), sn = Math.sin(r() * TAU), e = 0, ex = 0;
+      for (let i = 0; i < n; i++) {
+        if (hits[i]) ex += hits[i] * am * g0;
+        if (ex > 0) { const take = ex / A * 2; e += take; ex = Math.max(0, ex - take); }   // the mallet pushes energy in over `attack`
+        if (e > 1e-6) out[i] += sn * e; else if (i > lastHit + A) break;
+        const nc = c * cw - sn * sw; sn = sn * cw + c * sw; c = nc; e *= dk;
+      }
+    }
+  }
+  // felt thump and a breath of high wash on each stroke
+  const thump = noise(n, seed + 3), wash = noise(n, seed + 4);
+  biquad(thump, 'lowpass', 380, 0.7); biquad(wash, 'highpass', 6500, 0.7);
+  const kt = Math.exp(-1 / (0.02 * SR)), kw = Math.exp(-1 / (0.25 * SR));
+  let et = 0, ew = 0;
+  for (let i = 0; i < n; i++) { if (hits[i]) { et += hits[i]; ew += hits[i]; } out[i] = out[i] * 0.02 + thump[i] * et * 0.25 + wash[i] * ew * 0.06; et *= kt; ew *= kw; }
+  biquad(out, 'highpass', 160, 0.7);
+  for (let i = 0; i < n; i++) out[i] *= 1.1;
+  return fade(out, 0.001, 0.08);
+}
+/** Soft-mallet cymbal roll: alternating strokes ~14 per second, velocity rising v0 → v1 over `dur`, then ringing. */
+export function cymbalRoll(dur = 1.5, { seed = 1, v0 = 0.08, v1 = 0.7, decay = 2.5 } = {}) {
+  const r = rng(seed + 1), strokes = [];
+  for (let t = 0, k = 0; t < dur; t += 1 / (13 + 3 * r()), k++) { const u = t / dur; strokes.push([t, (v0 + (v1 - v0) * u * u) * (k % 2 ? 0.88 : 1) * (0.9 + 0.2 * r())]); }
+  return cymbal(1, { seed, decay, strokes, attack: 0.008 });
 }
 
 // ---------------------------------------------------------------- effects

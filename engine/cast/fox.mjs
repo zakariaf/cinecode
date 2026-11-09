@@ -1,8 +1,9 @@
 // The Fox. Legacy look (russet coat, cream bib, black socks, white-tipped brush) on an IK skeleton:
 // walk, trot and gallop whose planted paws never slide, a hinged jaw for talking, brows and expressions.
+// Round 2 (DESIGN §9.2): st.tilt pitches the head on the neck; the pupils follow (+1 up, -1 down).
 import { clamp, lerp, ell, rpoly, limb } from '../core/lib.mjs';
 import { cel, darken, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
-import { makeRig, quadFeet, leg, mixPose, plus, jumpAt, ease, frac } from './rig.mjs';
+import { makeRig, quadFeet, leg, mixPose, plus, jumpAt, ease, frac, pitchPose, gaze } from './rig.mjs';
 
 const rot = (v, a) => [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a)];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
@@ -127,7 +128,7 @@ function head(T, p, F, P, o) {
   }
   dot(T, 22.4, 1.2, 2.2, '#1d1515'); dot(T, 22.9, 0.5, 0.6, 'rgba(255,255,255,.5)');
   if (sm > 0.5) fillP(T, ell(-1, 3.2, 3.2, 2, 128, 0.1), rgba('#e2735a', 0.3 * (sm - 0.4)));
-  eye(T, 2.8, -4.2, 2, 2.4, F.eye, P.eye, F.look * 0.7, F.lid, F.tilt, { pupilCol: '#1a1010' });
+  eye(T, 2.8, -4.2, 2, 2.4, F.eye, P.eye, gaze(F, 0.7, 2.4), F.lid, F.tilt, { pupilCol: '#1a1010' });
   brow(T, 2.6, -8.4, 6.2, F.browY * 0.8, F.browT * 0.75, darken(P.coat, 0.5), 1.25, 129);
   earAt(1, -8, ea); cel(T, [[-2, 0], [1, -19], [8, 1]], darken(P.coat, 0.88), SH, 1, 120); fillP(T, [[0, -2], [1.6, -14], [5.4, -1]], '#3a2a26'); T.restore();
   o.out.head = T.map(4, -1); o.out.mouth = T.map(14, 5 + op * 2.5);
@@ -136,7 +137,8 @@ function head(T, p, F, P, o) {
 const legOpt = (P, near, fore, p, k) => fore
   ? { l1: 14 * p.fl, l2: 13 * p.fl, meta: 5, ma: p.fa, bend: -1, w: [5.2, 3.2, 2.4, 2.2], col: near ? P.coat : darken(P.coat, 0.8), low: near ? P.sock : darken(P.sock, 0.85), lowFrom: 0.62, paw: [3.4, 2.1], sh: SH, seed: near ? 140 : 150, curl: p[k + 'u'], curlA: -1.3 }
   : { l1: 15 * p.hl, l2: 14 * p.hl, meta: 9, ma: p.ha, bend: 1, w: [8.5, 4, 2.5, 2.2], col: near ? P.coat : darken(P.coat, 0.8), low: near ? P.sock : darken(P.sock, 0.85), lowFrom: 0.85, paw: [3.4, 2.1], sh: SH, seed: near ? 160 : 170, curl: p[k + 'u'], curlA: 0.9 };
-function paint(T, p, F, o) {
+function paint(T, p0, F, o) {
+  const p = pitchPose(p0, F.pitch, { hr: -0.5, hy: -6, hx: -2 }, { hr: 0.42, hy: 4, hx: 1 });   // st.tilt: the neck lifts or lowers the head
   const { P, t } = o, R = roots(p);
   const sleeping = p.tw > 0.5;
   if (!sleeping) tail(T, p, P, t);

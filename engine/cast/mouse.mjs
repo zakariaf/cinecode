@@ -1,8 +1,9 @@
 // The Mouse. Legacy field mouse (grey-brown, big pink ears) as a full rig: scurries on all fours with planted
 // feet, sits up, gasps and cheers, waves and points, brows and a tiny mouth with incisors for talking.
+// Round 2 (DESIGN §9.2): st.tilt pitches the head; the pupils follow (+1 up, -1 down).
 import { clamp, lerp, ell, rpoly } from '../core/lib.mjs';
 import { cel, darken, lighten, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
-import { makeRig, quadFeet, leg, spine, mixPose, plus, jumpAt, ease } from './rig.mjs';
+import { makeRig, quadFeet, leg, spine, mixPose, plus, jumpAt, ease, pitchPose, gaze } from './rig.mjs';
 
 const rot = (v, a) => [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a)];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
@@ -63,14 +64,15 @@ function head(T, p, F, P, o) {
   } else line(T, [[5, 1.4], [4.4, 2.3], [3.3, 2.5], [2.4, 2.3 - 0.7 * sm]], 0.5, { seed: 249 });
   if (sm > 0.5) fillP(T, ell(0.4, 0.8, 1.3, 0.8, 250, 0.05), rgba('#e88a90', 0.4 * (sm - 0.4)));
   dot(T, 6.3, 0.5, 0.8, P.nose);
-  eye(T, 1.4, -0.9, 1.05, 1.25, F.eye, P.eye, F.look * 0.3, F.lid, F.tilt, { w: 0.7 });
+  eye(T, 1.4, -0.9, 1.05, 1.25, F.eye, P.eye, gaze(F, 0.3, 1.25), F.lid, F.tilt, { w: 0.7 });
   brow(T, 1.3, -2.9, 2.6, F.browY * 0.7, F.browT * 0.75, darken(P.fur, 0.5), 0.75, 251);
   for (const [ty, s] of [[-0.6, 252], [0.8, 253], [2, 254]]) line(T, [[5.4, 0.8], [9.6, ty]], 0.25, { seed: s, color: 'rgba(42,33,48,.5)' });
   earAt(-0.6, -2.8, -0.1 + ea, true);
   o.out.head = T.map(0.5, -0.3); o.out.mouth = T.map(3.9, 1.8 + op * 0.5);
   T.restore();
 }
-function paint(T, p, F, o) {
+function paint(T, p0, F, o) {
+  const p = pitchPose(p0, F.pitch, { hr: -0.55, hy: -1, hx: -0.4 }, { hr: 0.4, hy: 0.6 });   // st.tilt
   const { P, t } = o, R = roots(p);
   const sp = spine(R.Tb, p.ta, p.tc, 17, u => 0.75 - u * 0.45, { n: 14, wave: 0.25, t });
   cel(T, sp.poly, P.tail, SH * 0.5, 0.7, 255);

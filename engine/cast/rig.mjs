@@ -1,5 +1,10 @@
 // Rig contract helpers: registry, pose blending, idle life (breath + seeded blinks), the shared expression
 // table, gait/IK helpers, and makeRig(), which wraps a rig's paint() into the contract's draw()/bbox().
+// Round 2 (DESIGN §9.2): st.tilt reaches paint() as F.pitch (-1..1, + = head up); pitchPose()/gaze() help rigs
+// apply it, and draw() scales the pitch back wherever it would push the drawing into the ground. Optional rig fields:
+// lookTime (s, how long a look/tilt takes), mount(pose, params) → [ux, uy] (the riding point, units at face 1 and
+// scale 1, params.size applied), and hangPoses (names of poses whose limbs/tail hang below the contact point on
+// purpose — for lying over a shell or a branch; leg(..., { free: true }) skips the ground clamps).
 import { clamp, lerp, rng } from '../core/lib.mjs';
 import { limb, ell, rpoly } from '../core/lib.mjs';
 import { groundShadow, setLineScale, lineScaleFor, cel, line } from '../core/style.mjs';
@@ -86,9 +91,20 @@ export function faceOf(st = {}, pose = {}, face = 1) {
   if (talk) F.round *= 0.4;
   if (pose.mo > F.round) F.round *= 0.5;
   F.look = clamp((st.look || 0) * face, -1, 1);          // st.look is in screen direction; F.look is local (+ = forward)
+  F.pitch = clamp(+st.tilt || 0, -1, 1);                 // st.tilt: head pitch, +1 = up as far as the species can, -1 = down
   F.breath = st.breath || 0;
   return F;
 }
+// Head pitch for rigs whose pose has a head position (hx, hy) and rotation hr: blends toward `up` (pitch > 0) or
+// `down` (pitch < 0) deltas, e.g. { hr: -0.5, hy: -4 }. A pitch of 0 returns the pose unchanged.
+export function pitchPose(p, pitch, up, down) {
+  if (!pitch) return p;
+  const d = pitch > 0 ? up : down, k = Math.abs(pitch), q = { ...p };
+  for (const key in d) q[key] = (q[key] ?? 0) + d[key] * k;
+  return q;
+}
+// Pupil offset [x, y] for an eye of vertical radius ry: look turns it forward, pitch lifts or drops it.
+export const gaze = (F, kx, ry) => [F.look * kx, -F.pitch * ry * 0.38];
 
 // ───────────── gaits and limbs ─────────────
 export const frac = x => x - Math.floor(x);
@@ -158,15 +174,16 @@ export function tube(pts, ws, seed = 1, jit = 0.25) {
 // o: { l1, l2, meta (metatarsal length, 0 = none), ma (its angle from vertical, + = paw ahead of the ankle),
 //      bend (+1 joint forward, -1 back), w: [root, knee, ankle, paw] half-widths, col, low (lower-leg colour),
 //      lowFrom (0..1 along knee→ankle where `low` starts), paw: [rx, ry] | null, hoof, sh, seed,
-//      curl (0..1 swing flex) with curlA (radians of paw flex per unit curl) }
+//      curl (0..1 swing flex) with curlA (radians of paw flex per unit curl), free (no ground clamps: a limb
+//      hanging over a shell or a branch) }
 export function leg(T, root, foot, o) {
   const [pr, py] = o.paw || [0, 0], meta = o.meta || 0, ma = (o.ma || 0) + (o.curl || 0) * (o.curlA ?? -1.1);
   // keep the ankle and the tube's end cap above the ground (y = 0) whatever the foot angle
   const pc = [foot[0], foot[1] - (meta ? Math.max(py, o.w[3] * 0.8 * Math.max(0, Math.cos(ma)) + 0.5, o.w[3] * Math.abs(Math.sin(ma)) + 0.3) : py)];
-  const ank = meta ? [pc[0] - Math.sin(ma) * meta, Math.min(pc[1] - Math.cos(ma) * meta, -o.w[2] - 0.5)] : pc;
+  const ank = meta ? [pc[0] - Math.sin(ma) * meta, o.free ? pc[1] - Math.cos(ma) * meta : Math.min(pc[1] - Math.cos(ma) * meta, -o.w[2] - 0.5)] : pc;
   const knee = ik2(root[0], root[1], ank[0], ank[1], o.l1, o.l2, o.bend);
   const w = o.w, sh = o.sh ?? 2, sd = o.seed || 1, low = o.low || o.col;
-  if (knee[1] > -w[1] - 0.6) knee[1] = -w[1] - 0.6;                 // a knee never goes through the ground
+  if (!o.free && knee[1] > -w[1] - 0.6) knee[1] = -w[1] - 0.6;     // a knee never goes through the ground
   const pts = meta ? [root, knee, ank, pc] : [root, knee, ank], ws = meta ? [w[0], w[1], w[2], w[3]] : [w[0], w[1], w[2]];
   const Tb = tube(pts, ws, sd);
   cel(T, Tb, o.col, sh, 0, sd);
@@ -183,7 +200,7 @@ export function leg(T, root, foot, o) {
   }
   line(T, [...Tb, Tb[0]], o.ink ?? 1.05, { seed: sd, taper: false });
   if (o.hoof) { const H = [[pc[0] - pr, pc[1] - py * 0.2], [pc[0] + pr * 0.9, pc[1] - py * 0.3], [pc[0] + pr * 1.2, foot[1]], [pc[0] - pr * 1.05, foot[1]]]; cel(T, H, o.hoof, sh * 0.5, o.ink ?? 1, sd + 4); }
-  else if (pr) { const pa = (o.curl || 0) * (o.curlA ?? -1.1) * 0.4, ext = Math.hypot(pr * Math.sin(pa), py * Math.cos(pa)); cel(T, ell(pc[0] + pr * 0.3, Math.min(pc[1], foot[1] - ext), pr, py, sd + 4, 0.15, pa), o.pawCol || low, sh * 0.6, (o.ink ?? 1) * 0.9, sd + 4); }
+  else if (pr) { const pa = (o.curl || 0) * (o.curlA ?? -1.1) * 0.4, ext = Math.hypot(pr * Math.sin(pa), py * Math.cos(pa)); cel(T, ell(pc[0] + pr * 0.3, o.free ? pc[1] : Math.min(pc[1], foot[1] - ext), pr, py, sd + 4, 0.15, pa), o.pawCol || low, sh * 0.6, (o.ink ?? 1) * 0.9, sd + 4); }
   return { knee, ank, pc };
 }
 // A tail (or any soft appendage) along a bending spine. It leaves `base` at angle a0 (0 = straight back, + up;
@@ -280,6 +297,23 @@ for (const k of ['fillStyle', 'strokeStyle', 'globalAlpha', 'globalCompositeOper
 }
 
 // ───────────── makeRig ─────────────
+// Head pitch never pushes the drawing into the ground: a head lowered (or a body tipped by a lifted head) may sink
+// no lower than the pose already reaches without pitch, or PITCH_CLEAR units under the contact, whichever is lower.
+// The pitch is scaled back (bisection over dry paints) until it fits — a grazing deer or a sleeping hare that is
+// told to look down keeps its chin on the grass instead of burying it. Units are local (ground at y = lift).
+const PITCH_CLEAR = 0.6;
+function clearPitch(paint, pose, F, o, sx, sy, lift) {
+  const low = pitch => {
+    const T = new Tee(null, sy); T.scale(sx, sy);
+    paint(T, pose, { ...F, pitch }, { ...o, out: {} });
+    const b = T.box(); return b ? b[3] / sy : -Infinity;
+  };
+  const lim = Math.max(low(0) + 0.02, lift + PITCH_CLEAR);
+  if (low(F.pitch) <= lim) return F.pitch;
+  let a = 0, b = 1;
+  for (let i = 0; i < 7; i++) { const m = (a + b) / 2; if (low(F.pitch * m) <= lim) a = m; else b = m; }
+  return F.pitch * a;
+}
 // spec: the contract fields plus
 //   paint(T, pose, F, o)   draws in local units (origin = contact point, +x forward, ground y = 0).
 //                          o = { st, P (params), face, t, out }; set o.out.head / o.out.mouth = T.map(x, y).
@@ -300,8 +334,9 @@ export function makeRig(spec) {
       const out = {};
       try {
         T.save(); T.translate(x, y - lift * s * (P.size || 1)); T.scale(s * face * (P.size || 1), s * (P.size || 1));
-        const F = faceOf(st, pose, face);
-        spec.paint(T, pose, F, { st, P, face, t: st.t || 0, out, s });
+        const F = faceOf(st, pose, face), o = { st, P, face, t: st.t || 0, out, s }, k = s * (P.size || 1);
+        if (F.pitch) F.pitch = clearPitch(spec.paint, pose, F, o, k * face, k, lift);
+        spec.paint(T, pose, F, o);
         T.restore();
       } finally { setLineScale(prev); }
       const b = T.box() || [x, y, x, y];

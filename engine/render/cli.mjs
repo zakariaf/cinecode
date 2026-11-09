@@ -90,7 +90,7 @@ function filmDir(opts, ctx) {
 async function planWithNote(dir, ctx, label = 'compile') {
   const r = await step(ctx, label, async () => {
     const p = await loadPlan(dir);
-    const voiced = (p.plan.lines?.length ?? 0) - p.missing.length;
+    const voiced = (p.plan.lines ?? []).filter(l => p.voices?.has(l.id)).length;   // missing is per unique line; a repeated line counts each time
     return { ...p, msg: `${clock(p.plan.duration)}, ${plural(p.plan.shots?.length ?? 0, 'shot')}, ${voiced}/${p.plan.lines?.length ?? 0} lines voiced` };
   });
   if (r.missing.length) say(ctx, '', `(${r.missing.length} line${r.missing.length > 1 ? 's' : ''} not voiced yet: timing uses estimates; run \`cinecode voice\`)`);
@@ -232,7 +232,7 @@ async function cmdLint(opts, ctx) {
     return { ...r, msg: `${plural(r.errors.length, 'error')}, ${plural(r.warnings.length, 'warning')} → ${rel(ctx, paths.out)}/lint.json, lint.jpg` };
   });
   for (const i of [...result.errors, ...result.warnings]) {
-    ctx.out.write(`  ${i.severity === 'error' || result.errors.includes(i) ? 'error' : 'warn '}  ${String(i.rule).padEnd(17)} ${(i.shot ?? '').toString().padEnd(9)} ${Number.isFinite(i.t) ? clock(i.t).padStart(7) : '       '}  ${i.actor ? `${i.actor}: ` : ''}${i.message}\n`);
+    ctx.out.write(`  ${i.severity === 'error' || result.errors.includes(i) ? 'error' : 'warn '}  ${String(i.rule).padEnd(17)} ${(i.shot ?? '').toString().padEnd(9)} ${Number.isFinite(i.t) ? clock(i.t).padStart(7) : '       '}  ${i.message}\n`);
   }
   if (result.errors.length) throw new CliError(`lint found ${result.errors.length} error${result.errors.length > 1 ? 's' : ''}`);
 }
@@ -248,10 +248,10 @@ async function score(film, plan, paths, ctx) {
   });
 }
 
-async function mixdown(plan, voices, music, paths, ctx) {
+async function mixdown(plan, voices, music, paths, ctx, film = null) {
   const { mixFilm, writeMaster } = await need('engine/audio/mix.mjs', 'the mixer');
   return step(ctx, 'mix', async () => {
-    const mix = await mixFilm(plan, { voices, music });
+    const mix = await mixFilm(plan, { voices, music, sounds: film?.custom?.sounds });   // plan.sounds wins when compile copied them
     const r = await writeMaster(paths.mix, mix);
     const lufs = r && Number.isFinite(r.lufs ?? r.integrated) ? `, ${(r.lufs ?? r.integrated).toFixed(1)} LUFS` : '';
     return `${rel(ctx, paths.mix)} (master${lufs})`;
@@ -269,7 +269,19 @@ async function cmdMix(opts, ctx) {
   const { film, plan, voices, missing, paths } = await planWithNote(dir, ctx);
   if (missing.length) say(ctx, 'mix', `warning: mixing without ${missing.length} unvoiced line${missing.length > 1 ? 's' : ''}`);
   const { music } = await score(film, plan, paths, ctx);
-  await mixdown(plan, voices, music, paths, ctx);
+  await mixdown(plan, voices, music, paths, ctx, film);
+}
+
+/** True when out/mix.wav exists and is newer than every file of the film (film.json, custom.mjs, fx/, voices/, …). */
+function mixFresh(dir, paths) {
+  if (!existsSync(paths.mix)) return false;
+  const t = statSync(paths.mix).mtimeMs;
+  const newer = d => readdirSync(d, { withFileTypes: true }).some(e => {
+    const p = join(d, e.name);
+    if (e.isDirectory()) return p !== paths.out && !e.name.startsWith('.') && newer(p);
+    return e.isFile() && statSync(p).mtimeMs > t;
+  });
+  return !newer(dir);
 }
 
 function frameRange(opts, fps, ctx) {
@@ -297,10 +309,15 @@ async function video(ctx, label, args) {
 
 async function cmdAnimatic(opts, ctx) {
   const dir = filmDir(opts, ctx);
-  const { plan, paths } = await planWithNote(dir, ctx);
+  const { film, plan, voices, missing, paths } = await planWithNote(dir, ctx);
   const { drawFrame } = await need('engine/film/frame.mjs', 'the frame renderer');
-  const fps = 12, audio = existsSync(paths.mix) ? paths.mix : null;
-  if (!audio) say(ctx, 'animatic', `no ${rel(ctx, paths.mix)} yet: silent preview (run \`cinecode mix\` first for sound)`);
+  const fps = 12, audio = paths.mix;
+  if (mixFresh(dir, paths)) say(ctx, 'mix', `${rel(ctx, paths.mix)} is up to date`);
+  else { // the preview always has sound: mix first (unvoiced lines are left out)
+    if (missing.length) say(ctx, 'mix', `warning: mixing without ${missing.length} unvoiced line${missing.length > 1 ? 's' : ''}`);
+    const { music } = await score(film, plan, paths, ctx);
+    await mixdown(plan, voices, music, paths, ctx, film);
+  }
   await video(ctx, 'animatic', {
     plan, drawFrame, workerModule: FILM_SOURCE, workerArgs: { filmDir: dir }, jobs: opts.jobs,
     outPath: opts.out ? resolve(ctx.cwd, opts.out) : paths.animatic, range: frameRange(opts, fps, ctx),
@@ -395,7 +412,7 @@ export const COMMANDS = {
   mix: { args: '<film>', summary: 'mix dialogue, music, sfx, ambience → out/mix.wav', run: cmdMix, options: {},
     detail: 'Composes the score, mixes it under the cached dialogue with sfx and ambience, and masters to −16 LUFS.' },
   animatic: { args: '<film>', summary: 'fast low-res preview with sound → out/animatic.mp4', run: cmdAnimatic,
-    detail: 'Half resolution, 12 fps, with out/mix.wav if it exists.',
+    detail: 'Half resolution, 12 fps, with sound: out/mix.wav, mixed first when it is missing or older than the film\'s files.',
     options: { jobs: JOBS, from: FROM, to: TO, out: OUT } },
   render: { args: '<film>', summary: 'final film → out/<slug>.mp4 + out/<slug>.srt', run: cmdRender,
     detail: 'voices (from cache) → compile → music → mix → master → parallel video (x264 crf 17, slow) → mux AAC 192k + soft subtitles → ffprobe check.',

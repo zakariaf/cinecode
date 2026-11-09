@@ -1,8 +1,9 @@
 // The Hare. Ported from the legacy film (same shapes and poses), upgraded with IK gaits whose planted feet
 // never slide, a jaw that talks, brows, blinks, expressions, breathing, look and ear sway.
+// Round 2 (DESIGN §9.2): st.tilt pitches the head; the pupils follow (+1 up, -1 down).
 import { clamp, lerp, ell, limb, rpoly } from '../core/lib.mjs';
 import { cel, darken, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
-import { makeRig, footAt, mixPose, plus, jumpAt, keyed, ease, frac, bone } from './rig.mjs';
+import { makeRig, footAt, mixPose, plus, jumpAt, keyed, ease, frac, bone, pitchPose, gaze } from './rig.mjs';
 
 const rot = (v, a) => [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a)];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
@@ -201,7 +202,7 @@ function head(T, p, F, P, o) {
     if (F.round > 0.5) dot(T, 15.2, 10.2, 1.4, '#5e1f2b');
   }
   if (sm > 0.5) fillP(T, ell(3.5, 5, 3.6, 2.2, 97, 0.1), rgba('#e88a80', 0.35 * (sm - 0.4)));
-  eye(T, 3.4, -4.6, 2.5, 3.5, F.eye, P.eye, F.look * 0.9, F.lid, F.tilt);
+  eye(T, 3.4, -4.6, 2.5, 3.5, F.eye, P.eye, gaze(F, 0.9, 3.5), F.lid, F.tilt);
   brow(T, 3.4, -9.9, 6.2, F.browY * 0.7, F.browT * 0.7, darken(P.fur, 0.42), 1.2, 96);
   for (const [ty, s] of [[2, 93], [5.5, 94], [8.5, 95]]) line(T, [[16, 4.2], [29, ty]], 0.5, { seed: s, color: 'rgba(42,33,48,.55)' });
   o.out.head = T.map(2, -1); o.out.mouth = T.map(14.5, 7.5 + op * 2);
@@ -222,9 +223,10 @@ function foreleg(T, S, paw, fw, w, col, seed) {
 }
 function paint(T, p0, F, o) {
   const { P, t } = o;
-  const p = { ...p0 };
+  let p = { ...p0 };
   p.eF += 0.05 * Math.sin(t * 1.9) + F.look * -0.1; p.eB += 0.06 * Math.sin(t * 1.5 + 1.3);
   const J = joints(p), sh = SH;
+  p = pitchPose(p, F.pitch, { hr: -0.5, hy: -5, hx: -2, eF: 0.1, eB: 0.1 }, { hr: 0.4, hy: 4, hx: 1 });   // st.tilt (after grounding)
   T.translate(0, -J.g);
   const fur2 = darken(P.fur, 0.85);
   ear(T, p, p.eB, true, P, t);

@@ -2,7 +2,8 @@
 // (shots, scenes and where each issue happens) and one numbered tile per issue: the frame at the issue's worst
 // moment with the offending boxes, footprints and contact points outlined (an arrow on the edge for anything
 // off frame, a magnified inset when the marks are small), then its rule, shot, time span and message. Issues
-// about a cut (cut-jump, axis) show the frame after the cut with the frame before it as an inset.
+// about a cut (cut-jump, axis) show the frame after the cut with the frame before it as an inset. Stills skip scene
+// dissolves and fades, so a tile always shows the scene its boxes were measured in.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createCanvas } from '@napi-rs/canvas';
@@ -78,10 +79,10 @@ function drawSheet(plan, result, tiles, omitted, opts) {
     x.textAlign = 'center'; x.fillStyle = INK; x.font = `italic ${Math.round(26 * u)}px ${SERIF}`;
     x.fillText('No staging or editing problems found.', width / 2, top + Math.round(64 * u));
   }
-  const frame = createCanvas(W, H), fx = frame.getContext('2d');
+  const frame = createCanvas(W, H), fx = frame.getContext('2d'), cut = cutsOnly(plan);
   tiles.forEach((issue, i) => {
     const px = margin + (i % cols) * (tw + gap), py = top + Math.floor(i / cols) * (th + label + gap);
-    drawTile(x, plan, issue, i + 1, { px, py, tw, th, k, u, frame, fx });
+    drawTile(x, cut, issue, i + 1, { px, py, tw, th, k, u, frame, fx });
   });
   if (omitted) {
     x.textAlign = 'left'; x.fillStyle = MUTED; x.font = `italic ${Math.round(17 * u)}px ${SERIF}`;
@@ -133,6 +134,14 @@ function pin(x, cx, cy, r, n, col, u) {
 }
 
 // ───────────── one issue ─────────────
+// The plan as the stills draw it: every scene cuts in, so a frame at the start of a dissolve or a fade shows its own
+// scene, the one the issue's boxes belong to, instead of a blend with the previous scene or black.
+function cutsOnly(plan) {
+  if (!plan._scenes?.some(s => s.transition && s.transition !== 'cut')) return plan;
+  const p = Object.create(plan);
+  Object.defineProperty(p, '_scenes', { value: plan._scenes.map(s => (s.transition && s.transition !== 'cut' ? { ...s, transition: 'cut' } : s)) });
+  return p;
+}
 function still(plan, t, frame, fx) {
   try { drawFrame(fx, plan, t); }
   catch (e) { fx.setTransform(1, 0, 0, 1, 0, 0); fx.fillStyle = '#333'; fx.fillRect(0, 0, frame.width, frame.height); fx.fillStyle = '#fff'; fx.font = `${Math.round(frame.height / 20)}px ${SERIF}`; fx.fillText(`frame failed: ${e.message}`.slice(0, 80), 20, frame.height / 2); }

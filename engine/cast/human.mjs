@@ -3,6 +3,17 @@
 // 'sit-seat' (the feet are then planted `seatHeight` units below it, or dangle if the legs are too short).
 // Poses are plain numeric objects; legs can be posed by angles or by IK foot targets (ik = 0..1),
 // which is how the gaits keep the stance foot planted. Everything is deterministic.
+// Every pose field blends continuously (seat, ground snaps, plants, the seated dangle), so mixPose never pops; mixPose
+// routes a direct sit ↔ stand blend through a crouch so the body leans over its feet as it rises or lowers.
+// Feet that carry weight don't skate: `anchor` holds each planted foot where the standing pose puts it (the hip moves
+// instead, `hxL`), so stand → crouch is a squat over fixed feet and a seated person's hips sit behind the contact point
+// (the contact is where her feet will stand when she gets up). Hands rest on the floor, never through it.
+// Round 2 (DESIGN §9.2): hairStyle 'braids'; glasses: true | frame colour (one glint on the near lens); tear 0..1
+// (one wet highlight on each lower lid); build 'slight'; shoes null = barefoot; skirts use the `dress` colour when
+// given; hem (skirt/dress length, 1 = knee, 2 = ankle; elders default long); dressStyle 'smock' (children) | 'fitted';
+// scarfLength (the ends are absolute units, so a child in an adult's scarf trails it in the grass; fringed ends);
+// st.tilt -1..1 head pitch (+1 up, the eyes follow); draw(null, …) returns anchors and bounds without drawing;
+// jump-for-joy sets pose.lift (units).
 import { clamp, lerp, smooth, easeInOut, poly, path, shift, arcPts, quad, noise1, canvas, INK } from '../core/lib.mjs';
 
 // Same algorithms as lib.mjs wobble/ink/ell, with noise tables cached per seed (a rig draws hundreds of strokes a frame).
@@ -39,7 +50,10 @@ function ink(ctx, P, w, { closed = true, color = INK, seed = 1, taper = !closed 
 
 // ───────────────────────── private style helpers (no import of style.mjs, by contract) ─────────────────────────
 const SHADE = '#c3b8dc';
-const NAMED = { red: '#c8443a', blue: '#3f6fb0', green: '#4f8a46', yellow: '#f2c94c', orange: '#e0703a', pink: '#e89ab0', purple: '#7a5a9a', brown: '#7a5236', black: '#2a2428', white: '#f4f1ea', grey: '#8a8a8e', gray: '#8a8a8e', blonde: '#e0b866', ginger: '#c0602e', navy: '#2f3f6a', teal: '#3a8a8a', cream: '#efe4c8' };
+const NAMED = { red: '#c8443a', blue: '#3f6fb0', green: '#4f8a46', yellow: '#f2c94c', orange: '#e0703a', pink: '#e89ab0', purple: '#7a5a9a', brown: '#7a5236', black: '#2a2428', white: '#f4f1ea', grey: '#8a8a8e', gray: '#8a8a8e', blonde: '#e0b866', ginger: '#c0602e', navy: '#2f3f6a', teal: '#3a8a8a', cream: '#efe4c8',
+  // materials (glasses frames, buckles) and storybook cloth colours
+  brass: '#b08a3a', gold: '#c9a227', silver: '#a9adb3', copper: '#b8693a', bronze: '#8c6a3a', tortoiseshell: '#6a4026', steel: '#6e747c',
+  moss: '#5e7b3f', olive: '#6b6b32', ochre: '#d9a441', mustard: '#d0a535', rust: '#a8502a', tan: '#c8a47a', beige: '#d8c8a8', khaki: '#b5a77a', maroon: '#6e2a30', plum: '#6a3a5a', lavender: '#a898c8', sky: '#8ab8dc', charcoal: '#3a3a40', ivory: '#f2ecdc' };
 function normHex(c, fb = '#888888') {
   if (typeof c !== 'string') return fb;
   if (NAMED[c]) return NAMED[c];
@@ -93,12 +107,16 @@ function spline(P, n = 8, closed = true) {
   if (!closed) out.push(P[N - 1]);
   return out;
 }
-// Tapered limb outline between joints with half-widths w1, w2 (rounded caps), as one smooth closed curve.
+// Tapered limb outline between joints with half-widths w1, w2 (rounded caps), as one smooth closed curve. Sampled
+// directly with even spacing: a spline over dense caps and long sides overshoots into tiny loops where they meet,
+// which the ink turns into spikes on bent knees and elbows.
 function capsule(a, b, w1, w2, seed = 0, jit = 0.25) {
   const d = sub(b, a), L = len(d) || 1e-3, t = mul(d, 1 / L), n = [-t[1], t[0]], P = [];
-  for (let i = 0; i <= 8; i++) { const q = Math.PI / 2 + (i / 8) * Math.PI; P.push(add(b, add(mul(t, -Math.cos(q) * w2 * 0.9), mul(n, Math.sin(q) * -w2)))); }
-  for (let i = 0; i <= 8; i++) { const q = -Math.PI / 2 + (i / 8) * Math.PI; P.push(add(a, add(mul(t, -Math.cos(q) * w1 * 0.9), mul(n, Math.sin(q) * -w1)))); }
-  return wobble(spline(P, 2), seed, jit);
+  const cap = (c, w, q0) => { for (let i = 0; i <= 12; i++) { const q = q0 + (i / 12) * Math.PI; P.push(add(c, add(mul(t, -Math.cos(q) * w * 0.9), mul(n, Math.sin(q) * -w)))); } };
+  const side = (p, q) => { const m = Math.max(1, Math.round(len(sub(q, p)) / 2.5)); for (let i = 1; i < m; i++) P.push(mid(p, q, i / m)); };
+  cap(b, w2, Math.PI / 2); side(P[P.length - 1], add(a, mul(n, w1)));
+  cap(a, w1, -Math.PI / 2); side(P[P.length - 1], P[0]);
+  return wobble(P, seed, jit);
 }
 // Two-bone IK: joint position for a chain root→target with bone lengths a, b. bend = +1 bends forward (knees), -1 back (elbows).
 function ik2(root, tgt, a, b, bend = 1) {
@@ -115,7 +133,13 @@ export const DEFAULTS = {
   hairStyle: 'short', hair: '#4a3222', beard: 'none',
   shirt: '#e0703a', sleeves: 'long', bottom: 'trousers', pants: '#3d5a8a', dress: null, shoes: '#5a3a2a', socks: '#f2ede2',
   scarf: false, glasses: false, hat: false, apron: false, backpack: false,
+  tear: 0, hem: null, scarfLength: 1, dressStyle: null,
 };
+const HAIR_STYLES = ['short', 'long', 'ponytail', 'bun', 'braids', 'curly', 'bald', 'cap'];
+const ACCESSORY = { scarf: '#c8443a', glasses: '#3a2e2a', hat: '#d8b04a', apron: '#f2ede2', backpack: '#b06a3a' };   // default colours
+const OFF = new Set([undefined, null, false, 0, '', 'none', 'no', 'false', 'off']);
+// Default hem (1 = knee, 2 = ankle) per age for skirt / dress: elders wear them long.
+const HEM = { child: [0.82, 1.06], teen: [0.85, 1.08], adult: [1.12, 1.2], elder: [1.62, 1.62] };
 const AGE_LOOK = {
   child: { hairStyle: 'short', bottom: 'shorts', shirt: '#e0703a', pants: '#3d5a8a' },
   teen: { hairStyle: 'ponytail', bottom: 'trousers', shirt: '#5a8fc8', pants: '#3a3a4e', hair: '#5a3a22' },
@@ -129,28 +153,38 @@ const AGES = {
   adult: { H: 215, head: 0.18, neck: 0.032, torso: 0.31, leg: 0.49, chest: 0.215, waist: 0.165, hipW: 0.175, upArm: 0.185, foreArm: 0.152, hand: 0.05, foot: 0.15, limbK: 1, belly: 0.15, eye: 1, stoop: 0, walk: 1.35, run: 2.6, cad: [0.95, 1.4], jaw: 1 },
   elder: { H: 205, head: 0.185, neck: 0.026, torso: 0.31, leg: 0.49, chest: 0.21, waist: 0.18, hipW: 0.18, upArm: 0.18, foreArm: 0.15, hand: 0.05, foot: 0.15, limbK: 0.95, belly: 0.35, eye: 0.98, stoop: 0.22, walk: 1.08, run: 1.7, cad: [0.82, 1.2], jaw: 0.9 },
 };
-const BUILD = { slim: { w: 0.86, limb: 0.86, belly: -0.15 }, average: { w: 1, limb: 1, belly: 0 }, sturdy: { w: 1.17, limb: 1.15, belly: 0.45 } };
+// h: height factor (a slight person is a little smaller as well as narrower)
+const BUILD = { slight: { w: 0.8, limb: 0.8, belly: -0.25, h: 0.97 }, slim: { w: 0.86, limb: 0.86, belly: -0.15 }, average: { w: 1, limb: 1, belly: 0 }, sturdy: { w: 1.17, limb: 1.15, belly: 0.45 } };
 
 export function look(params = {}) {
   const age = AGES[params.age] ? params.age : DEFAULTS.age;
   const p = { ...DEFAULTS, ...AGE_LOOK[age], ...params, age };
   if (!BUILD[p.build]) p.build = 'average';
-  for (const k of ['skin', 'eyes', 'hair', 'shirt', 'pants', 'shoes', 'socks']) p[k] = normHex(p[k], normHex(DEFAULTS[k]));
-  p.dress = p.dress ? normHex(p.dress) : p.shirt;
-  for (const k of ['scarf', 'hat', 'apron', 'backpack']) p[k] = p[k] === true ? { scarf: '#c8443a', hat: '#d8b04a', apron: '#f2ede2', backpack: '#b06a3a' }[k] : p[k] ? normHex(p[k]) : false;
-  p.glasses = p.glasses === true ? '#3a2e2a' : p.glasses ? normHex(p.glasses) : false;
+  const bare = p.shoes === null || p.shoes === false || p.shoes === 'none';
+  for (const k of ['skin', 'eyes', 'hair', 'shirt', 'pants', 'socks']) p[k] = normHex(p[k], normHex(DEFAULTS[k]));
+  p.shoes = bare ? null : normHex(p.shoes, normHex(DEFAULTS.shoes));
+  const dress = p.dress ? normHex(p.dress) : null;
+  p.dress = dress ?? p.shirt;
+  p.skirt = dress ?? p.pants;                          // a skirt takes the `dress` colour when one is given
+  // accessories: true = the default colour, a colour = that colour (an unknown name falls back to the default, not
+  // grey), and false / null / 'none' = not worn (as shoes 'none' = barefoot)
+  for (const [k, c] of Object.entries(ACCESSORY)) p[k] = OFF.has(p[k]) ? false : p[k] === true ? c : normHex(p[k], c);
   if (age === 'child' || age === 'teen') p.beard = 'none';
   if (!['none', 'short', 'full'].includes(p.beard)) p.beard = 'none';
-  if (!['short', 'long', 'ponytail', 'bun', 'curly', 'bald', 'cap'].includes(p.hairStyle)) p.hairStyle = 'short';
+  if (!HAIR_STYLES.includes(p.hairStyle)) p.hairStyle = 'short';
   if (!['trousers', 'shorts', 'skirt', 'dress'].includes(p.bottom)) p.bottom = 'trousers';
   p.height = clamp(+p.height || 1, 0.6, 1.5);
+  p.tear = clamp(+p.tear || 0, 0, 1);
+  p.scarfLength = clamp(+p.scarfLength || 1, 0.4, 2.5);
+  p.hem = p.hem != null && Number.isFinite(+p.hem) ? clamp(+p.hem, 0.4, 1.95) : HEM[age][p.bottom === 'dress' ? 1 : 0];
+  if (!['smock', 'fitted'].includes(p.dressStyle)) p.dressStyle = age === 'child' ? 'smock' : 'fitted';   // a smock hangs loose from a yoke
   p.__look = true;
   return p;
 }
 
 // Absolute metrics for a look: every length in units at scale 1.
 export function metrics(params = {}) {
-  const lk = params.__look ? params : look(params), A = AGES[lk.age], B = BUILD[lk.build], H = A.H * lk.height;
+  const lk = params.__look ? params : look(params), A = AGES[lk.age], B = BUILD[lk.build], H = A.H * lk.height * (B.h || 1);
   const L = A.leg * H, ankle = 0.036 * H, thigh = (L - ankle) * 0.52, shin = (L - ankle) * 0.48;
   const M = {
     age: lk.age, H, headH: A.head * H, k: (A.head * H) / 2, neck: A.neck * H, torso: A.torso * H, L, thigh, shin, ankle,
@@ -177,14 +211,17 @@ export function metrics(params = {}) {
 //  ik (both legs) / ikF / ikB 0..1 with tFx,tFy,tBx,tBy: foot targets (sole under the ankle) relative to the hip, in leg lengths;
 //    pvF/pvB: -1 heel / +1 toe pivot; gF/gB = 1 snaps that foot's target height to the ground found from the rest of the body
 //  gy (with weight gyW): hip height above the ground in leg lengths (gaits); liftL: extra lift in leg lengths; run: 1 for run cycles
-//  seat: 1 = sitting on a surface at the contact point; seatH: ground distance below the seat (0 = knee height)
+//  seat 0..1: weight of sitting on a surface at the contact point (blends continuously); seatH: ground distance below the seat (0 = knee height)
+//  plF / plB 0..1: plant weight — that foot's sole is pulled onto the floor by IK after the ground is found (feet never float)
+//  anchor 0..1: weight of holding each planted foot (× plF / plB) at its rest stance — where `stand` puts it, the hip over
+//    the contact point — pivoting on the toe when the heel is up; the legs reach it by IK
 //  bkFront: 1 = far arm drawn in front of the torso; lift: units off the ground; idle: weight-shift sway; gait: 0..1 walking weight
-//  laugh / gasp / sleep / joy: face hints for gestures and poses; hx: hip shift (units)
+//  laugh / gasp / sleep / joy: face hints for gestures and poses; hx: hip shift (units); hxL: hip shift (leg lengths)
 export const POSE0 = {
-  lean: 0.02, stoop: 0, tilt: 0, turn: 0, shrug: 0, hx: 0,
+  lean: 0.02, stoop: 0, tilt: 0, turn: 0, shrug: 0, hx: 0, hxL: 0, anchor: 0,
   hipF: -0.04, kneeF: 0.05, fF: 0, hipB: 0.07, kneeB: 0.04, fB: 0,
   shF: -0.07, elF: 0.24, hF: 0, shB: 0.1, elB: 0.25, hB: 0, bkFront: 0,
-  ik: 0, ikF: 0, ikB: 0, tFx: 0.06, tFy: 1, tBx: -0.05, tBy: 1, pvF: 0, pvB: 0, gF: 0, gB: 0, gy: 0, gyW: 0, liftL: 0, run: 0,
+  ik: 0, ikF: 0, ikB: 0, tFx: 0.06, tFy: 1, tBx: -0.05, tBy: 1, pvF: 0, pvB: 0, gF: 0, gB: 0, gy: 0, gyW: 0, liftL: 0, run: 0, plF: 1, plB: 1,
   seat: 0, seatH: 0, lift: 0, idle: 0, gait: 0, laugh: 0, gasp: 0, sleep: 0, joy: 0,
 };
 const BASE_YAW = 0.72;
@@ -210,7 +247,7 @@ function solve(p0, M, st = {}, lk = {}) {
   const br = 0.5 - 0.5 * Math.cos(2 * Math.PI * (st.breath || 0));
   const lean = p.lean, a2 = lean + p.stoop + M.stoop * (1 - p.seat * 0.3), T = M.torso * (1 + 0.012 * br);
   const fwd = a => [Math.cos(a), Math.sin(a)];
-  const hip = [p.hx, 0], chest = add(hip, mul(upv(lean), T * 0.5)), neck = add(chest, mul(upv(a2), T * 0.5));
+  const hip = [p.hx + p.hxL * M.L, 0], chest = add(hip, mul(upv(lean), T * 0.5)), neck = add(chest, mul(upv(a2), T * 0.5));
   const shC = add(neck, mul(upv(a2), -T * 0.12 + p.shrug * T * 0.1 + br * 0.4));
   const shN = add(shC, mul(fwd(a2), -0.15 * M.chest)), shFar = add(shC, mul(fwd(a2), 0.24 * M.chest));
   const ar = -(lean + p.stoop);                     // arms turn with the torso (an elder's stoop leaves them hanging)
@@ -219,35 +256,33 @@ function solve(p0, M, st = {}, lk = {}) {
   aF.hand = add(aF.wr, mul(down(aF.dir), M.hand * 0.75)); aB.hand = add(aB.wr, mul(down(aB.dir), M.hand * 0.75));
   const hipN = add(hip, mul(fwd(lean), -0.14 * M.hipW)), hipFar = add(hip, mul(fwd(lean), 0.16 * M.hipW));
   const footOff = [[-0.24 * M.foot, M.ankle], [0.76 * M.foot, M.ankle]];         // heel, toe relative to the ankle (flat)
-  const seat = p.seat >= 0.5;
+  const w = clamp(p.seat), seat = w >= 0.5;
   const seatH = st.seatHeight ?? (p.seatH < 0 ? 0 : p.seatH || (M.shin + M.ankle + 2));
+  const mkLeg = (Hj, hipA, shinA, fa, ha) => {
+    const knee = add(Hj, mul(down(hipA), M.thigh)), ank = add(knee, mul(down(shinA), M.shin));
+    return { hip: Hj, knee, ank, heel: add(ank, rot(footOff[0], fa)), toe: add(ank, rot(footOff[1], fa)), fa, hipA, shinA, ha };
+  };
   const leg = (Hj, ha, ka, fa, tx, ty, pv, side, ikw) => {
-    if (M.age === 'elder' && !seat) { ha += 0.05; ka += 0.12; }
+    if (M.age === 'elder') { ha += 0.05 * (1 - w); ka += 0.12 * (1 - w); }
     let hipA = ha, shinA = ha - ka;
-    if (seat) {
-      const kneeA = add(Hj, mul(down(ha), M.thigh)), gy = Hj[1] + M.buttR + seatH;
-      const tgt = [kneeA[0] + M.shin * 0.12 + side * 2, gy - M.ankle];
-      if (len(sub(tgt, Hj)) > (M.thigh + M.shin) * 0.995) {             // the floor is out of reach: dangle with a lazy swing
-        shinA = 0.18 + 0.12 * Math.sin((st.t || 0) * 2.1 + side * 1.7) - (ha - 1.5) * 0.3; fa = 0.5;
-      } else { const kn = ik2(Hj, tgt, M.thigh, M.shin, 1); hipA = angDown(sub(kn, Hj)); shinA = angDown(sub(tgt, kn)); fa = 0; }
-    } else if (ikw > 0) {
+    if (ikw > 0) {
       const A0 = add(Hj, [tx * M.L, ty * M.L - M.ankle]);
       const o = pv >= 0 ? footOff[1] : footOff[0], tgt = add(A0, mul(sub(o, rot(o, fa)), Math.abs(pv)));
       const kn = ik2(Hj, tgt, M.thigh, M.shin, 1);
       hipA = lerp(ha, angDown(sub(kn, Hj)), ikw); shinA = lerp(ha - ka, angDown(sub(tgt, kn)), ikw);
     }
-    const knee = add(Hj, mul(down(hipA), M.thigh)), ank = add(knee, mul(down(shinA), M.shin));
-    return { hip: Hj, knee, ank, heel: add(ank, rot(footOff[0], fa)), toe: add(ank, rot(footOff[1], fa)), fa, hipA, shinA };
+    return mkLeg(Hj, hipA, shinA, fa, ha);
   };
   const gk = p.run ? AGES[M.age].run / 2.6 : AGES[M.age].walk / 1.35, sx = p.gyW > 0 ? lerp(1, gk, clamp(p.gyW)) : 1;   // per-age stride
   const mkF = ty => leg(hipN, p.hipF, p.kneeF, p.fF, p.tFx * sx, ty, p.pvF, 1, Math.max(p.ik, p.ikF));
   const mkB = ty => leg(hipFar, p.hipB, p.kneeB, p.fB, p.tBx * sx, ty, p.pvB, -1, Math.max(p.ik, p.ikB));
   let lF = mkF(p.tFy), lB = mkB(p.tBy);
 
-  // head
+  // head; st.tilt pitches it (+1 = chin up as far as a person comfortably can, -1 = down) and the eyes follow (see drawHead)
+  const tu = clamp(st.tilt || 0, -1, 1), pitch = tu > 0 ? -0.62 * tu : -0.42 * tu;
   const yaw = clamp(BASE_YAW + p.turn + 0.3 * (st.look || 0), 0.12, 1.3), G = headGeo(M, yaw), k = M.k;
-  const th = a2 + p.tilt - M.stoop * 0.85 + (st.look ? 0.04 * st.look : 0);
-  const nTop = add(neck, mul(upv(a2 + p.tilt * 0.35 - M.stoop * 0.4), M.neck + k * 0.1));
+  const th = a2 + p.tilt + pitch - M.stoop * 0.85 + (st.look ? 0.04 * st.look : 0);
+  const nTop = add(neck, mul(upv(a2 + (p.tilt + pitch) * 0.35 - M.stoop * 0.4), M.neck + k * 0.1));
   const hc = sub(nTop, rot(mul(G.neck, k), th));
   const HT = q => add(hc, rot(mul(q, k), th));
   const headPts = spline(G.CP, 5).map(HT);
@@ -257,17 +292,56 @@ function solve(p0, M, st = {}, lk = {}) {
   const body = [add(hip, [0, M.buttR]), add(hip, mul(fwd(lean), -0.45 * M.hipW)), add(aF.hand, [0, M.hand * 0.6]), add(aB.hand, [0, M.hand * 0.6]),
     add(shN, mul(fwd(a2), -0.36 * M.chest)), add(chest, mul(fwd(lean), -0.5 * M.chest)), ...headPts];
   const maxY = P => Math.max(...P.map(c => c[1]));
-  if (!seat && (p.gF >= 0.5 || p.gB >= 0.5)) {        // plant the snapping foot on the ground the rest of the body defines
-    const g0 = maxY([...body, ...(p.gF >= 0.5 ? [] : legC(lF)), ...(p.gB >= 0.5 ? [] : legC(lB))]);
-    if (p.gF >= 0.5) lF = mkF((g0 - hipN[1]) / M.L);
-    if (p.gB >= 0.5) lB = mkB((g0 - hipFar[1]) / M.L);
+  const sF = clamp(p.gF) * (1 - w), sB = clamp(p.gB) * (1 - w);
+  if (sF > 0 || sB > 0) {                            // a snapping foot targets the ground the rest of the body defines
+    const g0 = maxY([...body, ...(sF > 0 ? [] : legC(lF)), ...(sB > 0 ? [] : legC(lB))]);
+    if (sF > 0) lF = mkF(lerp(p.tFy, (g0 - hipN[1]) / M.L, sF));
+    if (sB > 0) lB = mkB(lerp(p.tBy, (g0 - hipFar[1]) / M.L, sB));
   }
-  let g = seat ? hip[1] + M.buttR : maxY([...body, ...legC(lF), ...legC(lB)]);
-  if (!seat && p.gyW > 0) g = lerp(g, hip[1] + (p.gy / p.gyW) * M.L, clamp(p.gyW));
+  // ground: the lowest point, pulled toward an explicit hip height (gy) and toward the seat (the butt on the contact)
+  let g = maxY([...body, ...legC(lF), ...legC(lB)]);
+  if (p.gyW > 0) g = lerp(g, hip[1] + (p.gy / p.gyW) * M.L, clamp(p.gyW));
+  if (w > 0) g = lerp(g, hip[1] + M.buttR, w);
+  // plant: pull each planted sole onto the floor (seated feet always reach for it; out of reach on a seat, they dangle),
+  // and hold an anchored foot at its rest stance: the ankle x `stand` gives it (same arithmetic, so stand is unchanged).
+  const floor = g + w * seatH, R = M.thigh + M.shin;
+  const restX = (side, ha, ka) => {
+    if (M.age === 'elder') { ha += 0.05; ka += 0.12; }
+    const Hj = mul(fwd(POSE0.lean), side > 0 ? -0.14 * M.hipW : 0.16 * M.hipW);
+    return add(add(Hj, mul(down(ha), M.thigh)), mul(down(ha - ka), M.shin))[0];
+  };
+  const plant = (l, pl0, side) => {
+    const lock = clamp(p.anchor) * clamp(pl0), pl = Math.max(clamp(pl0), w);
+    if (pl <= 0 && lock <= 0) return l;
+    const d = (floor - Math.max(l.heel[1], l.toe[1])) * pl;
+    let tx = l.ank[0];
+    if (lock > 0) {                                   // the end of the foot on the floor stays put: the toe once the heel lifts
+      const o = footOff[l.fa >= 0 ? 1 : 0], ax = (side > 0 ? restX(1, POSE0.hipF, POSE0.kneeF) : restX(-1, POSE0.hipB, POSE0.kneeB)) + o[0] - rot(o, l.fa)[0];
+      tx = lerp(tx, ax, lock);
+    }
+    if (Math.abs(d) < 0.01 && Math.abs(tx - l.ank[0]) < 0.01) return l;
+    const tgt = [tx, l.ank[1] + d], kn = ik2(l.hip, tgt, M.thigh, M.shin, 1);
+    let hipA = angDown(sub(kn, l.hip)), shinA = angDown(sub(tgt, kn)), fa = l.fa;
+    // a floor out of reach from a seat: the legs dangle, weighted by the seat and by how far out of reach (no switch)
+    const dg = w * clamp((len(sub(tgt, l.hip)) - R * 0.995) / (R * 0.1));
+    if (dg > 0) {
+      hipA = lerp(hipA, l.ha, dg); fa = lerp(fa, 0.5, dg);
+      shinA = lerp(shinA, 0.18 + 0.12 * Math.sin((st.t || 0) * 2.1 + side * 1.7) - (l.ha - 1.5) * 0.3, dg);
+    }
+    return mkLeg(l.hip, hipA, shinA, fa, l.ha);
+  };
+  lF = plant(lF, p.plF, 1); lB = plant(lB, p.plB, -1);
+  // hands rest on the floor, never through it (a gy / seat ground can lie above a reaching hand): lift the wrist by IK
+  for (const a of [aF, aB]) {
+    const over = a.hand[1] + M.hand * 0.6 - floor;
+    if (over <= 0) continue;
+    const wr = [a.wr[0], a.wr[1] - over], cr = (a.wr[0] - a.sh[0]) * (a.el[1] - a.sh[1]) - (a.wr[1] - a.sh[1]) * (a.el[0] - a.sh[0]);
+    a.el = ik2(a.sh, wr, M.upArm, M.foreArm, cr > 0 ? -1 : 1); a.wr = wr; a.hand = [a.hand[0], a.hand[1] - over];
+  }
   const lift = (p.lift || 0) + (p.liftL || 0) * M.L + (st.lift || 0);
   const dy = -g - lift, mv = q => [q[0], q[1] + dy];
   const J = {
-    p, M, G, yaw, th, k, lift, seat, seatH, br, lean, a2, T,
+    p, M, G, yaw, th, k, lift, seat, w, seatH, br, lean, a2, T, tu,
     hip: mv(hip), chest: mv(chest), neck: mv(neck), shC: mv(shC), nTop: mv(nTop), hc: mv(hc),
     HT: q => mv(HT(q)), headPts: headPts.map(mv),
     aF: Object.fromEntries(Object.entries(aF).map(([kk, v]) => [kk, Array.isArray(v) ? mv(v) : v])),
@@ -275,6 +349,7 @@ function solve(p0, M, st = {}, lk = {}) {
     lF: Object.fromEntries(Object.entries(lF).map(([kk, v]) => [kk, Array.isArray(v) ? mv(v) : v])),
     lB: Object.fromEntries(Object.entries(lB).map(([kk, v]) => [kk, Array.isArray(v) ? mv(v) : v])),
   };
+  J.t = st.t || 0;
   return J;
 }
 
@@ -282,7 +357,7 @@ function solve(p0, M, st = {}, lk = {}) {
 function extent(J, lk) {
   const { M } = J, xs = [], ys = [];
   const put = (q, r = 0) => { xs.push(q[0] - r, q[0] + r); ys.push(q[1] - r, q[1] + r); };
-  const hv = { short: 0.12, long: 0.14, ponytail: 0.1, bun: 0.1, curly: 0.26, bald: 0.03, cap: 0.14 }[lk.hairStyle] ?? 0.12;
+  const hv = { short: 0.12, long: 0.14, ponytail: 0.1, bun: 0.1, braids: 0.08, curly: 0.26, bald: 0.03, cap: 0.14 }[lk.hairStyle] ?? 0.12;
   J.headPts.forEach(q => put(q, hv * J.k));
   for (const l of [J.lF, J.lB]) { put(l.knee, M.kneeW); put(l.heel, 2); put(l.toe, 3); put(l.hip, M.thighW); }
   for (const a of [J.aF, J.aB]) { put(a.el, M.elbowW); put(a.hand, M.hand * 0.75); put(a.sh, M.armW); }
@@ -290,8 +365,11 @@ function extent(J, lk) {
   if (lk.hairStyle === 'bun') put(J.HT([-0.45, -1.05]), 0.3 * J.k);
   if (lk.hairStyle === 'ponytail') put(J.HT([-1.3, 0.2]), 0.35 * J.k);
   if (lk.hairStyle === 'long') { put(J.HT([-0.9, 1.6]), 0.2 * J.k); }
+  if (lk.hairStyle === 'braids') for (const near of [true, false]) { const B = braidPath(J, lk, near).P; put(B[B.length - 1], 0.2 * J.k); put(B[Math.floor(B.length / 2)], 0.2 * J.k); }
   if (lk.hat || lk.hairStyle === 'cap') put(J.HT([0.2, -1.05]), 0.7 * J.k);
-  if (lk.scarf) put(add(J.neck, [-M.chest * 0.6, M.torso * 0.4]), 6);
+  if (lk.scarf) { J.tor = J.tor || torsoShape(J); const { front, back } = scarfTails(J, lk); for (const P of [front, back]) put(P[P.length - 1], SCARF_W * 1.4); }
+  if (lk.bottom === 'skirt' || lk.bottom === 'dress') { J.tor = J.tor || torsoShape(J); for (const q of skirtGeo(J, lk).P) put(q, 1.2); }   // the cloth flares past the legs
+  if (lk.apron) { J.tor = J.tor || torsoShape(J); for (const q of skirtGeo(J, apronHem(lk)).P) put(q, 1.2); }
   if (lk.backpack) put(add(J.chest, [-M.chest * 0.85, 0]), 6);
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
@@ -352,21 +430,36 @@ function shoeShape(l, M) {
   const Q = [[-0.16 * f, -0.55 * s], [0.16 * f, -0.62 * s], [0.46 * f, -0.08 * s], [0.72 * f, 0.15 * s], [0.82 * f, 0.6 * s], [0.74 * f, s], [-0.2 * f, s], [-0.28 * f, 0.62 * s], [-0.26 * f, -0.05 * s]];
   return spline(Q.map(q => add(l.ank, rot(q, l.fa))), 3);
 }
+// A bare foot (shoes: null): heel, arch, a rounded ball and toes, in skin.
+function bareFoot(l, M) {
+  const f = M.foot, s = M.ankle;
+  const Q = [[-0.12 * f, -0.75 * s], [0.12 * f, -0.75 * s], [0.38 * f, 0.02 * s], [0.62 * f, 0.3 * s], [0.78 * f, 0.6 * s], [0.74 * f, 0.94 * s], [0.4 * f, s], [-0.1 * f, s], [-0.21 * f, 0.72 * s], [-0.19 * f, 0.05 * s]];
+  return spline(Q.map(q => add(l.ank, rot(q, l.fa))), 3);
+}
 function drawLeg(ctx, J, l, far, lk, seed) {
   const M = J.M, f = far ? 0.86 : 1, skin = darken(lk.skin, f), pants = darken(lk.pants, f);
-  const tr = lk.bottom === 'trousers';
+  const tr = lk.bottom === 'trousers', bare = !lk.shoes;
   const thigh = capsule(l.hip, l.knee, M.thighW * (tr ? 1.1 : 1), M.kneeW * (tr ? 1.15 : 1), seed);
   const shin = capsule(l.knee, l.ank, M.kneeW * (tr ? 1.15 : 1), M.ankleW * (tr ? 1.45 : 1), seed + 1);
-  if (!tr) {                                           // socks before the shoe
-    group(ctx, [{ P: thigh, col: skin, seed }, { P: shin, col: skin, seed: seed + 1 }]);
-    cel(ctx, capsule(mid(l.ank, l.knee, 0.32), l.ank, M.ankleW * 1.12, M.ankleW * 1.1, seed + 3), darken(lk.socks, f), 0.8, seed + 3);
+  if (bare) {                                          // skin all the way down; the foot joins the shin without a line
+    const foot = bareFoot(l, M);
+    group(ctx, [...(tr ? [] : [{ P: thigh, col: skin, seed }, { P: shin, col: skin, seed: seed + 1 }]), { P: foot, col: skin, seed: seed + 4 }]);
+    if (!J.simple && LW * M.foot > 9) {               // toe creases
+      const T = q => add(l.ank, rot([q[0] * M.foot, q[1] * M.ankle], l.fa)), c = rgba(darken(lk.skin, 0.5), 0.6);
+      stroke(ctx, [T([0.6, 0.62]), T([0.63, 0.9])], 0.45, seed + 7, c); stroke(ctx, [T([0.5, 0.66]), T([0.52, 0.92])], 0.4, seed + 8, c);
+    }
+  } else {
+    if (!tr) {                                         // socks before the shoe
+      group(ctx, [{ P: thigh, col: skin, seed }, { P: shin, col: skin, seed: seed + 1 }]);
+      cel(ctx, capsule(mid(l.ank, l.knee, 0.32), l.ank, M.ankleW * 1.12, M.ankleW * 1.1, seed + 3), darken(lk.socks, f), 0.8, seed + 3);
+    }
+    const shoe = shoeShape(l, M);
+    cel(ctx, shoe, darken(lk.shoes, f), 1.1, seed + 4);
+    ctx.save(); path(ctx, shoe); ctx.clip();
+    const so = [[-0.3, 0.8], [0.9, 0.8], [0.9, 1.3], [-0.3, 1.3]].map(q => add(l.ank, rot([q[0] * M.foot, q[1] * M.ankle], l.fa)));
+    fillP(ctx, so, darken(lk.shoes, 0.55 * f)); ctx.restore();
+    ln(ctx, shoe, 1.1, { seed: seed + 4 });
   }
-  const shoe = shoeShape(l, M);
-  cel(ctx, shoe, darken(lk.shoes, f), 1.1, seed + 4);
-  ctx.save(); path(ctx, shoe); ctx.clip();
-  const so = [[-0.3, 0.8], [0.9, 0.8], [0.9, 1.3], [-0.3, 1.3]].map(q => add(l.ank, rot([q[0] * M.foot, q[1] * M.ankle], l.fa)));
-  fillP(ctx, so, darken(lk.shoes, 0.55 * f)); ctx.restore();
-  ln(ctx, shoe, 1.1, { seed: seed + 4 });
   if (tr) {
     group(ctx, [{ P: thigh, col: pants, seed }, { P: shin, col: pants, seed: seed + 1 }]);
     const v = sub(l.ank, l.knee), n = mul([-v[1], v[0]], M.ankleW * 1.45 / (len(v) || 1));
@@ -422,6 +515,11 @@ function drawEye(ctx, HT, k, e, rx, ry, st, side, lk, simple, seed) {
     const P = arcPts(0, 0, rx * 1.05, ry * (up ? 0.75 : 0.45), up ? Math.PI * 1.08 : Math.PI * 0.08, up ? Math.PI * 1.92 : Math.PI * 0.92, 0.02).map(q => E(q[0], q[1] + (up ? ry * 0.25 : -ry * 0.05)));
     stroke(ctx, P, simple ? 1.6 : 1.5, seed);
     if (!up && !simple) stroke(ctx, [P[side < 0 ? 0 : P.length - 1], E(side * rx * 1.35, -ry * 0.05)], 0.7, seed + 1);
+    if (st.tear > 0.01) {                          // a tear welling on the lash line of a shut / laughing eye
+      const c = E(side * rx * 0.15, up ? ry * 0.42 : ry * 0.12), r = rx * k * (simple ? 0.3 : 0.36);
+      ctx.fillStyle = `rgba(214,236,252,${0.75 * st.tear})`; ctx.beginPath(); ctx.ellipse(c[0], c[1], r * 1.35, r * 0.62, 0, 0, 7); ctx.fill();
+      dot(ctx, c[0] - side * r * 0.4, c[1] - r * 0.12, r * 0.38, `rgba(255,255,255,${0.95 * st.tear})`);
+    }
     return;
   }
   const wide = st.shape === 'wide' ? 1.14 : 1, RX = rx * wide, RY = ry * wide;
@@ -430,6 +528,7 @@ function drawEye(ctx, HT, k, e, rx, ry, st, side, lk, simple, seed) {
     const O = ell(0, 0, RX * 0.62, RY * 0.8, seed, 0).map(q => E(q[0] + gx * 0.6, q[1] + gy * 0.5));
     fillP(ctx, O, darken(iris, 0.45));
     const g = E(gx * 0.6 - RX * 0.2, -RY * 0.3); dot(ctx, g[0], g[1], RX * k * 0.22, '#fff');
+    if (st.tear > 0.01) { const q = E(gx * 0.6 + RX * 0.18, RY * 0.62); dot(ctx, q[0], q[1], RX * k * 0.17, `rgba(255,255,255,${0.9 * st.tear})`); }
     if (st.lid > 0.25) {                           // heavy lid as a straight-ish line
       const y = -RY * 0.8 + st.lid * RY * 1.6;
       ctx.save(); path(ctx, O); ctx.clip(); fillP(ctx, [E(-RX, -RY * 1.2), E(RX, -RY * 1.2), E(RX, y), E(-RX, y)], skin); ctx.restore();
@@ -460,6 +559,14 @@ function drawEye(ctx, HT, k, e, rx, ry, st, side, lk, simple, seed) {
   if (st.low > 0.02) {                              // cheek pushes the lower lid up (smile)
     const by = RY - st.low * RY * 1.2, xs = Array.from({ length: 13 }, (_, i) => -RX * 1.2 + (i / 12) * RX * 2.4);
     fillP(ctx, [E(-RX * 1.3, RY * 1.5), E(RX * 1.3, RY * 1.5), ...xs.slice().reverse().map(x => E(x, by + RY * 0.3 * st.low * (x / RX) ** 2))], skin);
+  }
+  if (st.tear > 0.01) {                             // a tear brimming on the lower lid: a glassy meniscus and one bright bead
+    const by = RY - st.low * RY * 1.2, bot = x => Math.min(RY * Math.sqrt(Math.max(0, 1 - (x / RX) ** 2)), st.low > 0.02 ? by + RY * 0.3 * st.low * (x / RX) ** 2 : 1e9);
+    const xs = Array.from({ length: 13 }, (_, i) => -RX * 0.85 + (i / 12) * RX * 1.7), th = x => RY * 0.24 * (1 - (x / (RX * 0.85)) ** 2);
+    fillP(ctx, [...xs.map(x => E(x, bot(x) + 0.01)), ...xs.slice().reverse().map(x => E(x, bot(x) - th(x)))], `rgba(205,230,250,${0.55 * st.tear})`);
+    stroke(ctx, xs.slice(2, -2).map(x => E(x, bot(x) - th(x))), 0.55, seed + 6, `rgba(255,255,255,${0.75 * st.tear})`);
+    const bx = -side * RX * 0.3, b = E(bx, bot(bx) - th(bx) * 0.75);
+    dot(ctx, b[0], b[1], RY * k * 0.13, `rgba(255,255,255,${0.95 * st.tear})`);
   }
   ctx.restore();
   // lash line follows the visible top edge, heavier at the outer corner, with a small flick
@@ -519,13 +626,14 @@ function hairCap(G, vol, fringe, lk) {
   if (fringe === 'locks') line = [[xc + 0.44, -0.46], [xc + 0.34, -0.52], [xc + 0.24, -0.4], [xc + 0.14, -0.5], [xc + 0.02, -0.37], [xc - 0.08, -0.46], [xc - 0.18, -0.34], [xc - 0.32, -0.3]];
   else if (fringe === 'sweep') line = [[xc + 0.38, -0.5], [xc + 0.12, -0.42], [xc - 0.14, -0.4], [xc - 0.32, -0.28]];
   else if (fringe === 'back') line = [[xc + 0.22, -0.74], [xc - 0.05, -0.62], [xc - 0.3, -0.42]];
+  else if (fringe === 'part') line = [[xc + 0.36, -0.62], [xc + 0.16, -0.6], [xc - 0.06, -0.52], [xc - 0.26, -0.36]];
   else line = [[xc + 0.36, -0.55], [xc + 0.05, -0.5], [xc - 0.3, -0.32]];
   line = [...line, [ear[0] + 0.14, ey - 0.28], [ear[0] + 0.16, ey + 0.02], [ear[0] + 0.06, ey - 0.18], [ear[0] - 0.14, ey - 0.12], [-0.6, 0.34]];
   return spline([...outer, front, ...line], 4);
 }
 function hairBack(G, vol) { const { CP } = G; return spline([[-0.2, 0.4], ...[CP[8], CP[9], CP[10], CP[0], CP[1]].map(q => radial(q, vol)), [G.xc - 0.1, -0.3]], 4); }
 
-const HAIR_VOL = { short: 0.12, long: 0.1, ponytail: 0.07, bun: 0.07, curly: 0.22, bald: 0.03, cap: 0.06 };
+const HAIR_VOL = { short: 0.12, long: 0.1, ponytail: 0.07, bun: 0.07, braids: 0.06, curly: 0.22, bald: 0.03, cap: 0.06 };
 // Hair that hangs behind the body (drawn before the torso): long sheet, ponytail.
 function drawHairBehind(ctx, J, lk) {
   const { G, HT } = J, t = J.t, sw = 0.05 * Math.sin(t * 1.9) + 0.1 * J.p.gait * Math.sin(t * 7.3), hair = lk.hair;
@@ -542,6 +650,66 @@ function drawHairBehind(ctx, J, lk) {
     cel(ctx, P, hair, 1.1, 403);
     if (!J.simple) stroke(ctx, [[-0.12, 0.05], [-0.3, 0.45], [-0.25, 0.85]].map(R).map(HT), 0.5, 404, rgba(darken(hair, 0.55), 0.6));
   }
+}
+// A hanging chain (hair, cloth): leaves `root` along d0, bends toward gravity g by `bend` of its length, ripples with a
+// wave travelling down it (wave = amplitude in radians), and lies along the ground (local y = -lift) trailing back.
+function hangChain(J, root, d0, g, L, n = 10, bend = 0.55, wave = 0) {
+  const P = [root], seg = L / n, floor = -J.lift - 0.8;
+  for (let i = 0; i < n; i++) {
+    const u = smooth(0, bend, i / n), d0i = [lerp(d0[0], g[0], u), lerp(d0[1], g[1], u)];
+    const d = wave ? rot(d0i, wave * (i / n) * Math.sin(J.t * 6.2 - i * 0.75)) : d0i, q = add(P[i], mul(d, seg / (len(d) || 1)));
+    if (q[1] > floor) q[0] = P[i][0] - Math.sqrt(Math.max(0, seg * seg - (floor - P[i][1]) ** 2)) * 0.95, q[1] = floor;
+    P.push(q);
+  }
+  return spline(P, 3, false);
+}
+// Arc-length frame along a polyline: point, tangent and normal at s; S = cumulative lengths.
+function chainFrame(P) {
+  const n = P.length, S = [0]; for (let i = 1; i < n; i++) S.push(S[i - 1] + len(sub(P[i], P[i - 1])));
+  const at = s => {
+    let i = 1; while (i < n - 1 && S[i] < s) i++;
+    const a = P[i - 1], b = P[i], u = clamp((s - S[i - 1]) / ((S[i] - S[i - 1]) || 1)), d = sub(b, a), dl = len(d) || 1, tn = mul(d, 1 / dl);
+    return { c: mid(a, b, u), tn, nn: [-tn[1], tn[0]] };
+  };
+  return { at, T: S[n - 1] || 1 };
+}
+// Two plaited braids hanging from behind the ears. The near one is drawn over the shoulder after the head; the far
+// one peeks out from under the jaw (drawn before the head). They leave the head along its axis and then hang with
+// gravity and a little sway; on the ground they lie flat. Ties use the scarf colour (as the ponytail band does).
+function braidPath(J, lk, near) {
+  const { G, HT, k, th } = J, t = J.t, er = G.ear, ph = near ? 0 : 1.3;
+  const root = HT(near ? [er[0] - 0.1, er[1] + 0.26] : [G.xc - 0.22, 0.5]);
+  const sw = 0.07 * Math.sin(t * 1.9 + ph) + 0.18 * J.p.gait * Math.sin(t * 7.3 + ph);
+  const Lb = (near ? 1.75 : 1.5) * k * (J.M.child ? 1 : 1.25);
+  return { P: hangChain(J, root, rot([0, 1], th), [(near ? -0.16 : 0.05) + sw, 1], Lb), w0: 0.21 * k, w1: 0.13 * k };
+}
+function drawBraid(ctx, J, lk, near) {
+  const { P, w0, w1 } = braidPath(J, lk, near), hair = near ? lk.hair : darken(lk.hair, 0.88), k = J.k;
+  const { at, T } = chainFrame(P), tieS = T * 0.84, wAt = s => lerp(w0, w1, clamp(s / tieS));
+  // the plait: overlapping lobes leaning alternately left and right, inked as one silhouette, then creased
+  const step = w0 * 1.2, lobes = [];
+  for (let s = 0, side = 1; s < tieS - step * 0.2; s += step * 0.78, side = -side) {
+    const F = at(Math.min(s + step * 0.45, tieS - step * 0.35)), w = wAt(s), a = Math.atan2(F.tn[1], F.tn[0]) + side * 0.5;
+    lobes.push({ c: add(F.c, mul(F.nn, side * w * 0.2)), rx: step * 0.66, ry: w * 0.86, a, side, P: ell(0, 0, step * 0.66, w * 0.86, 0, 0).map(q => add(add(F.c, mul(F.nn, side * w * 0.2)), rot(q, a))) });
+  }
+  if (J.simple) { group(ctx, lobes.map((L, i) => ({ P: L.P, col: hair, seed: 491 + i })), 0.9); }
+  else {
+    group(ctx, lobes.map((L, i) => ({ P: L.P, col: hair, seed: 491 + i })), 0.9);
+    const dk = rgba(darken(lk.hair, 0.45), 0.9), hl = rgba(lighten(lk.hair, near ? 0.38 : 0.28), 0.7);
+    lobes.forEach((L, i) => {
+      const E = (th0, th1, sc = 1) => arcPts(0, 0, L.rx * sc, L.ry * sc, th0, th1, 0.5).map(q => add(L.c, rot(q, L.a)));
+      if (i) stroke(ctx, E(Math.PI * 0.62, Math.PI * 1.38), 0.6, 495 + i, dk);          // where it comes out from under the lobe above
+      stroke(ctx, E(Math.PI * (L.side > 0 ? 1.15 : 0.55), Math.PI * (L.side > 0 ? 1.45 : 0.85), 0.55), 1.1, 505 + i, hl);
+    });
+  }
+  // tuft below the tie, then the tie band
+  const tie = at(tieS), end = at(T), tw = w1 * 0.75;
+  const tuft = spline([add(tie.c, mul(tie.nn, tw)), add(mid(tie.c, end.c, 0.6), mul(tie.nn, tw * 1.3)), add(end.c, mul(end.nn, tw * 0.9)), add(end.c, mul(end.tn, w1 * 0.5)), add(end.c, mul(end.nn, -tw * 0.9)), add(mid(tie.c, end.c, 0.6), mul(tie.nn, -tw * 1.3)), sub(tie.c, mul(tie.nn, tw))], 3);
+  cel(ctx, tuft, hair, 0.9, near ? 497 : 498, mul(SH, 0.6));
+  if (!J.simple) stroke(ctx, [tie.c, add(end.c, mul(end.tn, w1 * 0.2))], 0.4, 499, rgba(darken(lk.hair, 0.5), 0.7));
+  const band = lk.scarf || '#c8443a', bw = w1 * 1.2, bh = Math.max(0.9, k * 0.055);
+  const B = [add(add(tie.c, mul(tie.nn, bw)), mul(tie.tn, -bh)), add(add(tie.c, mul(tie.nn, bw)), mul(tie.tn, bh)), add(add(tie.c, mul(tie.nn, -bw)), mul(tie.tn, bh)), add(add(tie.c, mul(tie.nn, -bw)), mul(tie.tn, -bh))];
+  cel(ctx, spline(B, 3), near ? band : darken(band, 0.88), 0.8, 500);
 }
 function hairStrands(ctx, J, P, lk, seed) {
   if (J.simple) return;
@@ -596,7 +764,7 @@ function drawHead(ctx, J, lk, ex, st) {
   stroke(ctx, N.slice(Math.floor(N.length * 0.3)), simple ? 1.1 : 0.95, 46);
   if (lk.age === 'elder' && !simple) { const c = HT([n[0] + 0.01, n[1]]); dot(ctx, c[0], c[1], 0.05 * k, 'rgba(230,120,110,.25)'); }
   // eyes
-  const es = { shape: ex.eye, lid: clamp(ex.lid + (lk.age === 'elder' ? 0.12 : 0) + (1 - ex.lid) * clamp(st.blink || 0), 0, 1), low: ex.low, gaze: [(ex.gaze?.[0] || 0) + 0.6 * (st.look || 0), ex.gaze?.[1] || 0] };
+  const es = { shape: ex.eye, lid: clamp(ex.lid + (lk.age === 'elder' ? 0.12 : 0) + (1 - ex.lid) * clamp(st.blink || 0) - 0.1 * Math.max(0, J.tu), 0, 1), low: ex.low, gaze: [(ex.gaze?.[0] || 0) + 0.6 * (st.look || 0), (ex.gaze?.[1] || 0) - 0.7 * J.tu], tear: lk.tear };
   if (J.p.sleep > 0.5) es.lid = 1;
   if ((st.blink || 0) > 0.85 && es.shape === 'wide') es.shape = 'open';
   const eK = J.M.eye, rx = 0.122 * eK, ry = 0.158 * eK;
@@ -624,12 +792,13 @@ function drawHead(ctx, J, lk, ex, st) {
     if (lk.age === 'child' || lk.age === 'teen') { const P = hairCap(G, 0.02, 'none', lk).map(HT); ctx.save(); ctx.globalAlpha = 0.55; fillP(ctx, P, hair); ctx.restore(); }
     else if (!simple) stroke(ctx, quad([-0.55, -0.72], [-0.3, -0.9], [-0.02, -0.93], 8).map(HT), 2.4, 409, 'rgba(255,255,255,.4)');
   } else if (style !== 'cap') {
-    const fr = { short: 'locks', long: 'sweep', ponytail: 'sweep', bun: 'back', curly: 'locks' }[style] || 'locks';
+    const fr = { short: 'locks', long: 'sweep', ponytail: 'sweep', bun: 'back', braids: 'part', curly: 'locks' }[style] || 'locks';
     let C = hairCap(G, vol, fr, lk);
     if (style === 'curly') C = scallop(C, 0.06);
     const P = C.map(HT);
     cel(ctx, P, hair, 1.1, 410, sh);
     hairStrands(ctx, J, P, lk, 411);
+    if (style === 'braids' && !simple) stroke(ctx, quad([xc + 0.2, -0.64], [xc - 0.02, -0.86], [-0.2, -1.02], 8).map(HT), 0.7, 418, rgba(lighten(lk.skin, 0.1), 0.85));
     if (style === 'long') {                          // side curtain over the ear
       const t = J.t, sw = 0.04 * Math.sin(t * 1.9 + 0.5) + 0.08 * J.p.gait * Math.sin(t * 7.3);
       const Cu = spline([[er[0] + 0.17, er[1] - 0.42], [er[0] + 0.2, er[1] + 0.12], [er[0] + 0.1 + sw, 0.92], [er[0] - 0.02 + sw * 1.5, 1.24], [er[0] - 0.28 + sw, 1.12], [-0.88, 0.5], [-0.84, er[1] - 0.3]], 4).map(HT);
@@ -666,7 +835,10 @@ function drawGlasses(ctx, J, lk, rx, ry) {
   for (const P of [A, B]) { ctx.fillStyle = 'rgba(220,235,245,.18)'; path(ctx, P); ctx.fill(); ln(ctx, P, 0.9, { seed: 442, color: c }); }
   stroke(ctx, [[G.eyeN[0] + r1 * 0.93, G.eyeN[1] - 0.02], [(G.eyeN[0] + G.eyeF[0]) / 2, G.eyeN[1] - 0.05], [G.eyeF[0] - r1 * 0.66 * cf, G.eyeF[1] - 0.02]].map(HT), 0.8, 443, c);
   stroke(ctx, [[G.eyeN[0] - r1 * 0.93, G.eyeN[1] - 0.03], [G.ear[0] + 0.05, G.ear[1] - 0.08]].map(HT), 0.75, 444, c);
-  if (!J.simple) { ctx.save(); path(ctx, A); ctx.clip(); stroke(ctx, [[G.eyeN[0] - r1 * 0.5, G.eyeN[1] + r1 * 0.2], [G.eyeN[0] - r1 * 0.1, G.eyeN[1] - r1 * 0.5]].map(HT), 0.6, 445, 'rgba(255,255,255,.5)'); ctx.restore(); }
+  // one small glint on the near lens, on the side the light comes from
+  const lx = Math.sign(SH[0]) || -1, a0 = Math.atan2(-1, lx), c0 = [G.eyeN[0], G.eyeN[1] + 0.01];
+  if (J.simple) { const q = HT([c0[0] + lx * r1 * 0.45, c0[1] - r1 * 0.5]); dot(ctx, q[0], q[1], 0.055 * k, 'rgba(255,255,255,.9)'); }
+  else stroke(ctx, arcPts(c0[0], c0[1], r1 * 0.95 * 0.68, r1 * 0.68, a0 - 0.38, a0 + 0.3, 0.01).map(HT), 1.15, 445, 'rgba(255,255,255,.92)');
 }
 function drawCap(ctx, J, lk, sh) {
   const { G, HT, CP = G.CP } = J, xc = G.xc, col = lk.hat || '#c8443a';
@@ -689,28 +861,62 @@ function drawHat(ctx, J, lk, sh) {
 }
 
 // ───────────────────────── torso, clothes, accessories ─────────────────────────
-function skirtShape(J, lk) {
-  const { at, fr, Wd } = J.tor, M = J.M, f0 = fr(0), long = lk.bottom === 'dress' ? 1.02 : 0.78;
-  const legs = [J.lF, J.lB].map(l => ({ h: mid(l.hip, l.knee, long), d: sub(l.knee, l.hip) }));
-  const d = add(mul(legs[0].d, 1 / (len(legs[0].d) || 1)), mul(legs[1].d, 1 / (len(legs[1].d) || 1)));
-  const dl = len(d) || 1, dn = mul(d, 1 / dl), n = [dn[1], -dn[0]];
-  const pr = q => q[0] * n[0] + q[1] * n[1];
-  const [h0, h1] = pr(legs[0].h) < pr(legs[1].h) ? [legs[0].h, legs[1].h] : [legs[1].h, legs[0].h];
-  const w = M.hipW * (lk.bottom === 'dress' ? 0.7 : 0.66);
-  const hB = add(h0, mul(n, -w)), hF = add(h1, mul(n, w)), hm = add(mid(hB, hF), mul(dn, M.hipW * 0.06));
-  const wy = 0.3;
-  const up = mul(dn, -M.hipW * 0.12);
-  return spline([add(at(wy), mul(fr(wy), -Wd(wy, 0) * 0.99)), add(at(0.08), mul(fr(0.08), -Wd(0.08, 0) * 1.1)), add(hB, up), hB, add(mid(hB, hm), mul(dn, M.hipW * 0.01)), hm, add(mid(hm, hF), mul(dn, M.hipW * 0.01)), hF, add(hF, up),
-    add(at(0.08), mul(fr(0.08), Wd(0.08, 1) * 1.1)), add(at(wy), mul(fr(wy), Wd(wy, 1) * 0.99))], 5);
-}
 function drawPelvis(ctx, J, lk) {
   if (lk.bottom === 'dress') cel(ctx, J.tor.P, lk.dress, 1.15, 31);
-  else cel(ctx, J.tor.P, lk.pants, 1.15, 32);
+  else cel(ctx, J.tor.P, lk.bottom === 'skirt' ? lk.skirt : lk.pants, 1.15, 32);
+}
+// Convex hull (monotone chain), counter-clockwise.
+function hull(P) {
+  const Q = P.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]), cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], hi = [];
+  for (const q of Q) { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (let i = Q.length - 1; i >= 0; i--) { const q = Q[i]; while (hi.length > 1 && cr(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
+  return [...lo.slice(0, -1), ...hi.slice(0, -1)];
+}
+// Skirt / dress: the cloth hangs from the waist over both legs down to the hem (lk.hem: 1 = knee, 2 = ankle), so it is
+// the hull of the waist, hips, knees and hem points: an A-line standing, a tent over the knees sitting or crouching.
+function skirtGeo(J, lk) {
+  const { at, fr, Wd } = J.tor, M = J.M, hem = lk.hem, wy = 0.3;
+  const side = (s, k) => [add(at(s), mul(fr(s), -Wd(s, 0) * k)), add(at(s), mul(fr(s), Wd(s, 1) * k))];
+  const smock = lk.bottom === 'dress' && lk.dressStyle === 'smock', pts = [...side(wy, 0.99), ...side(0.08, 1.12), ...side(-0.06, 1.0), ...(smock ? side(0.58, 1.02) : [])];
+  const along = (l, u) => (u <= 1 ? mid(l.hip, l.knee, u) : mid(l.knee, l.ank, u - 1));
+  const dirAt = (l, u) => { const d = u <= 1 ? sub(l.knee, l.hip) : sub(l.ank, l.knee), L = len(d) || 1; return mul(d, 1 / L); };
+  const hems = [];
+  for (const l of [J.lF, J.lB]) {
+    for (let i = 1; i <= 6; i++) {
+      const u = hem * (i / 6), d = dirAt(l, u), n = [-d[1], d[0]], c = along(l, u);
+      const r = (u < 1 ? lerp(M.thighW * 1.3, M.kneeW * 1.55, u) : M.kneeW * 1.5) + M.hipW * (lk.bottom === 'dress' ? 0.26 : 0.2) * u;   // A-line: flares toward the hem
+      pts.push(add(c, mul(n, r)), sub(c, mul(n, r)));
+      if (i === 6) hems.push({ c, d, n, r });
+    }
+    if (hem > 1) { const d = dirAt(l, 0.98), n = [-d[1], d[0]]; pts.push(add(l.knee, mul(n, M.kneeW * 1.5)), sub(l.knee, mul(n, M.kneeW * 1.5))); }
+  }
+  const dd = add(hems[0].d, hems[1].d), dl = len(dd) || 1, hc = mid(hems[0].c, hems[1].c), hn = [-dd[1] / dl, dd[0] / dl], hw = M.hipW * (0.32 + 0.2 * lk.hem);
+  for (const [o, b] of [[0, 0.1], [0.55, 0.075], [-0.55, 0.075]]) pts.push(add(add(hc, mul(hn, o * hw)), mul(dd, (M.hipW * b) / dl)));   // a bowed hem
+  const floorY = -J.lift - 0.4;                       // the cloth rests on the ground, never under it
+  return { P: wobble(spline(hull(pts.map(q => [q[0], Math.min(q[1], floorY + J.w * J.seatH)])), 3), 161, 0.35), hems, at };
+}
+function drawSkirt(ctx, J, lk) {
+  const dress = lk.bottom === 'dress', col = dress ? lk.dress : lk.skirt, { P, hems, at } = skirtGeo(J, lk);
+  if (dress) group(ctx, [{ P: J.tor.P, col, seed: 31 }, { P, col, seed: 160 }], 1.15);   // one garment: no seam line
+  else cel(ctx, P, col, 1.15, 160);
+  if (J.simple) return;
+  if (dress && lk.dressStyle === 'smock') {           // the yoke seam across the chest, gathers falling from it
+    const { fr, Wd } = J.tor, ys = 0.64, sc = rgba(darken(col, 0.5), 0.6), Y = (v, o = 0) => add(J.tor.at(ys + o), mul(fr(ys), v));
+    ctx.save(); path(ctx, J.tor.P); ctx.clip();
+    stroke(ctx, quad(Y(-Wd(ys, 0) * 1.1), Y(Wd(ys, 1) * 0.1, -0.05), Y(Wd(ys, 1) * 1.1), 8), 0.6, 164, sc);
+    for (const v of [-0.45, 0.05, 0.5]) stroke(ctx, [Y(Wd(ys, v > 0 ? 1 : 0) * v, -0.04), Y(Wd(ys, v > 0 ? 1 : 0) * v * 1.08, -0.16)], 0.45, 165 + v * 10, rgba(darken(col, 0.5), 0.4));
+    ctx.restore();
+  }
+  ctx.save(); path(ctx, P); ctx.clip();               // two soft folds from the hips toward the hem
+  const top = at(0.06), fc = rgba(darken(col, 0.5), 0.45);
+  for (const [u, sd] of [[0.3, 162], [0.68, 163]]) { const h = mid(hems[1].c, hems[0].c, u); stroke(ctx, [mid(top, h, 0.3), mid(top, h, 0.75), mid(top, h, 1.02)], 0.5, sd, fc); }
+  ctx.restore();
 }
 function drawTorso(ctx, J, lk) {
   const M = J.M, top = lk.bottom === 'dress' ? lk.dress : lk.shirt, tor = J.tor;
   if (lk.bottom !== 'dress') {
-    const sh = torsoShape(J, lk.bottom === 'skirt' ? 0.24 : 0.0, 1.05);
+    const sh = torsoShape(J, lk.bottom === 'skirt' ? 0.03 : 0.0, 1.05);      // a top hangs over a skirt's waistband
     cel(ctx, sh.P, top, 1.15, 33);
     if (!J.simple) {
       const { at, fr, Wd } = sh, s = 0.2;
@@ -734,29 +940,41 @@ function drawCollar(ctx, J, lk) {
   cel(ctx, P, darken(top, 0.9), 0.85, 37);
   if (lk.age === 'adult' || lk.age === 'elder') stroke(ctx, [Q(0.1, -0.3), Q(0.55, -1.3), Q(1.0, -0.25)], 0.6, 38, rgba(darken(top, 0.45), 0.8));
 }
-function drawScarf(ctx, J, lk, part) {
-  const M = J.M, col = lk.scarf, { at, fr, Wd } = J.tor, f = fr(1), u = upv(J.a2), c = at(0.98), cw = Wd(0.9, 1), t = J.t;
-  const fl = Math.sin(t * 2.6) * 0.5 + J.p.gait * Math.sin(t * 6.5) * 0.8;
-  if (part === 'back') {                            // a tail streaming behind
-    const mv = clamp(J.p.gait), dv = [lerp(-0.42, -1, mv), lerp(1, 0.4, mv) + 0.08 * fl], dl = len(dv), dirB = mul(dv, 1 / dl);
-    const b0 = add(c, mul(f, -cw * 0.6));
-    const L = M.torso * 0.5, P = [b0, add(b0, add(mul(dirB, L * 0.5), [0, fl * 2])), add(b0, add(mul(dirB, L), [0, fl * 4 + 4])), add(b0, add(mul(dirB, L), [2, fl * 4 + 4 + M.torso * 0.12])), add(b0, add(mul(dirB, L * 0.5), [2, fl * 2 + M.torso * 0.13])), add(b0, [1, M.torso * 0.15])];
-    cel(ctx, spline(P, 3), darken(col, 0.85), 1, 470);
-    return;
+// Scarf: a wrap round the neck, a short end hanging in front and a long end behind. The ends are measured in absolute
+// units (lk.scarfLength scales them), so on a child the same scarf trails in the grass; both ends are fringed.
+const SCARF_W = 3.8, SCARF_FRONT = 34, SCARF_BACK = 58;
+function scarfTails(J, lk) {
+  const M = J.M, { at, fr, Wd } = J.tor, f = fr(1), u = upv(J.a2), c = at(0.98), cw = Wd(0.9, 1), t = J.t, gait = clamp(J.p.gait);
+  const fl = Math.sin(t * 2.6) * 0.06 + gait * Math.sin(t * 6.5) * 0.12, Lk = lk.scarfLength;
+  const front = hangChain(J, add(c, add(mul(f, cw * 0.2), mul(u, -M.torso * 0.08))), mul(u, -1), [fl - 0.35 * gait, 1], SCARF_FRONT * Lk, 8, 0.5);
+  const stream = 0.32 * gait + 0.9 * clamp(J.p.run);  // lies down the back at rest, swings out behind when walking / running
+  const back = hangChain(J, add(c, add(mul(f, -cw * 0.5), mul(u, -M.torso * 0.04))), add(mul(u, -1), mul(f, -0.12 - stream)), [-0.05 - stream + fl, 1 - 0.25 * stream], SCARF_BACK * Lk, 12, 0.85, 0.45 * gait);
+  return { front, back, c, f, u, cw };
+}
+function scarfEnd(ctx, J, lk, P, col, seed) {
+  const { at, T } = chainFrame(P), w = SCARF_W, L = [], R = [];
+  for (let s = 0; s <= T + 1e-6; s += Math.max(0.8, T / 24)) { const F = at(Math.min(s, T)), ww = w * (1 + 0.06 * Math.sin(s * 0.4 + seed)); L.push(add(F.c, mul(F.nn, ww))); R.push(sub(F.c, mul(F.nn, ww))); }
+  const band = wobble([...L, ...R.reverse()], seed, 0.15);
+  if (!J.simple) {                                     // fringe beyond the end
+    const E = at(T), fc = darken(col, 0.8);
+    for (let i = 0; i < 6; i++) { const o = lerp(-w * 0.85, w * 0.85, i / 5), b0 = add(E.c, mul(E.nn, o)), sw = 0.25 * Math.sin(J.t * 3 + i * 1.7); stroke(ctx, [b0, add(b0, add(mul(E.tn, w * 0.95), mul(E.nn, sw)))], 0.55, seed + 10 + i, fc); }
   }
+  cel(ctx, band, col, 1.0, seed);
+  if (!J.simple) for (const v of [T - w * 2.4, T - w * 1.6]) { const F = at(Math.max(0, v)); stroke(ctx, [add(F.c, mul(F.nn, w * 0.9)), sub(F.c, mul(F.nn, w * 0.9))], 0.9, seed + 20 + v, lighten(col, 0.45)); }
+}
+function drawScarf(ctx, J, lk, part) {
+  const M = J.M, col = lk.scarf, { front, back, c, f, u, cw } = scarfTails(J, lk);
+  if (part === 'back') { scarfEnd(ctx, J, lk, back, darken(col, 0.85), 470); return; }
   const ring = spline([add(c, add(mul(f, -cw * 0.75), mul(u, M.torso * 0.02))), add(c, add(mul(f, -cw * 0.1), mul(u, -M.torso * 0.12))), add(c, add(mul(f, cw * 0.82), mul(u, -M.torso * 0.02))),
     add(c, add(mul(f, cw * 0.7), mul(u, M.torso * 0.16))), add(c, add(mul(f, -cw * 0.1), mul(u, M.torso * 0.12))), add(c, add(mul(f, -cw * 0.72), mul(u, M.torso * 0.15)))], 4);
   cel(ctx, ring, col, 1.05, 471);
-  const t0 = add(c, add(mul(f, cw * 0.15), mul(u, -M.torso * 0.08))), dn = mul(u, -1), L = M.torso * 0.42;
-  const sway = mul(f, fl * 1.5 - J.p.gait * 3);
-  const tail = spline([add(t0, mul(f, -cw * 0.16)), add(add(t0, mul(dn, L * 0.55)), add(mul(f, -cw * 0.2), sway)), add(add(t0, mul(dn, L)), add(mul(f, -cw * 0.12), mul(sway, 1.6))),
-    add(add(t0, mul(dn, L)), add(mul(f, cw * 0.2), mul(sway, 1.6))), add(add(t0, mul(dn, L * 0.55)), add(mul(f, cw * 0.18), sway)), add(t0, mul(f, cw * 0.18))], 3);
-  cel(ctx, tail, col, 1.05, 472);
-  if (!J.simple) for (const v of [0.62, 0.78]) stroke(ctx, [add(add(t0, mul(dn, L * v)), add(mul(f, -cw * 0.17), mul(sway, 1.2 + v * 0.4))), add(add(t0, mul(dn, L * v)), add(mul(f, cw * 0.19), mul(sway, 1.2 + v * 0.4)))], 0.9, 473 + v * 10, lighten(col, 0.5));
+  if (!J.simple) stroke(ctx, quad(add(c, add(mul(f, -cw * 0.55), mul(u, M.torso * 0.06))), add(c, add(mul(f, cw * 0.1), mul(u, -M.torso * 0.02))), add(c, add(mul(f, cw * 0.62), mul(u, M.torso * 0.08))), 8), 0.5, 474, rgba(darken(col, 0.5), 0.55));
+  scarfEnd(ctx, J, lk, front, col, 472);
 }
+const apronHem = lk => ({ hem: lk.bottom === 'skirt' || lk.bottom === 'dress' ? lk.hem * 0.92 : 0.95 });
 function drawApron(ctx, J, lk) {
   const M = J.M, col = lk.apron, { at, fr, Wd } = J.tor, low = J.lF.knee, f0 = fr(0);
-  const sk = skirtShape(J, { bottom: 'skirt' });
+  const sk = skirtGeo(J, apronHem(lk)).P;
   const bib = spline([add(at(0.8), mul(fr(0.8), -Wd(0.8, 0) * 0.05)), add(at(0.8), mul(fr(0.8), Wd(0.8, 1) * 0.85)), add(at(0.36), mul(fr(0.36), Wd(0.36, 1) * 1.04)), add(at(0.36), mul(fr(0.36), -Wd(0.36, 0) * 0.2))], 2);
   ctx.save(); path(ctx, J.tor.P); ctx.clip(); cel(ctx, bib, col, 1, 480); ctx.restore();
   // lower panel: front half of a skirt shape
@@ -801,21 +1019,27 @@ function exprOf(st, p) {
   if (p.sleep > 0.5) n = 'sleepy';
   return EXPR[n];
 }
+// ctx = null: solve only and return the anchors and bounds (the film core and sheets probe this way).
 function draw(ctx, x, y, s, face, st = {}) {
   const lk = look(st.params || {}), M = metrics(lk), p = resolvePose(st), f = face < 0 ? -1 : 1;
-  const m = ctx.getTransform(), eff = Math.max(1e-3, s * Math.hypot(m.a, m.b));
+  const m = ctx ? ctx.getTransform() : null, eff = Math.max(1e-3, s * (m ? Math.hypot(m.a, m.b) : 1));
   LW = eff > 2 ? Math.sqrt(2 / eff) : Math.pow(2 / eff, 0.35);
   SH = [-M.sh * f, -M.sh];
   const J = solve(p, M, st, lk);
-  J.t = st.t || 0; J.simple = M.headH * eff < 46; J.tor = torsoShape(J);
-  const ex = exprOf(st, p), box = extent(J, lk);
-  if (st.shadow !== false && !(J.seat && J.seatH > 1)) {
+  J.simple = M.headH * eff < 46;
+  const box = extent(J, lk), W = q => [x + q[0] * s * f, y + q[1] * s];
+  const b = [x + (f > 0 ? box[0] : -box[2]) * s, y + box[1] * s, x + (f > 0 ? box[2] : -box[0]) * s, y + box[3] * s];
+  const out = { head: W(J.hc), mouth: W(J.HT(J.G.mouth)), eye: W(J.HT(J.G.eyeN)), hands: { front: W(J.aF.hand), back: W(J.aB.hand) }, hand: W(J.aF.hand), bounds: b };
+  if (!ctx) return out;
+  J.tor = J.tor || torsoShape(J);
+  const ex = exprOf(st, p), shA = 0.26 * (J.seatH > 1 ? 1 - J.w : 1);   // no ground shadow while sitting up on a seat
+  if (st.shadow !== false && shA > 0.01) {
     const cx = x + ((box[0] + box[2]) / 2) * s * f * 0.6, w = Math.max(M.width * 0.75, (box[2] - box[0]) * 0.5) * s;
-    ctx.save(); ctx.fillStyle = 'rgba(35,50,30,0.26)'; ctx.beginPath();
+    ctx.save(); ctx.fillStyle = `rgba(35,50,30,${shA})`; ctx.beginPath();
     ctx.ellipse(cx, y + 1, w * (1 - clamp(J.lift / 160, 0, 0.5)), Math.max(1.5, w * 0.16), 0, 0, 7); ctx.fill(); ctx.restore();
   }
   ctx.save(); ctx.translate(x, y); ctx.scale(s * f, s);
-  ctx.beginPath(); ctx.rect(-2000, -4000, 4000, 4000 + (J.seat ? J.seatH : 0) + 1.5 * LW); ctx.clip();   // nothing passes through the ground
+  ctx.beginPath(); ctx.rect(-2000, -4000, 4000, 4000 + J.w * J.seatH + 1.5 * LW); ctx.clip();   // nothing passes through the ground
   const bk = p.bkFront >= 0.5, hB = p.hB, hF = p.hF;
   drawHairBehind(ctx, J, lk);
   if (lk.scarf) drawScarf(ctx, J, lk, 'back');
@@ -825,19 +1049,19 @@ function draw(ctx, x, y, s, face, st = {}) {
   drawNeck(ctx, J, lk);
   drawPelvis(ctx, J, lk);
   drawLeg(ctx, J, J.lF, false, lk, 140);
+  if (lk.bottom === 'skirt' || lk.bottom === 'dress') drawSkirt(ctx, J, lk);
   drawTorso(ctx, J, lk);
   drawCollar(ctx, J, lk);
-  if (lk.bottom === 'skirt' || lk.bottom === 'dress') { const P = skirtShape(J, lk); cel(ctx, P, lk.bottom === 'dress' ? lk.dress : lk.pants, 1.15, 160); if (!J.simple) { const c = lk.bottom === 'dress' ? lk.dress : lk.pants; const { at } = J.tor; for (const [u, sd] of [[0.35, 161], [0.62, 162]]) { const h = mid(J.lB.knee, J.lF.knee, u); stroke(ctx, [mid(at(0.05), h, 0.35), mid(at(0.05), h, 0.95)], 0.5, sd, rgba(darken(c, 0.5), 0.5)); } } }
   if (lk.apron) drawApron(ctx, J, lk);
   if (lk.backpack) drawBackpack(ctx, J, lk, 'strap');
   if (lk.scarf) drawScarf(ctx, J, lk, 'front');
+  if (lk.hairStyle === 'braids') drawBraid(ctx, J, lk, false);
   drawHead(ctx, J, lk, ex, st);
+  if (lk.hairStyle === 'braids') drawBraid(ctx, J, lk, true);
   if (bk) drawArm(ctx, J, J.aB, true, lk, hB, 100);
   drawArm(ctx, J, J.aF, false, lk, hF, 180);
   ctx.restore();
-  const W = q => [x + q[0] * s * f, y + q[1] * s];
-  const b = [x + (f > 0 ? box[0] : -box[2]) * s, y + box[1] * s, x + (f > 0 ? box[2] : -box[0]) * s, y + box[3] * s];
-  return { head: W(J.hc), mouth: W(J.HT(J.G.mouth)), eye: W(J.HT(J.G.eyeN)), hands: { front: W(J.aF.hand), back: W(J.aB.hand) }, hand: W(J.aF.hand), bounds: b };
+  return out;
 }
 // Solved joints in local units (contact at the origin, facing right), for tests, props and lint.
 export function skeleton(pose = POSES.stand, params = {}, st = {}) {
@@ -851,17 +1075,46 @@ function bbox(pose = {}, face = 1, params = {}) {
 }
 
 // ───────────────────────── poses ─────────────────────────
-export const mixPose = (a, b, u) => { const p = {}; for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) { const x = a[k] ?? POSE0[k], y = b[k] ?? POSE0[k]; p[k] = typeof x === 'number' && typeof y === 'number' ? lerp(x, y, u) : (u < 0.5 ? x : y); } return p; };
+const lerpPose = (a, b, u) => { const p = {}; for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) { const x = a[k] ?? POSE0[k], y = b[k] ?? POSE0[k]; p[k] = typeof x === 'number' && typeof y === 'number' ? lerp(x, y, u) : (u < 0.5 ? x : y); } return p; };
+// A direct blend between a seated and an upright pose passes through RISE (hips just off the ground, torso over the
+// feet), the way a person sits down or gets up. The path is a quadratic Bézier through RISE at u = 0.5: exact at both
+// ends, smooth in between. Every other blend is a plain lerp. Weight-bearing feet stay put: in any blend between a
+// seated pose and one on its feet, the feet keep their anchor until the seat takes the weight (the upright half of a
+// sit ↔ stand, the first 40% of crouch → sit), then slide to where the seated pose puts them. RISE's hips sit a quarter
+// of the way from the seated hips to the standing ones, so the hips never scoot back before they lift.
+const RISE = { seat: 0.32, lean: 0.74, stoop: 0.12, tilt: -0.55, ik: 1, ikF: 0, ikB: 0, gy: 0.36, gyW: 0.6, tFx: 0.2, tFy: 0.36, tBx: 0.34, tBy: 0.36, pvF: 0, pvB: 1,
+  hipF: 1.45, kneeF: 2.2, hipB: 1.3, kneeB: 2.05, fF: 0, fB: 0.3, hx: 0, plF: 1, plB: 1, shF: 0.82, elF: 0.5, shB: 0.75, elB: 0.55, shrug: 0.15 };
+const upright = q => (q.seat ?? 0) < 0.5 && (q.gyW ?? 0) < 0.5 && (q.gait ?? 0) < 0.5 && Math.abs(q.lean ?? 0) < 0.6 && !(q.lift > 1) && !(q.liftL > 0.05);
+export const mixPose = (a, b, u) => {
+  const sa = a.seat ?? 0, sb = b.seat ?? 0;
+  if (!(u > 0 && u < 1) || Math.abs(sa - sb) < 0.5) return lerpPose(a, b, u);
+  const S = sa > sb ? a : b, F = S === a ? b : a, s = S === b ? u : 1 - u;   // s: progress toward the seated end
+  const anchor = r0 => lerp(F.anchor ?? 0, S.anchor ?? 0, smooth(r0, 1, s));
+  if (!upright(F)) { const q = lerpPose(a, b, u); q.anchor = anchor(0.4); return q; }
+  const m = lerpPose(a, b, 0.5), q = {};
+  for (const k in RISE) m[k] = RISE[k];
+  m.hxL = 0.75 * (S.hxL ?? 0) + 0.25 * (F.hxL ?? 0);
+  for (const k in m) {
+    const x = a[k] ?? POSE0[k], y = b[k] ?? POSE0[k];
+    if (typeof x !== 'number' || typeof y !== 'number') { q[k] = u < 0.5 ? x : y; continue; }
+    const c = 2 * m[k] - (x + y) / 2;
+    q[k] = (1 - u) * (1 - u) * x + 2 * u * (1 - u) * c + u * u * y;
+  }
+  q.anchor = anchor(0.5);
+  return q;
+};
 const P = o => ({ ...POSE0, ...o });
 export const POSES = {
-  stand: P({}),
-  'idle-weight-shift': P({ idle: 1 }),
-  'sit-ground': P({ seat: 1, seatH: -1, lean: -0.1, stoop: 0.14, tilt: 0.0, hipF: 1.72, hipB: 1.52, shF: 0.62, elF: 0.8, shB: 0.55, elB: 0.85 }),
-  'sit-seat': P({ seat: 1, seatH: 0, lean: 0.0, stoop: 0.06, hipF: 1.52, hipB: 1.45, shF: 0.2, elF: 0.95, shB: 0.28, elB: 0.85 }),
-  crouch: P({ lean: 0.62, stoop: 0.1, tilt: -0.5, hipB: 1.95, kneeB: 2.85, ikF: 1, gF: 1, tFx: 0.26, shF: 1.02, elF: 0.55, shB: 0.95, elB: 0.6 }),
-  kneel: P({ lean: 0.04, tilt: 0.04, hipB: -0.06, kneeB: 1.64, fB: 1.38, ikF: 1, gF: 1, tFx: 0.62, shF: 0.45, elF: 0.4, shB: 0.08, elB: 0.32 }),
-  lie: P({ lean: -1.57, tilt: -0.05, hipF: 1.52, kneeF: 0.12, fF: -1.35, hipB: 1.46, kneeB: 0.3, fB: -1.2, shF: 0.36, elF: -0.48, shB: 0.05, elB: 0.1 }),
-  sleep: P({ lean: -1.57, tilt: 0.05, hipF: 2.35, kneeF: 2.1, fF: -0.15, hipB: 1.5, kneeB: 0.25, fB: -1.2, shF: 0.5, elF: -0.42, shB: 0.32, elB: -0.3, sleep: 1 }),
+  stand: P({ anchor: 1 }),
+  'idle-weight-shift': P({ idle: 1, anchor: 1 }),
+  // hips behind the contact point: it is where her feet stand when she gets up (and where they stood as she sat down)
+  'sit-ground': P({ seat: 1, seatH: -1, hxL: -0.3, lean: -0.1, stoop: 0.14, tilt: 0.0, hipF: 1.72, kneeF: 1.6, hipB: 1.52, kneeB: 1.4, shF: 0.62, elF: 0.8, shB: 0.55, elB: 0.85 }),
+  'sit-seat': P({ seat: 1, seatH: 0, lean: 0.0, stoop: 0.06, hipF: 1.52, kneeF: 1.4, hipB: 1.45, kneeB: 1.33, shF: 0.2, elF: 0.95, shB: 0.28, elB: 0.85 }),
+  // a squat over the standing feet: the hips go back and down, the knees forward, the far heel lifts
+  crouch: P({ lean: 0.62, stoop: 0.1, tilt: -0.5, ik: 1, anchor: 1, hxL: -0.2, gyW: 1, gy: 0.46, tFx: 0.13, tFy: 0.46, tBx: 0.25, tBy: 0.46, fB: 0.5, pvB: 1, shF: 1.02, elF: 0.55, shB: 0.95, elB: 0.6 }),
+  kneel: P({ lean: 0.04, tilt: 0.04, hipB: -0.06, kneeB: 1.64, fB: 1.38, ikF: 1, gF: 1, tFx: 0.62, shF: 0.45, elF: 0.4, shB: 0.08, elB: 0.32, plB: 0 }),
+  lie: P({ plF: 0, plB: 0, lean: -1.57, tilt: -0.05, hipF: 1.52, kneeF: 0.12, fF: -1.35, hipB: 1.46, kneeB: 0.3, fB: -1.2, shF: 0.36, elF: -0.48, shB: 0.05, elB: 0.1 }),
+  sleep: P({ plF: 0, plB: 0, lean: -1.57, tilt: 0.05, hipF: 2.35, kneeF: 2.1, fF: -0.15, hipB: 1.5, kneeB: 0.25, fB: -1.2, shF: 0.5, elF: -0.42, shB: 0.32, elB: -0.3, sleep: 1 }),
   'look-up': P({ lean: -0.12, stoop: -0.04, tilt: -0.42, shF: -0.12, elF: 0.15, shB: 0.15, elB: 0.18 }),
   'hands-on-hips': P({ lean: -0.04, hipF: -0.12, hipB: 0.16, kneeB: 0.04, shF: -0.72, elF: 1.4, hF: 2, shB: 0.72, elB: -1.42, hB: 2 }),
   'arms-crossed': P({ lean: -0.03, tilt: -0.04, shF: -0.25, elF: 1.86, hF: 2, shB: 0.38, elB: -1.75, hB: 2 }),
@@ -890,7 +1143,7 @@ function walk(ph) {
   const sw = u => 0.11 * Math.pow(Math.sin(Math.PI * u), 0.9);
   const a = stepLeg(ph, beta, D / 2, -D / 2, h, sw, 0.6, -0.3), b = stepLeg((ph + 0.5) % 1, beta, D / 2, -D / 2, h, sw, 0.6, -0.3);
   const c = Math.cos(TAU * ph);
-  return P({ ik: 1, gait: 1, gyW: 1, gy: h, tFx: a.x, tFy: a.y, fF: a.f, pvF: a.pv, tBx: b.x, tBy: b.y, fB: b.f, pvB: b.pv,
+  return P({ ik: 1, gait: 1, gyW: 1, gy: h, plF: 0, plB: 0, tFx: a.x, tFy: a.y, fF: a.f, pvF: a.pv, tBx: b.x, tBy: b.y, fB: b.f, pvB: b.pv,
     lean: 0.06, tilt: -0.03 + 0.02 * Math.cos(2 * TAU * ph), shF: -0.42 * c + 0.06, elF: 0.28 + 0.32 * Math.max(0, -c), shB: 0.42 * c + 0.14, elB: 0.28 + 0.32 * Math.max(0, c) });
 }
 function run(ph) {
@@ -904,7 +1157,7 @@ function run(ph) {
   const sw = u => 0.48 * Math.pow(Math.sin(Math.PI * Math.pow(u, 0.75)), 1.2);
   const a = stepLeg(qa, beta, x0, x1, gy, sw, 0.95, -0.12), b = stepLeg(qb, beta, x0, x1, gy, sw, 0.95, -0.12);
   const c = Math.cos(TAU * ph);
-  return P({ ik: 1, gait: 1, run: 1, gyW: 1, gy, tFx: a.x, tFy: a.y, fF: a.f, pvF: a.pv, tBx: b.x, tBy: b.y, fB: b.f, pvB: b.pv,
+  return P({ ik: 1, gait: 1, run: 1, gyW: 1, gy, plF: 0, plB: 0, tFx: a.x, tFy: a.y, fF: a.f, pvF: a.pv, tBx: b.x, tBy: b.y, fB: b.f, pvB: b.pv,
     lean: 0.24, tilt: -0.16, shF: -0.75 * c + 0.5, elF: 1.5 + 0.2 * c, hF: 2, shB: 0.75 * c + 0.5, elB: 1.5 - 0.2 * c, hB: 2 });
 }
 export const GAITS = { walk, run };
@@ -912,18 +1165,23 @@ export const GAITS = { walk, run };
 // ───────────────────────── gestures ─────────────────────────
 const env = (u, a = 0.18, b = 0.2) => smooth(0, a, u) * (1 - smooth(1 - b, 1, u));
 const over = (base, key, e) => { const p = { ...POSE0, ...base }; for (const k in key) p[k] = lerp(p[k] ?? 0, key[k], e); return p; };
+const JUMP = {
+  crouch: { hipF: 0.85, kneeF: 1.5, hipB: 0.8, kneeB: 1.45, lean: 0.38, tilt: -0.15, shF: -0.35, elF: 0.4, shB: -0.25, elB: 0.4 },
+  air: { plF: 0, plB: 0, hipF: 0.75, kneeF: 1.35, hipB: 0.35, kneeB: 1.15, fF: 0.6, fB: 0.6, lean: -0.05, tilt: -0.22, shF: 2.7, elF: 0.15, hF: 1, shB: 2.55, elB: 0.2, hB: 1, joy: 1 },
+  land: { hipF: 0.7, kneeF: 1.3, hipB: 0.65, kneeB: 1.25, lean: 0.28, shF: 1.9, elF: 0.3, shB: 1.7, elB: 0.3, joy: 1 },
+};
 export const GESTURES = {
   wave: { dur: 1.8, at: (u, b = POSES.stand) => { const e = env(u, 0.14, 0.16), p = over(b, { shF: 3.7, elF: -0.5, hF: 1, tilt: -0.06, joy: 1, shrug: 0.12 }, e); p.elF += 0.42 * Math.sin(TAU * 2.6 * u) * e; p.shF += 0.05 * Math.sin(TAU * 2.6 * u + 1) * e; return p; } },
   nod: { dur: 0.9, at: (u, b = POSES.stand) => { const p = over(b, {}, 0); p.tilt += 0.24 * (0.5 - 0.5 * Math.cos(TAU * 2 * u)); return p; } },
   'shake-head': { dur: 1.1, at: (u, b = POSES.stand) => { const p = over(b, { tilt: 0.06 }, env(u, 0.1, 0.1)); p.turn += -0.42 * Math.sin(TAU * 2.5 * u) * env(u, 0.1, 0.25); return p; } },
   shrug: { dur: 1.2, at: (u, b = POSES.stand) => over(b, { shrug: 1, shF: 0.45, elF: 1.55, hF: 1, shB: 0.32, elB: 1.5, hB: 1, tilt: 0.2, lean: -0.03 }, env(u, 0.3, 0.32)) },
   laugh: { dur: 1.8, at: (u, b = POSES.stand) => { const e = env(u, 0.12, 0.2), p = over(b, { lean: -0.12, tilt: -0.28, shF: 0.35, elF: 1.85, hF: 0, shB: 0.25, elB: 1.6, laugh: 1 }, e); p.lean += 0.04 * Math.sin(TAU * 6 * u) * e; p.tilt += 0.06 * Math.sin(TAU * 6 * u) * e; p.shrug += 0.35 * Math.abs(Math.sin(TAU * 3 * u)) * e; return p; } },
-  'jump-for-joy': { dur: 1.3, at: (u, b = POSES.stand) => {
-    const p = over(b, {}, 0);
-    if (u < 0.22) { const k = Math.sin((Math.PI / 2) * (u / 0.22)); Object.assign(p, over(p, { hipF: 0.85, kneeF: 1.5, hipB: 0.8, kneeB: 1.45, lean: 0.38, tilt: -0.15, shF: -0.35, elF: 0.4, shB: -0.25, elB: 0.4 }, k)); return p; }
-    if (u < 0.78) { const v = (u - 0.22) / 0.56, k = Math.sin(Math.PI * v); return over(p, { liftL: 0.62 * k, hipF: 0.75, kneeF: 1.35, hipB: 0.35, kneeB: 1.15, fF: 0.6, fB: 0.6, lean: -0.05, tilt: -0.22, shF: 2.7, elF: 0.15, hF: 1, shB: 2.55, elB: 0.2, hB: 1, joy: 1 }, Math.min(1, v * 4)); }
-    const k = 1 - (u - 0.78) / 0.22, sq = Math.sin(Math.PI * k);
-    return over(p, { hipF: 0.7, kneeF: 1.3, hipB: 0.65, kneeB: 1.25, lean: 0.28, shF: 1.9, elF: 0.3, shB: 1.7, elB: 0.3, joy: 1 }, sq * 0.8 + k * 0.2);
+  'jump-for-joy': { dur: 1.3, at: (u, b = POSES.stand) => {      // crouch, spring up (pose.lift, units) with arms high, land, settle
+    let p = over(b, JUMP.crouch, smooth(0, 0.2, u) * (1 - smooth(0.2, 0.36, u)));
+    p = over(p, JUMP.air, smooth(0.18, 0.36, u) * (1 - smooth(0.62, 0.8, u)));
+    p = over(p, JUMP.land, smooth(0.66, 0.8, u) * (1 - smooth(0.84, 1, u)));
+    p.lift = (p.lift || 0) + 34 * Math.sin(Math.PI * clamp((u - 0.22) / 0.52));
+    return p;
   } },
   point: { dur: 1.3, at: (u, b = POSES.stand) => over(b, { shF: 1.52, elF: 0.04, hF: 3, lean: 0.05, tilt: -0.05 }, env(u, 0.2, 0.22)) },
   bow: { dur: 1.7, at: (u, b = POSES.stand) => over(b, { lean: 0.85, stoop: 0.12, tilt: 0.28, hipF: 0.2, hipB: 0.12, shF: 1.0, elF: 0.15, shB: 1.08, elB: 0.15 }, env(u, 0.32, 0.35)) },
@@ -965,8 +1223,10 @@ export const SAMPLE_CAST = [
   { label: 'elder', age: 'elder', glasses: true },
   { label: 'elder bald', age: 'elder', hairStyle: 'bald', beard: 'full', build: 'sturdy', hat: false, shirt: '#7a8a6a' },
   { label: 'elder hat', age: 'elder', hairStyle: 'long', hair: '#e8e4dc', hat: '#c8a85a', bottom: 'skirt', pants: '#6a4a6a', shirt: '#d8c8a8', glasses: '#8a5a3a' },
+  { label: 'child braids', age: 'child', skin: '#c99a72', hairStyle: 'braids', hair: '#3b2a20', scarf: '#5e7b3f', bottom: 'dress', dress: '#d9a441', shoes: null },
+  { label: 'elder slight', age: 'elder', build: 'slight', skin: '#c99a72', hairStyle: 'bun', hair: '#d9d6d0', glasses: '#b08a3a', scarf: '#5e7b3f', shirt: '#cdbfa3', bottom: 'skirt', dress: '#5f6f8c' },
 ];
-export async function humanSheet(outPath, { sections = ['cast', 'poses', 'gaits', 'gestures', 'faces'], width = 2600 } = {}) {
+export async function humanSheet(outPath, { sections = ['cast', 'poses', 'gaits', 'gestures', 'faces', 'blends'], width = 2600 } = {}) {
   const pages = sections.map(s => sheetSection(s, width));
   const H = pages.reduce((a, c) => a + c.height, 0), [cv, x] = canvas(width, H);
   let y = 0; for (const c of pages) { x.drawImage(c, 0, y); y += c.height; }
@@ -990,6 +1250,10 @@ export function sheetSection(name, width = 2600) {
     const items = [];
     for (const k of Object.keys(GESTURES)) for (const u of [0.3, 0.55]) items.push(fig(`${k} ${u}`, { params: SAMPLE_CAST[age === 'child' ? 0 : 7], st: { pose: GESTURES[k].at(u, POSES.stand), t: u } }));
     rows.push({ title: `gestures — ${age}`, s: age === 'child' ? 1.15 : 0.92, h: 320, items, cw: 112 });
+  }
+  if (name === 'blends') for (const [age, idx] of [['elder', 12], ['child', 11]]) for (const [a, b] of [['stand', 'crouch'], ['crouch', 'sit-ground'], ['sit-ground', 'stand']]) {
+    const n = 10;
+    rows.push({ title: `blend — ${SAMPLE_CAST[idx].label}: ${a} → ${b} (mixPose, eased, ${n} frames)`, s: age === 'child' ? 1.25 : 1.0, h: 300, items: Array.from({ length: n }, (_, i) => fig(`${i}`, { params: SAMPLE_CAST[idx], st: { pose: mixPose(POSES[a], POSES[b], easeInOut(i / (n - 1))), t: 0.5 } })), cw: 230 });
   }
   if (name === 'faces') for (const idx of [0, 4, 6, 9]) {
     const items = Object.keys(EXPR).map(e => fig(e, { params: SAMPLE_CAST[idx], st: { expr: e, t: 0 }, face: true }));

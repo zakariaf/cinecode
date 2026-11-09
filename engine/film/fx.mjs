@@ -2,7 +2,7 @@
 // extended). One-shot effects (dust, splash, sparkle) take an age in seconds; fields (fireflies, leaves, motes,
 // mist) are deterministic particle tilings over the world, so they stay put when the camera moves.
 // Rain is drawn in screen space. Everything is seeded: the same t gives the same pixels.
-import { rng, blob, pick, canvas } from '../core/lib.mjs';
+import { rng, blob, pick, canvas, arcPts, wobble, ink } from '../core/lib.mjs';
 import { mistSprite } from '../paint/atmos.mjs';
 import { clamp, lerp } from './util.mjs';
 
@@ -164,6 +164,34 @@ export function rain(ctx, t, W, H, { a = 1, seed = 9 } = {}) {
       ctx.moveTo(x, y); ctx.lineTo(x - len * u * 0.18, y + len * u);
     }
     ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Where a wading body breaks the water (screen space): a dark meniscus hugging the body, a broken pale highlight
+// drawn as tapered brush strokes, two rings spreading and fading (on twos), and foam dabs at the sides.
+// half: 'back' (drawn before the body) or 'front' (after it). The caller clips to the water.
+export function ripple(ctx, { x, y, rx, a = 1, seed = 1, half = 'front', t = 0, s = 1 }) {
+  const front = half === 'front', tq = TWOS(t), lw = Math.max(1.2, 1.7 * s), r = rng(seed * 131 + 7);
+  const arc = (R, u0, u1, k) => wobble(arcPts(x, y, R, R * 0.26, Math.PI * u0, Math.PI * u1, 4), seed * 7 + k, Math.min(2.5, lw * 0.5), false);
+  // pieces of an arc with seeded gaps; front arc angles 0..1 (× π), back 1..2
+  const pieces = (u0, u1, n, k) => { const out = [], step = (u1 - u0) / n; for (let i = 0; i < n; i++) { const a0 = u0 + step * (i + 0.06 + r() * 0.12), a1 = u0 + step * (i + 0.82 + r() * 0.12); out.push([a0, a1, k + i]); } return out; };
+  ctx.save();
+  if (front) {
+    // the meniscus: water darkened right against the body
+    for (const [u0, u1, k] of pieces(0.02, 0.98, 2, 1)) ink(ctx, arc(rx * 0.97, u0, u1, k).map(([px, py]) => [px, py + lw * 0.5]), lw * 1.5, { closed: false, color: `rgba(32,58,74,${(0.42 * a).toFixed(3)})`, seed: seed + k });
+    for (const [u0, u1, k] of pieces(0.04, 0.96, 3, 5)) ink(ctx, arc(rx, u0, u1, k), lw * 1.3, { closed: false, color: `rgba(240,250,252,${(0.85 * a).toFixed(3)})`, seed: seed + k });
+  } else for (const [u0, u1, k] of pieces(1.08, 1.92, 2, 9)) ink(ctx, arc(rx * 0.98, u0, u1, k), lw * 0.9, { closed: false, color: `rgba(236,248,250,${(0.6 * a).toFixed(3)})`, seed: seed + k });
+  // rings spreading out
+  for (let k = 0; k < 2; k++) {
+    const ph = (tq * 0.55 + k / 2 + (seed % 97) / 97) % 1, R = rx * (1.1 + 0.8 * ph), al = 0.5 * a * (1 - ph) ** 1.5;
+    if (al < 0.02) continue;
+    for (const [u0, u1, j] of pieces(front ? 0.08 : 1.12, front ? 0.92 : 1.88, 2, 20 + k * 4)) ink(ctx, arc(R, u0, u1, j), lw * (1.1 - 0.5 * ph), { closed: false, color: `rgba(232,246,250,${al.toFixed(3)})`, seed: seed + j });
+  }
+  if (front) {
+    const q = rng(seed * 31 + Math.floor(tq * 6));
+    ctx.fillStyle = `rgba(244,251,252,${(0.75 * a).toFixed(3)})`;
+    for (const side of [-1, 1]) for (let i = 0; i < 3; i++) blob(ctx, x + side * rx * (0.9 + q() * 0.18), y + (q() - 0.4) * rx * 0.08, (1.1 + q() * 1.5) * lw, (0.7 + q() * 0.8) * lw, 0, q, 6);
   }
   ctx.restore();
 }

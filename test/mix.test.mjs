@@ -167,3 +167,104 @@ test('writeMaster with real ffmpeg: 48 kHz 24-bit at −16 LUFS, under −1.5 dB
     assert.ok(Math.abs(loudness(w.channels) + 16) < 0.7);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ───────────── DESIGN §9.3: custom sounds, dur/params, unvoiced lines, hums ─────────────
+
+const energy = (x, t0, t1) => { let s = 0; for (let i = Math.round(t0 * SR); i < Math.min(x.length, Math.round(t1 * SR)); i++) s += x[i] * x[i]; return s; };
+
+test('custom sounds from plan.sounds get { seed, dur, params } and play at their time', () => {
+  const calls = [];
+  const beep = ({ seed, dur, params }) => { calls.push({ seed, dur, params }); return tone(params.f ?? 1000, dur ?? 0.5, 0.2); };
+  const plan = { duration: 3, sounds: { 'tiny-bell': beep }, sfx: [{ t: 1, name: 'tiny-bell', dur: 0.6, params: { f: 1500 }, seed: 9 }] };
+  const m = mixFilm(plan, { sfxReverb: 0 });
+  assert.deepEqual(calls, [{ seed: 9, dur: 0.6, params: { dur: 0.6, f: 1500 } }]);
+  assert.ok(level(m.L, 1500, 1.1, 1.5) > 0.02, 'the custom sound plays');
+  assert.ok(energy(m.L, 0, 0.99) === 0 && energy(m.L, 1.62, 3) === 0, 'only between t and t + dur');
+  // a film's sound may replace a built-in one; opts.sounds is a fallback the plan overrides
+  const knock = () => tone(700, 0.3, 0.2);
+  const m2 = mixFilm({ duration: 1, sfx: [{ t: 0.2, name: 'knock', seed: 1 }] }, { sfxReverb: 0, sounds: { knock } });
+  assert.ok(level(m2.L, 700, 0.25, 0.45) > 0.02, 'opts.sounds used');
+  const m3 = mixFilm({ duration: 1, sounds: { knock: () => tone(300, 0.3, 0.2) }, sfx: [{ t: 0.2, name: 'knock', seed: 1 }] }, { sfxReverb: 0, sounds: { knock } });
+  assert.ok(level(m3.L, 300, 0.25, 0.45) > 0.02 && level(m3.L, 700, 0.25, 0.45) < 0.002, 'plan.sounds wins');
+  // edges are softened, bad output is skipped with a warning (not fatal)
+  const step = mixFilm({ duration: 1, sounds: { dc: () => new Float32Array(4800).fill(0.3) }, sfx: [{ t: 0.5, name: 'dc' }] }, { sfxReverb: 0 });
+  assert.ok(Math.abs(step.L[Math.round(0.5 * SR)]) < 0.01, 'no click at the start');
+  assert.doesNotThrow(() => mixFilm({ duration: 1, sounds: { bad: () => 'nope', boom: () => { throw new Error('boom'); } }, sfx: [{ t: 0.1, name: 'bad' }, { t: 0.2, name: 'boom' }] }));
+});
+
+test('sfx dur and params reach the generator; gate-creak is a door creak', () => {
+  const short = mixFilm({ duration: 4, sfx: [{ t: 0.2, name: 'wind', dur: 1.2, seed: 3 }] }, { sfxReverb: 0 });
+  const long = mixFilm({ duration: 4, sfx: [{ t: 0.2, name: 'wind', params: { dur: 3 }, seed: 3 }] }, { sfxReverb: 0 });
+  assert.ok(energy(short.L, 1.5, 4) === 0 && energy(short.L, 0.4, 1.2) > 0, 'dur 1.2 s');
+  assert.ok(energy(long.L, 2, 3) > 0, 'params.dur 3 s');
+  const hum = mixFilm({ duration: 6, sfx: [{ t: 0, name: 'hum', params: { notes: 'A4:1', tempo: 60, voice: 'child' } }] }, { sfxReverb: 0 });
+  assert.ok(level(hum.L, 440, 0.5, 1.2) > 5 * level(hum.L, 392, 0.5, 1.2), 'params.notes sung');
+  const g = mixFilm({ duration: 2.5, sfx: [{ t: 0.1, name: 'gate-creak', seed: 2 }] }, { sfxReverb: 0 });
+  const d = mixFilm({ duration: 2.5, sfx: [{ t: 0.1, name: 'door-creak', seed: 2 }] }, { sfxReverb: 0 });
+  assert.ok(energy(g.L, 0, 2.5) > 0 && g.L.every((v, i) => v === d.L[i]), 'alias resolves to the same sound');
+});
+
+test('a film with no voices yet still mixes: unvoiced lines are skipped with one warning', () => {
+  const warn = console.warn, seen = [];
+  console.warn = (...a) => seen.push(a.join(' '));
+  try {
+    const plan = { duration: 4, lines: [{ id: 'u1', who: 'pip', t0: 0.5, t1: 1.5 }, { id: 'u2', who: 'fox', t0: 2, t1: 3 }], sfx: [{ t: 1, name: 'chime' }], ambience: [{ t0: 0, t1: 4, name: 'meadow-day' }] };
+    const m = mixFilm(plan, { music: music(4) });
+    assert.ok(energy(m.L, 0, 4) > 0, 'music, effects and beds still play');
+    assert.equal(seen.filter(w => /no voice/.test(w)).length, 1);
+    assert.match(seen.find(w => /no voice/.test(w)), /2 of 2 lines .*u1 pip, u2 fox/);
+  } finally { console.warn = warn; }
+});
+
+test('a hum ducks the score like a voice (params.duck: false keeps it up)', () => {
+  const hum = { t: 2, name: 'hum', params: { notes: 'C5:4', tempo: 60, voice: 'child' }, seed: 1 };
+  const ducked = mixFilm({ duration: 8, sfx: [hum] }, { music: music(8), sfxReverb: 0 });
+  const kept = mixFilm({ duration: 8, sfx: [{ ...hum, params: { ...hum.params, duck: false } }] }, { music: music(8), sfxReverb: 0 });
+  const dip = db(level(ducked.L, 200, 3, 5) / level(ducked.L, 200, 0.5, 1.5)), flat = db(level(kept.L, 200, 3, 5) / level(kept.L, 200, 0.5, 1.5));
+  assert.ok(dip < -7, `music under the hum ${dip.toFixed(1)} dB`);
+  assert.ok(Math.abs(flat) < 1, `no duck ${flat.toFixed(1)} dB`);
+});
+
+test('films/_test mixes before it is voiced: its custom tiny-bell plays, unvoiced lines are skipped', async () => {
+  const { loadPlan } = await import('../engine/render/film-source.mjs');
+  const { resolveLine } = await import('../engine/audio/voice.mjs');
+  const { film, plan } = await loadPlan(new URL('../films/_test', import.meta.url).pathname);
+  // the voice module sees what to say: `speak` for the laugh (non-verbal) and the cut line (trimEnd)
+  const laugh = plan.lines.find(l => l.text === '[laughs]'), cut = plan.lines.find(l => l.trimEnd > 0);
+  if (laugh) { const r = resolveLine(film, laugh); assert.equal(r.text, laugh.speak); assert.equal(r.nonverbal, true); }
+  if (cut) assert.equal(resolveLine(film, cut).trimEnd, cut.trimEnd);
+  const bell = plan.sfx.find(e => e.name === 'tiny-bell');
+  assert.ok(bell && plan.sounds?.['tiny-bell'], 'compile copies custom.mjs sounds to plan.sounds');
+  const warn = console.warn; console.warn = () => {};
+  let m;
+  try { m = mixFilm(plan, { voices: new Map(), sfxReverb: 0 }); } finally { console.warn = warn; }
+  assert.equal(m.L.length, Math.round(plan.duration * SR));
+  assert.ok(m.L.every(Number.isFinite) && energy(m.L, 0, plan.duration) > 0);
+  assert.ok(level(m.L, 2093, bell.t + 0.01, bell.t + 0.3) > 4 * level(m.L, 2093, bell.t - 0.4, bell.t - 0.1), 'the tiny bell rings at its time');
+});
+
+test('two lines that share a voice entry play their own cuts (one interrupted, one in full), in either order', async () => {
+  const { trimTake } = await import('../engine/audio/voice.mjs');
+  const full = { wav: tone(500, 2, 0.3), sampleRate: SR, dur: 2, fps: 24 }, cut = trimTake(full, 0.5);
+  const lines = [{ id: 'd', who: 'pip', t0: 0.5, t1: 2, trimEnd: 0.5 }, { id: 'd', who: 'pip', t0: 3.5, t1: 5.5, trimEnd: 0 }];
+  for (const entry of [cut, full]) {   // the map holds the take cut for whichever line came first
+    const m = mixFilm({ duration: 6.5, lines }, { voices: new Map([['d', entry]]), sfxReverb: 0, dialoguePan: 0 });
+    assert.ok(level(m.L, 500, 0.5 + 1.6, 0.5 + 1.9) < 0.002, 'the interrupted line stops at its cut');
+    assert.ok(level(m.L, 500, 3.5 + 1.6, 3.5 + 1.9) > 0.02, 'the full line plays to its end');
+  }
+});
+
+test('a broken effect cannot poison the mix: zero-length built-ins are finite and NaN is silenced', () => {
+  const plan = { duration: 4, sfx: [{ t: 2, name: 'wind-swell', params: { dur: 0 } }, { t: 1, name: 'snore', params: { dur: 0 } }, { t: 0.5, name: 'rustle', dur: 0 }, { t: 0.2, name: 'chime' }] };
+  const m = mixFilm(plan, { music: music(4) });
+  assert.ok(m.L.every(Number.isFinite) && m.R.every(Number.isFinite));
+  assert.ok(energy(m.L, 2.5, 4) > 0, 'the music after the event still plays');
+  // a NaN param (custom.mjs code can pass one; JSON can't) still breaks some generators: the mix silences it and warns
+  const warn = console.warn, seen = [];
+  console.warn = (...a) => seen.push(a.join(' '));
+  try {
+    const n = mixFilm({ duration: 3, sfx: [{ t: 1, name: 'bell', params: { f0: NaN } }] }, { music: music(3) });
+    assert.ok(n.L.every(Number.isFinite) && energy(n.L, 2, 3) > 0, 'music after the broken bell survives');
+    assert.ok(seen.some(w => /sfx "bell" made \d+ non-finite samples/.test(w)), seen.join('\n'));
+  } finally { console.warn = warn; }
+});

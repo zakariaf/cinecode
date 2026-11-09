@@ -1,5 +1,6 @@
-// loadFilm: read films/<slug>/film.json (or take a parsed object), load custom.mjs, resolve rigs and set kits,
-// validate everything and either return the resolved film or throw a ValidationError listing every problem.
+// loadFilm: read films/<slug>/film.json (or take a parsed object), load custom.mjs (rigs, kits, custom beats,
+// overlays, sounds), resolve rigs and set kits, validate everything and either return the resolved film or throw
+// a ValidationError listing every problem.
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join, resolve, basename, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -53,8 +54,8 @@ export async function loadFilm(src, opts = {}) {
     json = structuredClone(src);
   } else throw new ValidationError([{ path: 'film', message: 'loadFilm: expected a film directory, a film.json path or a film object' }]);
 
-  // custom.mjs: extra rigs, kits and custom beats
-  const problems = [], custom = { rigs: [], kits: {}, custom: {} };
+  // custom.mjs: extra rigs, kits, custom beats, overlays (scene-long drawings) and sounds
+  const problems = [], custom = { rigs: [], kits: {}, custom: {}, overlays: {}, sounds: {} };
   const customPath = opts.custom ?? (dir ? join(dir, 'custom.mjs') : null);
   if (customPath && existsSync(customPath)) {
     try {
@@ -62,6 +63,8 @@ export async function loadFilm(src, opts = {}) {
       custom.rigs = Array.isArray(m.rigs) ? m.rigs : [];
       custom.kits = m.kits && typeof m.kits === 'object' ? m.kits : {};
       custom.custom = m.custom && typeof m.custom === 'object' ? m.custom : {};
+      custom.overlays = m.overlays && typeof m.overlays === 'object' ? m.overlays : {};
+      custom.sounds = m.sounds && typeof m.sounds === 'object' ? m.sounds : {};
       custom.module = m;
     } catch (e) { problems.push({ path: 'custom.mjs', message: `custom.mjs: failed to load: ${e.message}` }); }
   }
@@ -77,7 +80,7 @@ export async function loadFilm(src, opts = {}) {
       catch (e) { problems.push({ path: `sets.${id}`, message: `sets.${id}: kit "${s.kit}" failed: ${e.message}` }); }
     }
   }
-  const v = validateFilm(json, { getRig, rigKinds: listRigs(), kits, sets, custom: custom.custom });
+  const v = validateFilm(json, { getRig, rigKinds: listRigs(), kits, sets, custom: custom.custom, overlays: custom.overlays, sounds: custom.sounds });
   problems.push(...v.problems);
   if (problems.length) throw new ValidationError(problems, v.warnings);
 

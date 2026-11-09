@@ -1,5 +1,6 @@
 // Time of day: sky crossfades and the colour grade (ported from the legacy engine: a soft-light wash, a multiply
-// tint, a vignette and animated film grain), plus a few story grades (memory, dream) layered on top.
+// tint, a vignette and animated film grain), plus a few story grades (memory, dream) layered on top; mixStory blends
+// two story grades (a shot's grade → gradeTo).
 import { rng, canvas } from '../core/lib.mjs';
 import { clamp, lerp, ease } from './util.mjs';
 
@@ -34,11 +35,24 @@ export function mixGrade(list) {
   return g;
 }
 
-// A scene's time spec → sky crossfade list at time t. A {from, to} change happens over the middle 80% of the scene.
+// Blend of two story grades (null = no story grade): saturation, sepia, vignette and bloom move linearly.
+const NO_STORY = { sat: 1, sepia: 0, vig: 0, bloom: 0 };
+export function mixStory(a, b, u) {
+  if (a === b) return a;
+  if (u <= 0) return a; if (u >= 1) return b;
+  const A = a || NO_STORY, B = b || NO_STORY, o = {};
+  for (const k of Object.keys(NO_STORY)) o[k] = lerp(A[k] ?? NO_STORY[k], B[k] ?? NO_STORY[k], u);
+  return o;
+}
+
+// Progress of a change over a span: eased across its middle 80% (a scene's or a shot's time of day, a gradeTo).
+export const spanU = (t0, t1, t) => ease((t - t0 - (t1 - t0) * 0.1) / ((t1 - t0) * 0.8 || 1));
+
+// A time spec → sky crossfade list at time t. A {from, to} change happens over the middle 80% of the span.
 export function skyList(time, t0, t1, t, fallback = 'morning') {
   if (!time) return [[fallback, 1]];
   if (typeof time === 'string') return [[time, 1]];
-  const u = ease((t - t0 - (t1 - t0) * 0.1) / ((t1 - t0) * 0.8 || 1));
+  const u = spanU(t0, t1, t);
   if (u <= 0) return [[time.from, 1]];
   if (u >= 1) return [[time.to, 1]];
   return [[time.from, 1 - u], [time.to, u]];

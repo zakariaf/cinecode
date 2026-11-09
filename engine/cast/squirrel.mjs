@@ -1,8 +1,12 @@
 // The Squirrel. Legacy look (red coat, cream front, huge brush) as a full rig: sits up with an acorn, shushes,
 // drops the acorn, nibbles; on the ground it hop-walks and bounds with planted feet; perches on branches.
+// Round 2 (DESIGN §9.2): params.tail (0.4..1.8) scales the brush; above ~1.1 it gets fluffier, below 0.7 it goes flat,
+// thin and pointed like a wet paintbrush and hangs instead of curling. Pose "flop": exhausted, lying flat over something
+// rounded (a tortoise's shell, a branch) with legs dangling and the tail draped down; it is a hanging pose (pose.hang = 1:
+// limbs and tail may go below the contact point), listed in rig.hangPoses. st.tilt pitches the head.
 import { clamp, lerp, ell, rpoly } from '../core/lib.mjs';
 import { cel, darken, lighten, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
-import { makeRig, quadFeet, leg, spine, mixPose, plus, jumpAt, ease, frac } from './rig.mjs';
+import { makeRig, quadFeet, leg, spine, mixPose, plus, jumpAt, ease, frac, pitchPose, gaze } from './rig.mjs';
 
 const rot = (v, a) => [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a)];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
@@ -10,8 +14,9 @@ const SH = 1.3;
 
 // Pose: body centre (bx, by), rotation br (0 = on all fours, -1.35 upright), head (hx, hy, hr), ear ea,
 // tail start angle ta / bend tc, near & far fore paws f1/f2 and hind toes h1/h2 (ground units), paw angles fa/ha,
-// acorn (1 = shown), ad (0 = in the paws .. 1 = dropped on the ground in front), face hints.
-const D = { bx: 0, by: -11, br: -1.35, hx: 4, hy: -26, hr: 0, ea: 0, ta: 0.75, tc: 2.1, fa: 0.2, ha: 1.45, acorn: 0, ad: 0, nib: 0, lift: 0, mo: 0, sm: 0, eh: 0, lid: 0, f1u: 0, f2u: 0, h1u: 0, h2u: 0 };
+// acorn (1 = shown), ad (0 = in the paws .. 1 = dropped on the ground in front), sq body squash 0..1 (flattened),
+// hang (1 = limbs and tail hang free below the contact line), tw tail width factor (a limp tail lies flatter), face hints.
+const D = { bx: 0, by: -11, br: -1.35, hx: 4, hy: -26, hr: 0, ea: 0, ta: 0.75, tc: 2.1, fa: 0.2, ha: 1.45, acorn: 0, ad: 0, nib: 0, sq: 0, hang: 0, tw: 1, lift: 0, mo: 0, sm: 0, eh: 0, lid: 0, f1u: 0, f2u: 0, h1u: 0, h2u: 0 };
 const P0 = o => ({ ...D, ...o });
 const roots = p => {
   const B = [p.bx, p.by], H1 = add(B, rot([-6.5, 1.5], p.br)), S1 = add(B, rot([6, 1.5], p.br));
@@ -25,6 +30,8 @@ export const POSES = {
   alert: P0({ by: -13.5, br: -1.45, hx: 3, hy: -31, hr: -0.1, ea: -0.2, ta: 0.55, tc: 1.6, ...UPRIGHT, f1x: 6.5, f1y: -17.5, f2x: 7.5, f2y: -18, h1x: 6, h2x: 7.5, ha: 1.2, fa: 0.6, lid: 0 }),
   shush: P0({ ...UPRIGHT, f1x: 10.5, f1y: -24.5, fa: -1.2 }),
   sleep: P0({ bx: 0, by: -8.6, br: -0.05, hx: 9, hy: -8, hr: 0.4, ea: 0.3, ta: 1.3, tc: 3.6, f1x: 7, f1y: 0, f2x: 8, f2y: 0, h1x: 0, h1y: 0, h2x: 1, h2y: 0, fa: 1.4, ha: 1.5, lid: 1 }),
+  // exhausted, draped belly-down over a shell or a branch: legs dangle, chin rests, the tail hangs down behind
+  flop: P0({ bx: 0, by: -5.4, br: 0.04, sq: 0.32, hang: 1, hx: 12.4, hy: -5.6, hr: 0.22, ea: 0.5, ta: -0.45, tc: -0.75, tw: 0.5, f1x: 10.5, f1y: 7.5, f2x: 13.5, f2y: 4, h1x: -7.5, h1y: 8, h2x: -10, h2y: 4.5, fa: 0.25, ha: 0.35, lid: 0.55 }),
 };
 POSES.rest = POSES.sit; POSES.perch = POSES.hold;
 
@@ -77,7 +84,7 @@ function head(T, p, F, P, o) {
   }
   dot(T, 6.8, 0.8, 1.05, P.nose);
   if (sm > 0.5) fillP(T, ell(1.4, 1.8, 2, 1.2, 197, 0.1), rgba('#e88070', 0.35 * (sm - 0.4)));
-  eye(T, 2.2, -1.6, 1.6, 2, F.eye, P.eye, F.look * 0.5, F.lid, F.tilt, { w: 0.9 });
+  eye(T, 2.2, -1.6, 1.6, 2, F.eye, P.eye, gaze(F, 0.5, 2), F.lid, F.tilt, { w: 0.9 });
   brow(T, 2.1, -4.7, 3.6, F.browY * 0.7, F.browT * 0.75, darken(P.coat, 0.5), 0.95, 198);
   for (const [ty, s] of [[0.6, 200], [2.2, 201]]) line(T, [[6.4, 1.4], [11, ty]], 0.35, { seed: s, color: 'rgba(42,33,48,.5)' });
   T.save(); T.translate(-0.6, -4.8); T.rotate(ea);                                                // near ear with tuft
@@ -86,29 +93,52 @@ function head(T, p, F, P, o) {
   o.out.head = T.map(1, -0.5); o.out.mouth = T.map(mx - 0.4, my + op);
   T.restore();
 }
-function paint(T, p, F, o) {
-  const { P, t } = o, R = roots(p);
-  const sp = spine(R.Tb, p.ta, p.tc, 46, u => (2.6 + 5.2 * Math.sin(Math.PI * Math.min(1, 0.12 + u * 0.9))) * (u > 0.92 ? 1 - (u - 0.92) * 4 : 1), { n: 18, wave: 0.12, t });
-  const sleeping = p.tc > 3;
+// The brush for params.tail = k: length and width grow with k at every size; above 1.1 fluff tufts ring it; below 0.7
+// (fully by 0.6) it is wet: thin, clumped to a point and limp. A wet tail never rests on the ground, so it reads the
+// same on a shell or a branch as on the grass: upright it lifts off the rump in a tired arch and the tip hangs; asleep
+// (a curled pose) it drops off the rump and tucks under the haunch instead of wrapping; in a hanging pose it falls.
+function tailOf(p, R, k, t) {
+  const w = clamp((0.7 - k) / 0.1), len = 46 * (0.6 + 0.4 * k) * (1 - 0.3 * w), wk = k * (1 - 0.12 * w) * (p.tw ?? 1);
+  const cu = clamp((p.tc - 2.4) / 1.2), hg = clamp(p.hang);
+  const wa = lerp(lerp(1.05, -0.5, cu), Math.min(p.ta, 0.4), hg), wc = lerp(lerp(-2.7, -2.1, cu), Math.min(p.tc, -0.7), hg);
+  const ta = lerp(p.ta, wa, w), tc = lerp(p.tc, wc, w);
+  const dry = u => (2.6 + 5.2 * Math.sin(Math.PI * Math.min(1, 0.12 + u * 0.9))) * (u > 0.92 ? 1 - (u - 0.92) * 4 : 1);
+  const wet = u => 0.35 + 3.3 * Math.pow(1 - u, 0.9) * Math.min(1, 0.55 + u * 3);
+  return { w, ...spine(R.Tb, ta, tc, len, u => lerp(dry(u), wet(u), w) * wk, { n: 18, wave: 0.12 * (1 - 0.7 * w), t, ground: !(p.hang > 0.5) }) };
+}
+function paint(T, p0, F, o) {
+  const { P, t } = o, k = clamp(P.tail ?? 1, 0.4, 1.8);
+  const p = pitchPose(p0, F.pitch, { hr: -0.55, hy: -1.2, hx: -0.8 }, { hr: 0.45, hy: 1 }), R = roots(p);
+  const sp = tailOf(p, R, k, t);
+  const sleeping = p.tc > 3 && sp.w < 0.5;                        // a dry tail wraps round the sleeper; a wet one tucks behind
   const drawTail = () => {
-    cel(T, sp.poly, darken(P.coat, 0.95), SH, 1.1, 180);
+    cel(T, sp.poly, darken(P.coat, 0.95 - 0.12 * sp.w), SH, 1.1, 180);
     T.save(); T.beginPath(); sp.poly.forEach((q, i) => (i ? T.lineTo(q[0], q[1]) : T.moveTo(q[0], q[1]))); T.closePath(); T.clip();
-    for (let i = 2; i < 17; i++) { const q = sp.pts[i], w = sp.ws[i]; line(T, [[q[0] - w * 0.5, q[1] - 0.6], [q[0] - w * 0.15, q[1] + 1]], 0.55, { seed: 181 + i, color: 'rgba(240,200,160,.55)' }); }
+    if (sp.w > 0.05) {                                              // wet: dark clumped strands and one wet sheen
+      for (let i = 0; i < 5; i++) line(T, sp.pts.slice(1 + i, 18 - i).map((q, j) => [q[0], q[1] + (i - 2) * sp.ws[j + 1 + i] * 0.32]), 0.45, { seed: 181 + i, color: rgba(darken(P.coat, 0.55), 0.6 * sp.w) });
+      line(T, sp.pts.slice(2, 12).map((q, j) => [q[0], q[1] - sp.ws[j + 2] * 0.45]), 0.5, { seed: 187, color: rgba('#ffffff', 0.45 * sp.w) });
+    } else for (let i = 2; i < 17; i++) { const q = sp.pts[i], w = sp.ws[i]; line(T, [[q[0] - w * 0.5, q[1] - 0.6], [q[0] - w * 0.15, q[1] + 1]], 0.55, { seed: 181 + i, color: 'rgba(240,200,160,.55)' }); }
     T.restore();
+    if (k > 1.1) {                                                  // fluff: little tufts breaking the outline
+      const f = Math.min(1, (k - 1.1) / 0.5);
+      for (let i = 3; i < 18; i += 2) { const q0 = sp.pts[i - 1], q = sp.pts[i], dx = q[0] - q0[0], dy = q[1] - q0[1], d = Math.hypot(dx, dy) || 1, nx = -dy / d, ny = dx / d, w = sp.ws[i];
+        for (const sd of [-1, 1]) { const b = [q[0] + nx * w * sd * 0.92, q[1] + ny * w * sd * 0.92]; line(T, [b, [b[0] + nx * sd * (0.8 + f) - dx / d * 1.2, b[1] + ny * sd * (0.8 + f) - dy / d * 1.2]], 0.55, { seed: 260 + i + sd, color: darken(P.coat, 0.6) }); } }
+    }
   };
   if (!sleeping) drawTail();
-  leg(T, R.H2, [p.h2x, p.h2y], { l1: 6.5, l2: 6, meta: 7, ma: p.ha, bend: 1, w: [4.6, 2.3, 1.8, 1.5], col: darken(P.coat, 0.82), paw: [2.2, 1.3], sh: SH, seed: 210, curl: p.h2u, curlA: 0.8, ink: 0.85 });
-  leg(T, R.S2, [p.f2x, p.f2y], { l1: 4.6, l2: 4.4, meta: 1.6, ma: p.fa, bend: -1, w: [2, 1.6, 1.3, 1.2], col: darken(P.coat, 0.82), paw: [1.5, 1.1], sh: SH, seed: 220, curl: p.f2u, curlA: -1.2, ink: 0.8 });
-  const body = ell(R.B[0], R.B[1], 11 * (1 + F.breath * 0.02), 7.6, 184, 0.3, p.br);
+  const free = p.hang > 0.5;
+  leg(T, R.H2, [p.h2x, p.h2y], { free, l1: 6.5, l2: 6, meta: 7, ma: p.ha, bend: 1, w: [4.6, 2.3, 1.8, 1.5], col: darken(P.coat, 0.82), paw: [2.2, 1.3], sh: SH, seed: 210, curl: p.h2u, curlA: 0.8, ink: 0.85 });
+  leg(T, R.S2, [p.f2x, p.f2y], { free, l1: 4.6, l2: 4.4, meta: 1.6, ma: p.fa, bend: -1, w: [2, 1.6, 1.3, 1.2], col: darken(P.coat, 0.82), paw: [1.5, 1.1], sh: SH, seed: 220, curl: p.f2u, curlA: -1.2, ink: 0.8 });
+  const body = ell(R.B[0], R.B[1], 11 * (1 + F.breath * 0.02) * (1 + p.sq * 0.12), 7.6 * (1 - p.sq * 0.3), 184, 0.3, p.br);
   cel(T, body, P.coat, SH, 0, 184);
   T.save(); T.beginPath(); body.forEach((q, i) => (i ? T.lineTo(q[0], q[1]) : T.moveTo(q[0], q[1]))); T.closePath(); T.clip();
-  const bp = add(R.B, rot([1.5, 4.8], p.br)); fillP(T, ell(bp[0], bp[1], 9.5, 4.2, 185, 0.2, p.br), P.cream); T.restore();
+  const bp = add(R.B, rot([1.5, 4.8 * (1 - p.sq * 0.3)], p.br)); fillP(T, ell(bp[0], bp[1], 9.5, 4.2, 185, 0.2, p.br), P.cream); T.restore();
   line(T, [...body, body[0]], 1.1, { seed: 184, taper: false });
   // neck join
   cel(T, ell((R.S1[0] + p.hx) / 2 - 0.5, (R.S1[1] + p.hy) / 2 + 1, 4.6, 5.2, 189, 0.2, Math.atan2(p.hx - R.S1[0], R.S1[1] - p.hy)), P.coat, SH, 0, 189);
   // near hind with haunch
-  const hl = leg(T, R.H1, [p.h1x, p.h1y], { l1: 6.5, l2: 6, meta: 7, ma: p.ha, bend: 1, w: [5, 2.6, 2, 1.7], col: P.coat, paw: [2.4, 1.4], sh: SH, seed: 230, curl: p.h1u, curlA: 0.8, ink: 0.9 });
-  const ha = Math.atan2(hl.knee[1] - R.H1[1], hl.knee[0] - R.H1[0]), hy = Math.min((R.H1[1] + hl.knee[1]) / 2, -Math.hypot(5.6 * Math.sin(ha), 4.6 * Math.cos(ha)) - 0.9);
+  const hl = leg(T, R.H1, [p.h1x, p.h1y], { free, l1: 6.5, l2: 6, meta: 7, ma: p.ha, bend: 1, w: [5, 2.6, 2, 1.7], col: P.coat, paw: [2.4, 1.4], sh: SH, seed: 230, curl: p.h1u, curlA: 0.8, ink: 0.9 });
+  const ha = Math.atan2(hl.knee[1] - R.H1[1], hl.knee[0] - R.H1[0]), hy = free ? (R.H1[1] + hl.knee[1]) / 2 : Math.min((R.H1[1] + hl.knee[1]) / 2, -Math.hypot(5.6 * Math.sin(ha), 4.6 * Math.cos(ha)) - 0.9);
   cel(T, ell((R.H1[0] + hl.knee[0]) / 2, hy, 5.6, 4.6, 231, 0.2, ha), P.coat, SH, 0.95, 231);
   head(T, p, F, P, o);
   if (sleeping) drawTail();
@@ -119,7 +149,7 @@ function paint(T, p, F, o) {
     if (u < 0.7) { const v = u / 0.7; ay = lerp(hold[1], land[1], v * v); } else { const v = (u - 0.7) / 0.3; ay = land[1] - 3 * Math.sin(Math.PI * v) * (1 - v * 0.3); }
     acorn(T, ax, Math.min(ay, -3.6), 1, u * 7.85);
   }
-  leg(T, R.S1, [p.f1x, p.f1y], { l1: 4.6, l2: 4.4, meta: 1.6, ma: p.fa, bend: -1, w: [2.2, 1.7, 1.4, 1.3], col: P.coat, paw: [1.6, 1.2], sh: SH, seed: 240, curl: p.f1u, curlA: -1.2, ink: 0.85 });
+  leg(T, R.S1, [p.f1x, p.f1y], { free, l1: 4.6, l2: 4.4, meta: 1.6, ma: p.fa, bend: -1, w: [2.2, 1.7, 1.4, 1.3], col: P.coat, paw: [1.6, 1.2], sh: SH, seed: 240, curl: p.f1u, curlA: -1.2, ink: 0.85 });
 }
 
 const base = POSES.sit;
@@ -127,9 +157,10 @@ const g = (dur, at, keys) => ({ dur, at, keys });
 const env = (u, a = 0.2, b = 0.2) => ease(clamp(u / a)) * (1 - ease(clamp((u - 1 + b) / b)));
 export default makeRig({
   kind: 'squirrel', label: 'Squirrel',
+  hangPoses: ['flop'],
   height: 52, headHeight: 17, width: 24, shadowW: 12,
   perch: true, breathPeriod: 1.6,
-  params: { coat: '#b4542a', cream: '#f0dcc0', earIn: '#d98a78', nose: '#3a2020', eye: '#1a1210' },
+  params: { coat: '#b4542a', cream: '#f0dcc0', earIn: '#d98a78', nose: '#3a2020', eye: '#1a1210', tail: 1 },
   speeds: { walk: G.walk.speed, run: G.run.speed },
   stride: { walk: G.walk.stride, run: G.run.stride },
   steps: { walk: [0, 0.04, 0.25], run: [0, 0.44] },

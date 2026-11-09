@@ -3,6 +3,13 @@
 // The only part of a cinecode film that comes from a model. Every line is cached as
 // <cacheDir>/<id>.wav (48 kHz mono, trimmed) + <id>.json (meta, QA, envelope), so once a
 // film is voiced it re-renders identically with no network and no API key.
+//
+// A line speaks `line.speak ?? line.text` (plan lines carry `speak` from the beat's `tts`; `text` stays the caption).
+// Non-verbal lines (`line.nonverbal`, or a caption starting with "[", e.g. "[laughs]") are transcribed but not held to
+// the word-error gate: a take passes unless any word of the direction is audible (directionHeard). `line.trimEnd` (s)
+// cuts the end of the take after the cache (the cache keeps the full take): a 2-frame fade-out, and `dur`/`env` describe
+// the cut audio. The cut belongs to the line, not to its id: two lines with the same words share an id and one cached
+// take but may cut it differently, so whoever places or times a line asks voiceFor(voices, line) for its own cut.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -91,9 +98,30 @@ export function directionSpoken(direction, leadingWords) {
   return dir.size > 0 && leadingWords.filter(w => dir.has(w)).length >= Math.min(2, dir.size);
 }
 
+const FUNCTION_WORDS = new Set('a an the and or but with of in on at to for as like very is are it its his her their by from into'.split(' '));
+/** A light stem, so "giggling", "giggles" and "giggle" match, and "laughs", "laughing", "laughed" → "laugh". */
+const stem = w => (w.length > 3 ? w.replace(/(ing|ed|es|s)$/, '').replace(/e$/, '').replace(/(.)\1$/, '$1') : w);
+/**
+ * For a non-verbal line (no words to hold the take to): was any of the direction heard? The direction is the bracket sent
+ * to the TTS plus any bracket in the spoken text itself (a caption like "[laughs]" voiced as-is), minus function words
+ * and words the line really says. One such word is enough: a model that reads out only the line's own delivery
+ * ("Giggling. Hahaha!") has still read the direction. (Parenthesised) and *starred* descriptions are ignored.
+ */
+export function directionHeard(direction, speak, transcript) {
+  const said = new Set(normalizeWords(speak).map(stem));
+  const bracketed = (String(speak ?? '').match(/\[[^\]]*\]/g) ?? []).map(s => s.slice(1, -1)).join(' ');
+  const dir = new Set(normalizeWords(`${direction ?? ''} ${bracketed}`).filter(w => !FUNCTION_WORDS.has(w)).map(stem).filter(w => !said.has(w)));
+  return normalizeWords(String(transcript ?? '').replace(/\([^)]*\)|\*[^*]*\*/g, ' ')).some(w => !FUNCTION_WORDS.has(w) && dir.has(stem(w)));
+}
+
 // ---------------------------------------------------------------------------------- QA (WER)
 
 const NUM = 'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty'.split(' ');
+
+/** What a line's voice says: `speak` (from the beat's `tts`) or else its text. */
+export const spokenText = line => line?.speak ?? line?.text;
+/** A non-verbal line: flagged by compile, or a caption that starts with "[" ("[laughs]"). */
+export const isNonverbal = line => !!(line?.nonverbal ?? /^\s*\[/.test(String(line?.text ?? '')));
 
 /** Lowercase words without punctuation or diacritics; `don't` → `dont`, digits 0–20 → words. */
 export function normalizeWords(s) {
@@ -145,6 +173,38 @@ function fadeEdges(x, sr, ms = 4) {
   const n = Math.min(Math.floor(x.length / 2), Math.round((sr * ms) / 1000));
   for (let i = 0; i < n; i++) { const g = Math.sin((0.5 * Math.PI * i) / n) ** 2; x[i] *= g; x[x.length - 1 - i] *= g; }
   return x;
+}
+
+/**
+ * Cut `trimEnd` seconds off the end of a voiced take (a line interrupted mid-word), with a 2-frame fade-out, and
+ * recompute the lip envelope from the cut audio. → the entry with wav/dur/env replaced, plus trimEnd and fullDur; the
+ * uncut take stays reachable as the non-enumerable `full` (so voiceFor can cut it again for another line).
+ */
+export function trimTake(v, trimEnd, fps = v.fps ?? 24) {
+  const sr = v.sampleRate ?? SAMPLE_RATE, fade = Math.max(1, Math.round((2 * sr) / fps));
+  const keep = Math.min(v.wav.length, Math.max(fade + 1, v.wav.length - Math.round(trimEnd * sr))), wav = v.wav.slice(0, keep);
+  for (let i = 0; i < fade; i++) wav[keep - 1 - i] *= Math.sin((0.5 * Math.PI * i) / fade) ** 2;
+  return Object.defineProperty({ ...v, wav, dur: keep / sr, env: mouthEnv(wav, sr, fps), trimEnd, fullDur: v.dur }, 'full', { value: v });
+}
+
+const cutOf = line => (Number.isFinite(+line?.trimEnd) && +line.trimEnd > 0 ? +line.trimEnd : 0);
+const TRIMS = new WeakMap();   // full take → Map trimEnd → cut take, so every caller gets the same object for a line
+/**
+ * The voice of one plan line: `voices.get(line.id)` cut to the line's own `trimEnd`. The id hashes who, voice, words and
+ * tone, not the cut, so a line said once interrupted and once in full shares one id and one cached take, and the map
+ * entry is cut for the first of them. Anything that places or times a line (the mix; compile) should use this.
+ * → the entry (unchanged when its cut already matches), or undefined when the line has no voice.
+ */
+export function voiceFor(voices, line) {
+  const v = voices?.get?.(line?.id), want = cutOf(line), have = v?.trimEnd ?? 0;
+  if (!v || want === have) return v;
+  const full = have ? v.full : v;
+  if (!(full?.wav instanceof Float32Array)) return v;   // nothing to cut from (a hand-made entry): the best there is
+  if (!want) return full;
+  let byCut = TRIMS.get(full);
+  if (!byCut) TRIMS.set(full, (byCut = new Map()));
+  if (!byCut.has(want)) byCut.set(want, trimTake(full, want));
+  return byCut.get(want);
 }
 
 /** RBJ biquad low/high-pass (Q 0.707), used to isolate the vowel band for the lip envelope. */
@@ -309,9 +369,9 @@ function context(opts) {
 function normalizeLine(line) {
   const voice = VOICE_BY_LC.get(String(line.voice ?? '').toLowerCase());
   if (!voice) throw new Error(`unknown voice "${line.voice}" for "${line.who ?? 'line'}"; prebuilt voices: ${VOICES.map(v => v.name).join(', ')}`);
-  const who = line.who ?? 'narrator', text = String(line.text ?? '').replace(/\s+/g, ' ').trim(), tone = joinTones(line.tone);
+  const who = line.who ?? 'narrator', text = String(spokenText(line) ?? '').replace(/\s+/g, ' ').trim(), tone = joinTones(line.tone);
   if (!text) throw new Error(`empty line text for "${who}"`);
-  return { id: line.id ?? lineId(who, voice, text, tone), who, voice, text, tone };
+  return { id: line.id ?? lineId(who, voice, text, tone), who, voice, text, tone, nonverbal: isNonverbal(line), trimEnd: Number.isFinite(+line.trimEnd) && +line.trimEnd > 0 ? +line.trimEnd : 0 };
 }
 
 const missingKeyError = (missing, total, dir) => new Error(
@@ -336,15 +396,23 @@ async function synthesize(L, ctx) {
     let qa = { wer: null, transcript: null };
     if (ctx.qa) {
       try {
-        const transcript = await transcribe(x, a.sr, ctx), hyp = normalizeWords(transcript), w = wordErrorRate(ref, hyp);
-        qa = { wer: Math.round(w.wer * 1000) / 1000, transcript, leading: w.leading, trailing: w.trailing };
-        if (directionSpoken(direction, hyp.slice(0, w.leading))) qa.directionSpoken = true;
+        const transcript = await transcribe(x, a.sr, ctx), hyp = normalizeWords(transcript);
+        if (L.nonverbal) {   // a laugh, a sob: no words to hold it to, only that no word of the direction was read out
+          qa = { wer: null, transcript, nonverbal: true };
+          if (directionHeard(direction, L.text, transcript)) qa.directionSpoken = true;
+        } else {
+          const w = wordErrorRate(ref, hyp);
+          qa = { wer: Math.round(w.wer * 1000) / 1000, transcript, leading: w.leading, trailing: w.trailing };
+          if (directionSpoken(direction, hyp.slice(0, w.leading))) qa.directionSpoken = true;
+        }
       } catch (e) { qa = { wer: null, transcript: null, error: e.message }; }   // QA service down: keep the take unchecked
     }
-    const checked = ctx.qa && qa.wer !== null, score = checked ? qa.wer + (qa.leading ? 0.25 : 0) : 1;
+    const checked = ctx.qa && (L.nonverbal ? qa.transcript !== null : qa.wer !== null);
+    const passed = checked && (L.nonverbal ? !qa.directionSpoken : qa.wer <= ctx.maxWer && !qa.leading);
+    const score = !checked ? 1 : L.nonverbal ? (passed ? 0 : 1) : qa.wer + (qa.leading ? 0.25 : 0);
     takes.push({ attempt, direction, ...qa, dur: Math.round((x.length / a.sr) * 1000) / 1000 });
-    if (!best || score < best.score) best = { x, sr: a.sr, qa, score, attempt, prompt };
-    if (!checked || (qa.wer <= ctx.maxWer && !qa.leading)) break;
+    if (!best || score < best.score) best = { x, sr: a.sr, qa, score, attempt, prompt, checked, passed };
+    if (!checked || passed) break;
     // The model read the bracket aloud: the same prompt tends to fail the same way, so simplify it.
     if (qa.directionSpoken) level = Math.min(level + 1, directions.length - 1);
   }
@@ -352,7 +420,7 @@ async function synthesize(L, ctx) {
 
   const wav = fadeEdges(resample(best.x, best.sr, SAMPLE_RATE), SAMPLE_RATE);
   const dur = wav.length / SAMPLE_RATE, env = mouthEnv(wav, SAMPLE_RATE, ctx.fps);
-  const qa = { ...best.qa, pass: best.qa.wer === null ? null : best.qa.wer <= ctx.maxWer && !best.qa.leading, take: best.attempt, takes };
+  const qa = { ...best.qa, pass: best.checked ? best.passed : null, take: best.attempt, takes };
   const p = cachePaths(ctx.cacheDir, L.id);
   mkdirSync(ctx.cacheDir, { recursive: true });
   writeAtomic(p.wav, encodeWav([wav], SAMPLE_RATE, 16));
@@ -362,28 +430,37 @@ async function synthesize(L, ctx) {
 }
 
 async function voiceOne(L, ctx) {
-  if (metaMatches(readMeta(ctx.cacheDir, L.id), L)) return loadCached(ctx.cacheDir, L, ctx.fps);
-  if (!ctx.apiKey) throw missingKeyError([L], 1, ctx.cacheDir);
-  return synthesize(L, ctx);
+  let v;
+  if (metaMatches(readMeta(ctx.cacheDir, L.id), L)) v = loadCached(ctx.cacheDir, L, ctx.fps);
+  else if (!ctx.apiKey) throw missingKeyError([L], 1, ctx.cacheDir);
+  else v = await synthesize(L, ctx);
+  return L.trimEnd > 0 ? trimTake(v, L.trimEnd, ctx.fps) : v;   // the cache keeps the full take
 }
 
 /**
- * Voice a single line. `line`: { who?, voice (prebuilt name), text, tone?, id? }.
- * Returns { id, who, text, voice, tone, wav: Float32Array (48 kHz mono), sampleRate, dur, env, fps, qa, path, cached }.
+ * Voice a single line. `line`: { who?, voice (prebuilt name), text, speak?, tone?, id?, nonverbal?, trimEnd? }.
+ * Returns { id, who, text, voice, tone, wav: Float32Array (48 kHz mono), sampleRate, dur, env, fps, qa, path, cached }
+ * (+ trimEnd, fullDur when trimmed: `path` is then the full cached take, `wav`/`dur`/`env` the cut one).
  */
 export async function voiceLine(line, opts = {}) {
   if (!opts.cacheDir) throw new Error('voiceLine: opts.cacheDir is required');
   return voiceOne(normalizeLine(line), context(opts));
 }
 
-/** Resolve a plan line's prebuilt voice and full direction from film.voices / film.cast. */
+/**
+ * Resolve a plan line's prebuilt voice and full direction from film.voices / film.cast. `text` becomes what is spoken
+ * (`speak ?? text`); `nonverbal` and `trimEnd` are carried when set.
+ */
 export function resolveLine(film, line) {
   const voices = film?.voices ?? {}, cast = film?.cast?.[line.who];
   const key = [line.voice, cast?.voice, line.who, line.narrator ? 'narrator' : null].find(k => typeof k === 'string' && voices[k]);
   const cfg = key ? voices[key] : {};
   const voice = cfg.voice ?? [line.voice, cast?.voice].find(isVoiceName);
   if (!voice) throw new Error(`line ${line.id ?? ''} (${line.who}: "${String(line.text).slice(0, 40)}"): no voice — add film.voices.${line.who} = { "voice": "<prebuilt name>", "tone": "…" }`);
-  return { id: line.id, who: line.who ?? 'narrator', voice, text: line.text, tone: joinTones(cfg.tone, line.tone) };
+  const out = { id: line.id, who: line.who ?? 'narrator', voice, text: spokenText(line), tone: joinTones(cfg.tone, line.tone) };
+  if (isNonverbal(line)) out.nonverbal = true;
+  if (+line.trimEnd > 0) out.trimEnd = +line.trimEnd;
+  return out;
 }
 
 /**

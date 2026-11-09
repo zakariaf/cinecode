@@ -19,7 +19,8 @@ export const smoothWin = (a, b, x) => ease((x - a) / ((b - a) || 1e-9));
 export const round3 = x => Math.round(x * 1000) / 1000;
 
 // ───────────── targets ─────────────
-// 'left' | 'right' | 'x:1500' | 'x:1500,y:1060' | 'near:fox' | 'left-of:fox' | 'right-of:fox' | anchor name | {x, y}
+// 'left' | 'right' | 'x:1500' | 'x:1500,y:1060' | 'near:fox' | 'left-of:fox' | 'right-of:fox' | 'on:pebble' (riding)
+// | anchor name | {x, y}
 export function parseTarget(v) {
   if (v && typeof v === 'object' && Number.isFinite(v.x)) return { kind: Number.isFinite(v.y) ? 'xy' : 'x', x: v.x, y: v.y };
   if (Array.isArray(v) && v.length === 2 && v.every(Number.isFinite)) return { kind: 'xy', x: v[0], y: v[1] };
@@ -28,7 +29,7 @@ export function parseTarget(v) {
   if (s === 'left' || s === 'right') return { kind: 'side', side: s };
   let m = /^x:\s*(-?\d+(?:\.\d+)?)\s*(?:,\s*y:\s*(-?\d+(?:\.\d+)?))?$/.exec(s);
   if (m) return m[2] != null ? { kind: 'xy', x: +m[1], y: +m[2] } : { kind: 'x', x: +m[1] };
-  m = /^(near|left-of|right-of|behind|front-of):\s*([\w.-]+)$/.exec(s);
+  m = /^(near|left-of|right-of|behind|front-of|on):\s*([\w.-]+)$/.exec(s);
   if (m) return { kind: m[1], who: m[2] };
   if (/^[\w.-]+$/.test(s)) return { kind: 'name', name: s };
   return { kind: 'bad', raw: v };
@@ -93,6 +94,18 @@ export function profile(rig, poseName, params = {}) {
   const p = { box: r.bounds.slice(), head: r.head.slice(), mouth: (r.mouth || r.head).slice() };
   m.set(key, p);
   return p;
+}
+
+// Riding point of a carrier in a pose: [ux, uy] in units from its contact point at face 1, scale 1 (the pose's own
+// lift and params.size included). rig.mount(pose, params) when the rig has one, else the top centre of the
+// drawing's bounds.
+export function mountPoint(rig, pose, params = {}) {
+  if (typeof rig.mount === 'function') {
+    const m = rig.mount(pose, params);
+    if (Array.isArray(m) && Number.isFinite(m[0]) && Number.isFinite(m[1])) return [m[0], m[1]];
+  }
+  const b = typeof rig.bbox === 'function' ? rig.bbox(pose, 1) : probe(rig, 0, 0, 1, 1, { pose, params, shadow: false, t: 0 }).bounds, k = params.size || 1;
+  return [((b[0] + b[2]) / 2) * k, b[1] * k];
 }
 
 // Keys of a gait pose that move the feet: perturbing them changes rig.feet(). Gestures layered over a gait keep

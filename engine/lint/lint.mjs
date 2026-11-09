@@ -8,6 +8,17 @@
 // frame. Consecutive hits of the same rule, actor and shot merge into one issue spanning t0–t1, reported at its
 // worst moment `t`.
 //
+// Riding, wading and cast scale (DESIGN §9.4): a rider (contact kind 'mount') stands on its carrier, so it is not
+// floating while that carrier is there, never collides with it, and is judged at the carrier's ground depth for
+// scale; a carrier may be framed together with its riders (one figure) and is never hidden by them. An actor on a
+// wade route may stand in water. A wading actor (or a rider sunk with its carrier) is judged by its visible box, the
+// part above the waterline, for being on screen, for being seen while speaking (a line from under the water is an
+// offscreen-speaker error) and for being too big or absent; too small is judged on the whole body, so sinking out of
+// sight on purpose is not a framing fault. Scale divides out the cast scale; a cast member scaled below 1 that even
+// the closest zoom cannot fill is judged at scale 1. Scene overlays, marks, fx, music and sfx beats are drawings,
+// sounds and instants, not actors: they hide no one and bring no one together. A push-in / pull-out that ends at
+// another size or zoom ("to", "toOn", "zoomTo") is judged at its starting size.
+//
 // Issue: { rule, severity, t, t0, t1, frame, shot, scene, actor?, other?, message, box?, marks?, frames?, samples }
 //   t, frame  the worst moment (seconds, and the frame index t·fps); t0–t1 the span the hits cover
 //   box     the offending actor's screen box [x0, y0, x1, y1] at t (plan W×H pixels)
@@ -88,9 +99,14 @@ function inRegion(S, x, y, tol = 3) {
 const ellipseD = (c, x, y) => Math.hypot((x - c.x) / c.rx, (y - c.y) / c.ry);
 const toScreen = (cam, W, H, x, y) => [(x - cam.cx) * cam.zoom + W / 2, (y - cam.cy) * cam.zoom + H / 2];
 const ellipseMark = (cam, W, H, c, label) => { const [x, y] = toScreen(cam, W, H, c.x, c.y); return { kind: 'ellipse', ellipse: [x, y, c.rx * cam.zoom, c.ry * cam.zoom], label }; };
+const union = (A, B) => [Math.min(A[0], B[0]), Math.min(A[1], B[1]), Math.max(A[2], B[2]), Math.max(A[3], B[3])];
+// What the audience sees of an actor: the box above the waterline when it wades (or rides a wading carrier).
+const shown = a => a.visibleBox ?? a.screenBox;
+const seen = a => (a.visibleBox ? { ...a, screenBox: a.visibleBox } : a);
 
 // Ids of the actors a beat brings together: moves, places, gestures and custom beats that name another actor
-// (to: "near:fox", at: "fox", actors: [...]), and any beat with an explicit touch/contact. Looks and lines don't count.
+// (to: "near:fox", to: "on:pebble", at: "fox", actors: [...]), and any beat with an explicit touch/contact. Looks,
+// lines, fx, marks and sfx don't count.
 const CONTACT_DO = new Set(['walk', 'run', 'hop', 'fly', 'enter', 'exit', 'place', 'gesture', 'custom', 'pose']);
 function beatRefs(b, cast) {
   const out = new Set(), explicit = b.touch !== undefined || b.contact !== undefined;
@@ -98,7 +114,7 @@ function beatRefs(b, cast) {
   const add = v => {
     if (Array.isArray(v)) return v.forEach(add);
     if (typeof v !== 'string') return;
-    const m = /^(?:near|left-of|right-of|behind|front-of):\s*([\w.-]+)$/.exec(v.trim());
+    const m = /^(?:near|left-of|right-of|behind|front-of|on):\s*([\w.-]+)$/.exec(v.trim());
     const id = m ? m[1] : v.trim();
     if (cast[id]) out.add(id);
   };
@@ -106,12 +122,18 @@ function beatRefs(b, cast) {
   return out;
 }
 
-// frameInfo boxes are probed without the quick horizontal squash of a turn; drawFrame squashes around the contact.
-function squashed(a) {
-  const q = a.st.squash ?? 1;
-  if (Math.abs(q - 1) < 1e-3) return a;
-  const sx = a.contact.screen[0], X = v => sx + (v - sx) * q, box = b => { const p = X(b[0]), r = X(b[2]); return [Math.min(p, r), b[1], Math.max(p, r), b[3]]; };
-  return { ...a, screenBox: box(a.screenBox), headBox: box(a.headBox), head: [X(a.head[0]), a.head[1]], hh: (a.headBox[2] - a.headBox[0]) / 1.2 };
+// The actors a carrier carries, directly or through another rider (states by id).
+function ridersOf(states, id) {
+  const out = new Set([id]);
+  for (let grew = true; grew;) { grew = false; for (const b of states.values()) if (b.carrier && out.has(b.carrier) && !out.has(b.id)) { out.add(b.id); grew = true; } }
+  out.delete(id);
+  return out;
+}
+// The carrier an actor rides on at the bottom of a riding chain (itself when it rides nothing).
+function baseOf(states, a) {
+  let b = a;
+  for (let i = 0; i < 8 && b?.carrier && states.get(b.carrier); i++) b = states.get(b.carrier);
+  return b;
 }
 
 // ───────────── visibility (frame edges, props, other actors and front layers in front) ─────────────
@@ -133,10 +155,11 @@ function covered(x, w, h) {
  * How much of an actor's drawing is visible at time t, within `region` (a screen box, default the whole drawing;
  * a close shot only needs the head and shoulders). → { frac, frame, blockers: [{ id, frac }] }: `frame` is the
  * part inside the frame, blockers what hides the rest (props, other actors, 'front' for the foreground layers).
+ * A wading actor counts only its part above the waterline; its riders never hide a carrier; overlays hide nothing.
  */
 export function visibleFraction(plan, shot, t, info, a, st, states, { occlusion = true, region = null } = {}) {
-  const W = plan.W, H = plan.H, cam = info.camera, z = cam.zoom, S = shot.set, alpha = st.alpha ?? 1;
-  const mb = region ? inter(region, a.screenBox) : a.screenBox, [x0, y0, x1, y1] = mb, bw = x1 - x0, bh = y1 - y0;
+  const W = plan.W, H = plan.H, cam = info.camera, z = cam.zoom, S = shot.set, alpha = st.alpha ?? 1, box = shown(a);
+  const mb = region ? inter(region, box) : box, [x0, y0, x1, y1] = mb, bw = x1 - x0, bh = y1 - y0;
   const inFrame = frac(mb, W, H) * alpha;
   if (!(bw > 0 && bh > 0) || inFrame <= 0 || !occlusion) return { frac: inFrame, frame: inFrame, blockers: [] };
   const k = Math.min(1, MASK / Math.max(bw, bh)), cw = Math.ceil(bw * k) + 2, ch = Math.ceil(bh * k) + 2;
@@ -144,11 +167,14 @@ export function visibleFraction(plan, shot, t, info, a, st, states, { occlusion 
   const screen = () => x.setTransform(k, 0, 0, k, 1 - x0 * k, 1 - y0 * k);
   const world = () => x.setTransform(k * z, 0, 0, k * z, (W / 2 - cam.cx * z - x0) * k + 1, (H / 2 - cam.cy * z - y0) * k + 1);
   const clipPath = s => { s.clip.forEach(([px, py], i) => { const q = toScreen(cam, W, H, px, py); i ? x.lineTo(q[0], q[1]) : x.moveTo(q[0], q[1]); }); x.closePath(); };
+  // as drawFrame draws it: squashed in a turn, sunk by a wade and hidden below its waterline
   const drawActor = (s, clipped = true) => {
-    const sx = (s.x - cam.cx) * z + W / 2, sy = (s.y - cam.cy) * z + H / 2;
+    const sx = (s.x - cam.cx) * z + W / 2, sy = (s.y - cam.cy) * z + H / 2, q = s.squash ?? 1;
     x.save(); screen();
     if (clipped && s.clip) { x.beginPath(); clipPath(s); x.clip(); }
-    s.R.draw(x, sx, sy, s.s * z, s.face, { ...s.st, shadow: false });
+    if (clipped && s.waterY != null) { x.beginPath(); x.rect(-1e6, -1e6, 2e6, (s.waterY - cam.cy) * z + H / 2 + 1e6); x.clip(); }
+    if (q !== 1) { x.translate(sx, sy); x.scale(q, 1); x.translate(-sx, -sy); }
+    s.R.draw(x, sx, sy + (s.sink || 0) * z, s.s * z, s.face, { ...s.st, shadow: false });
     x.restore();
   };
   const cut = (bx0, by0, bx1, by1) => { screen(); x.fillStyle = '#000'; x.beginPath(); x.rect(-1e6, -1e6, 2e6, 2e6); x.rect(bx0, by0, bx1 - bx0, by1 - by0); x.fill('evenodd'); };
@@ -164,9 +190,9 @@ export function visibleFraction(plan, shot, t, info, a, st, states, { occlusion 
   if (st.clip) step(`inside:${st.anchor || 'a hollow'}`, () => { screen(); x.fillStyle = '#000'; x.beginPath(); x.rect(-1e6, -1e6, 2e6, 2e6); clipPath(st); x.fill('evenodd'); });
   // the region in world space, to skip props that cannot cover it
   const wb = [(x0 - W / 2) / z + cam.cx, (y0 - H / 2) / z + cam.cy, (x1 - W / 2) / z + cam.cx, (y1 - H / 2) / z + cam.cy];
-  const items = [];
+  const items = [], mine = ridersOf(states, st.id);
   for (const p of S.propsSorted()) if (p.y > st.key) items.push({ key: p.y, id: p.id, draw: () => { world(); p.draw(x); }, box: p.bounds });
-  for (const b of states.values()) if (b.id !== st.id && b.visible && b.mode !== 'off' && b.alpha > 0.5 && b.key > st.key) items.push({ key: b.key, id: b.id, draw: () => drawActor(b) });
+  for (const b of states.values()) if (b.id !== st.id && !mine.has(b.id) && b.visible && b.mode !== 'off' && b.alpha > 0.5 && b.key > st.key) items.push({ key: b.key, id: b.id, draw: () => drawActor(b) });
   for (const it of items.sort((p, q) => p.key - q.key)) {
     if (it.box) { const [bx0, by0, bx1, by1] = it.box, m = 0.25 * Math.max(bx1 - bx0, by1 - by0); if (bx0 - m > wb[2] || bx1 + m < wb[0] || by0 - m > wb[3] || by1 + m < wb[1]) continue; }
     step(it.id, it.draw);
@@ -262,7 +288,8 @@ class Linter {
         const t = f / this.fps, info = frameInfo(plan, t);
         if (info.shot !== shot.id || !info.camera) continue;
         const states = new Map(plan.actorsAt(t).map(a => [a.id, a]));
-        const actors = info.actors.filter(a => states.has(a.id)).map(a => squashed({ ...a, st: states.get(a.id) })).map(a => ({ ...a, vis: frac(a.screenBox, this.W, this.H) }));
+        // frameInfo boxes already include a turn's squash and a wade's sink; vis is the on-screen part above water
+        const actors = info.actors.filter(a => states.has(a.id)).map(a => ({ ...a, st: states.get(a.id), vis: frac(shown(a), this.W, this.H) }));
         const c = { t, f, si: this.si++, shot, info, states, actors, byId: new Map(actors.map(a => [a.id, a])), S: shot.set, cam: info.camera };
         this.samples++;
         this.actorRules(c);
@@ -286,11 +313,14 @@ class Linter {
       if (a.vis <= 0.02 || a.alpha < 0.05) continue;           // not on screen: nothing to see
       const st = a.st, R = st.R, aloft = !!a.airborne, moving = MOVES.has(st.action), k = a.scale || 1;
       const where = pt(a.x, a.y), mark = { kind: 'point', point: a.contact.screen, label: a.mode };
+      const wading = !!(a.wade ?? st.wade), wet = !!S.inWater?.(a.x, a.y);
+      const cid = a.mode === 'mount' ? a.carrier ?? st.carrier : null, carrier = cid ? c.states.get(cid) : null;
       // floating
       if (!aloft) {
         let why = null;
-        if (a.mode === 'ground') { if (!inRegion(S, a.x, a.y) && !S.onStone?.(a.x, a.y)) why = `stands on air at ${where}: outside the walkable ground of ${shot.setId}`; }
+        if (a.mode === 'ground') { if (!inRegion(S, a.x, a.y) && !S.onStone?.(a.x, a.y) && !(wading && wet)) why = `stands on air at ${where}: outside the walkable ground of ${shot.setId}`; }
         else if (a.mode === 'air') why = `hangs in the air at ${where} without flying or jumping`;
+        else if (a.mode === 'mount') { if (!carrier || !carrier.visible || carrier.mode === 'off') why = `rides ${cid ?? 'a carrier'} at ${where}, but it is not there`; }
         else if (a.mode === 'surface' || a.mode === 'perch' || a.mode === 'hollow') {
           const an = this.anchor(S, a.anchor), tol = Math.max(4, 3 * a.s);
           let ok = a.mode === 'surface' && S.onStone?.(a.x, a.y);
@@ -312,33 +342,37 @@ class Linter {
           if (d < 0.95) this.hit(c, { rule: 'inside-solid', actor: a.id, metric: 1 - d, message: `${a.id} stands inside the solid footprint of ${col.id} at ${where} (${pct(1 - d)} of the way to its centre)`, box: a.screenBox, marks: [{ kind: 'box', box: a.screenBox, label: a.id }, ellipseMark(cam, W, H, col, col.id), mark] });
         }
       }
-      // in water
-      if ((a.mode === 'ground' || a.mode === 'surface') && S.inWater?.(a.x, a.y) && !S.onStone?.(a.x, a.y) && !(R.swims || SWIMMERS.has(R.kind))) {
-        this.hit(c, { rule: 'in-water', actor: a.id, metric: 1, message: `${a.id} (${R.kind}) stands in the water at ${where}; ${R.kind}s can't swim (use a stone or the bank)`, box: a.screenBox, marks: [{ kind: 'box', box: a.screenBox, label: a.id }, mark] });
+      // in water (a wade route may cross it; a rider is carried)
+      if ((a.mode === 'ground' || a.mode === 'surface') && wet && !wading && !S.onStone?.(a.x, a.y) && !(R.swims || SWIMMERS.has(R.kind))) {
+        this.hit(c, { rule: 'in-water', actor: a.id, metric: 1, message: `${a.id} (${R.kind}) stands in the water at ${where}; ${R.kind}s can't swim (use a stone, the bank or a "wade": true walk)`, box: a.screenBox, marks: [{ kind: 'box', box: a.screenBox, label: a.id }, mark] });
       }
-      // perspective scale (cast scale divided out; perched actors use their anchor's depth)
+      // perspective scale (cast scale divided out; perched actors use their anchor's depth, riders their carrier's)
       if (this.on('scale')) {
-        const an = a.mode !== 'ground' ? this.anchor(S, a.anchor) : null;
-        const want = an ? an.s : S.scaleAt(a.x, a.y), got = a.s / k;
+        const an = a.mode !== 'ground' && a.mode !== 'mount' ? this.anchor(S, a.anchor) : null;
+        const want = carrier ? carrier.s / (carrier.scale || 1) : an ? an.s : S.scaleAt(a.x, st.ground ?? a.y), got = a.s / k;
         if (want > 0 && Math.abs(got / want - 1) > LIMITS.scaleTol) {
-          this.hit(c, { rule: 'scale', actor: a.id, metric: Math.abs(got / want - 1), message: `${a.id} is drawn at ${(got / want).toFixed(2)}× the set's scale at ${an ? `"${a.anchor}" (depth ${Math.round(an.depth)})` : where}: ${got.toFixed(2)} instead of ${want.toFixed(2)}${k !== 1 ? ` (cast scale ${k} divided out)` : ''}`, box: a.screenBox, marks: [{ kind: 'box', box: a.screenBox, label: a.id }] });
+          const at = carrier ? `its carrier ${carrier.id}'s depth` : an ? `"${a.anchor}" (depth ${Math.round(an.depth)})` : where;
+          this.hit(c, { rule: 'scale', actor: a.id, metric: Math.abs(got / want - 1), message: `${a.id} is drawn at ${(got / want).toFixed(2)}× the set's scale at ${at}: ${got.toFixed(2)} instead of ${want.toFixed(2)}${k !== 1 ? ` (cast scale ${k} divided out)` : ''}`, box: a.screenBox, marks: [{ kind: 'box', box: a.screenBox, label: a.id }] });
         }
       }
     }
   }
 
   // ── collision: footprints overlapping at similar depth ──
-  footprint(a) {
+  // A rider stands at its carrier's depth (its contact point is up on the carrier's back).
+  footprint(a, states) {
     const R = a.st.R, params = a.st.st?.params || {}, b = profile(R, 'stand', params).box, w = rigSizes(R, params).width || (b[2] - b[0]);
-    const cx = a.x + (a.face < 0 ? -1 : 1) * ((b[0] + b[2]) / 2) * a.s;
-    return { cx, y: a.y, key: a.key, hl: Math.max(2, ((b[2] - b[0]) / 2) * a.s * 0.75), rd: Math.max(2, 0.15 * w * a.s) };
+    const cx = a.x + (a.face < 0 ? -1 : 1) * ((b[0] + b[2]) / 2) * a.s, base = baseOf(states, a.st);
+    return { cx, y: base === a.st ? a.y : base.y, key: base === a.st ? a.key : base.key, hl: Math.max(2, ((b[2] - b[0]) / 2) * a.s * 0.75), rd: Math.max(2, 0.15 * w * a.s) };
   }
   interacting(t, A, B) { return this.contacts.some(c => t >= c.t0 && t <= c.t1 && c.refs.has(A) && c.refs.has(B)); }
   collisions(c) {
     if (!this.on('collision')) return;
     const list = c.actors.filter(a => a.vis > 0.02 && a.alpha > 0.3 && !a.airborne && a.mode !== 'air' && a.mode !== 'hollow');
-    const fp = list.map(a => this.footprint(a));
+    const fp = list.map(a => this.footprint(a, c.states)), rides = list.map(a => ridersOf(c.states, a.id));
     for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      // a rider sits on its carrier (and on whatever that carrier rides)
+      if (rides[i].has(list[j].id) || rides[j].has(list[i].id)) continue;
       const A = fp[i], B = fp[j];
       const dx = (A.cx - B.cx) / (A.hl + B.hl), dy = Math.max(Math.abs(A.y - B.y), Math.abs(A.key - B.key)) / (A.rd + B.rd);
       const e = Math.hypot(dx, dy);
@@ -366,8 +400,13 @@ class Linter {
         this.hit(c, { rule: 'offscreen-speaker', actor: L.who, metric: 1, message: `${L.who} speaks "${text}" but ${why} (mark the line "vo": true or bring them on)`, marks: [] });
         continue;
       }
-      // what has to be seen depends on the shot size: the body in a wide shot, the head in a close-up
-      const size = c.shot.size, region = framedRegion(a, size);
+      // what has to be seen depends on the shot size: the body in a wide shot, the head in a close-up (of the part
+      // above the water when wading)
+      const size = c.shot.size, region = framedRegion(seen(a), size);
+      if (area(a.screenBox) > 0 && area(shown(a)) <= 0) {
+        this.hit(c, { rule: 'offscreen-speaker', actor: a.id, metric: 1, message: `${a.id} speaks "${text}" from under the water (mark the line "vo": true or let them surface first)`, box: a.screenBox.map(r1), marks: [{ kind: 'box', box: a.screenBox, label: a.id }] });
+        continue;
+      }
       const v = visibleFraction(this.plan, c.shot, c.t, c.info, a, a.st, c.states, { occlusion: this.occlusion, region });
       if (v.frac >= LIMITS.minVisible) continue;
       const parts = [], what = REGION_NAME[size] ? `${REGION_NAME[size]} ` : '';
@@ -425,60 +464,98 @@ class Linter {
     }
     const live = ids.map(id => c.states.get(id)).filter(s => s && s.visible && s.mode !== 'off' && s.alpha > 0.05);
     if (!live.length) return;                                          // off stage or gone: nothing to frame
-    const subs = live.map(s => c.byId.get(s.id)).filter(Boolean).map(a => ({ a, g: framedRegion(a, size) }));
+    // a push-in / pull-out that ends at another size or zoom is judged at its starting size: the fill at that zoom
+    const cs = this.srec.get(shot.id)?.def?.camera || {}, fr = shot.frames || {};
+    const resized = (shot.move === 'push-in' || shot.move === 'pull-out') && !!(cs.to || cs.toOn || cs.zoomTo) && fr.from?.zoom > 0;
+    const zk = resized ? fr.from.zoom / c.cam.zoom : 1, fill = g => ((g[3] - g[1]) / H) * zk;
+    const f = spec.f * (cs.zoom ?? 1), lo = 0.5 * f, hi = Math.min(1.35 * f, 1.15);
+    // Each subject as the camera frames it: alone, or a carrier together with its riders (one figure), whichever is
+    // nearer the size (the camera frames riders that stay on for most of the shot). g: the whole body, gv: the part
+    // above the water (what the audience sees of a wading subject).
+    const figure = a => {
+      let box = a.screenBox, vis = shown(a);
+      for (const r of ridersOf(c.states, a.id)) { const b = c.byId.get(r); if (b && b.alpha > 0.05) { box = union(box, b.screenBox); vis = union(vis, shown(b)); } }
+      return box === a.screenBox ? a : { ...a, screenBox: box, visibleBox: vis };
+    };
+    const subs = live.map(s => c.byId.get(s.id)).filter(Boolean).map(a => {
+      const fig = figure(a), near = x => Math.abs(Math.log(Math.max(1e-4, fill(framedRegion(x, size))) / f));
+      const x = fig !== a && near(fig) < near(a) ? fig : a;
+      return { a, g: framedRegion(x, size), gv: framedRegion(seen(x), size) };
+    });
     if (!subs.length) return;
-    const what = REGION_NAME[size] === 'body' ? 'body' : `${REGION_NAME[size]} region`;
-    if (!subs.some(s => frac(s.g, W, H) >= 0.5)) {
-      if (!live.some(s => s.action === 'enter' || s.action === 'exit')) {
+    const what = REGION_NAME[size] === 'body' || REGION_NAME[size].endsWith('region') ? REGION_NAME[size] : `${REGION_NAME[size]} region`;
+    if (!subs.some(s => frac(s.gv, W, H) >= 0.5)) {
+      // entering or leaving, a wade going under (in frame, below the waterline), or a move toward other subjects
+      const under = subs.some(s => frac(s.g, W, H) >= 0.5);
+      if (!under && !live.some(s => s.action === 'enter' || s.action === 'exit') && !(resized && cs.toOn)) {
         const s0 = subs[0];
-        this.hit(c, { rule: 'subject-size', variant: 'absent', actor: s0.a.id, metric: 1, message: `${size} shot on ${ids.join(' + ')}, but ${subs.length > 1 ? 'none of their' : `${s0.a.id}'s`} ${what}${subs.length > 1 ? 's is' : ' is not'} in frame`, box: s0.g, marks: [{ kind: 'box', box: s0.g, label: s0.a.id }] });
+        this.hit(c, { rule: 'subject-size', variant: 'absent', actor: s0.a.id, metric: 1, message: `${size} shot on ${ids.join(' + ')}, but ${subs.length > 1 ? 'none of their' : `${s0.a.id}'s`} ${what}${subs.length > 1 ? 's is' : ' is not'} in frame`, box: s0.gv, marks: [{ kind: 'box', box: s0.gv, label: s0.a.id }] });
       }
       return;
     }
-    // the tallest framed region sets the zoom (also for subjects still walking in from off screen)
-    const zoomK = this.srec.get(shot.id)?.def?.camera?.zoom ?? 1;
-    const f = spec.f * zoomK, lo = 0.5 * f, hi = Math.min(1.35 * f, 1.15);
-    let best = null, U = null;
-    for (const { a, g } of subs) {
-      const m = (g[3] - g[1]) / H;
-      if (!best || m > best.m) best = { a, g, m };
+    // the tallest framed region sets the zoom (also for subjects still walking in from off screen); too big is what
+    // is seen, too small is the whole body (a wade sinking out of sight is not a framing fault)
+    let best = null, U = null, V = null;
+    for (const { a, g, gv } of subs) {
+      const m = fill(g);
+      if (!best || m > best.m) best = { a, g, gv, m, mv: fill(gv) };
       U = U ? [Math.min(U[0], a.screenBox[0]), Math.max(U[1], a.screenBox[2])] : [a.screenBox[0], a.screenBox[2]];
+      V = V ? [Math.min(V[0], g[1]), Math.max(V[1], g[3])] : [g[1], g[3]];
     }
-    const big = best.m > hi;
+    const big = best.mv > hi;
     if (!big && best.m >= lo) return;
+    const hfit = spec.region === 'head' || spec.region === 'face' ? 0.94 : 0.86;
     if (!big) {
       if (live.length < ids.length) return;                            // someone not on yet: framed at their destination
       if (subs.length > 1 && (U[1] - U[0]) / W > 0.55 * spec.wmax) return;   // a two-shot fitted to the width
+      if (subs.length > 1 && ((V[1] - V[0]) / H) * zk > 0.55 * hfit) return;   // ... or to the height (one above the other)
       if (shot.move === 'track') { const v = Math.max(0, ...[...this.motion(shot).values()].map(m => m.v)); if (v > 1 && c.cam.zoom <= (1.05 * W / v) * 1.03) return; }   // fast runners framed looser on purpose
     }
-    const zmax = ZMAX * Math.max(1, Math.min(W, H) / 1080) * 0.98, fr = shot.frames || {};
+    const zmax = ZMAX * Math.max(1, Math.min(W, H) / 1080) * 0.98;
     const capped = !big && Math.max(c.cam.zoom, fr.from?.zoom ?? 0, fr.to?.zoom ?? 0) >= zmax;
+    // a cast member scaled down on purpose (cast scale < 1) that even the closest zoom can't enlarge: judged at scale 1
+    const k = best.a.scale || 1;
+    if (capped && k < 1 && best.m / k >= lo) return;
     // a subject crossing a static frame makes the camera frame the whole move
-    const mo = this.motion(shot).get(best.a.id), bodyW = (best.a.screenBox[2] - best.a.screenBox[0]) / c.cam.zoom;
-    const roams = !big && shot.move !== 'track' && mo && Math.max(mo.dx, mo.dy) > 1.5 * bodyW;
-    this.hit(c, { rule: 'subject-size', variant: big ? 'big' : 'small', actor: best.a.id, metric: big ? best.m / hi - 1 : 1 - best.m / lo,
-      message: `${size} shot: ${best.a.id}'s ${what} fills ${pct(best.m)} of the frame height (expected ${pct(lo)}–${pct(hi)})${capped ? '; the camera is already at its closest zoom, so the rig is too small for this size' : roams ? `; ${best.a.id} travels ${Math.round(Math.max(mo.dx, mo.dy))} px during the shot and the camera frames the whole move (try "move": "track")` : ''}`,
-      box: best.g, marks: [{ kind: 'box', box: best.g, label: best.a.id }] });
+    const bodyW = (best.a.screenBox[2] - best.a.screenBox[0]) / c.cam.zoom;
+    let rover = null;
+    for (const [id, mo] of this.motion(shot)) if (!rover || Math.max(mo.dx, mo.dy) > rover.d) rover = { id, d: Math.max(mo.dx, mo.dy) };
+    const roams = !big && shot.move !== 'track' && rover && rover.d > 1.5 * bodyW;
+    const m = big ? best.mv : best.m, box = big ? best.gv : best.g;
+    this.hit(c, { rule: 'subject-size', variant: big ? 'big' : 'small', actor: best.a.id, metric: big ? m / hi - 1 : 1 - m / lo,
+      message: `${size} shot: ${best.a.id}'s ${what} fills ${pct(m)} of the frame height${resized ? ` at the move's starting zoom` : ''} (expected ${pct(lo)}–${pct(hi)})${capped ? `; the camera is already at its closest zoom, so the rig is too small for this size${k !== 1 ? ` (cast scale ${k})` : ''}` : roams ? `; ${rover.id} travels ${Math.round(rover.d)} px during the shot and the camera frames the whole move (try "move": "track")` : ''}`,
+      box, marks: [{ kind: 'box', box, label: best.a.id }] });
   }
 
   // ── axis: talking pairs keep their left/right order across cuts ──
+  // The camera never mirrors the set, so a flip is always a move: fine when it happens inside a shot (a walk or a
+  // hop the audience follows), a continuity jump when it happens at a cut (a place, the next scene's blocking).
   axis(c) {
     if (!this.on('axis')) return;
     const talk = this.talkers.get(c.shot.scene); if (!talk || talk.size < 2) return;
     const g = this.group.get(c.shot.scene), ids = [...talk].sort(), W = this.W;
     for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+      const key = `${g}|${ids[i]}|${ids[j]}`;
+      let o = this.order.get(key); if (!o) this.order.set(key, (o = { seen: null, world: 0, shot: null, cut: false }));
+      // their order in the set, followed at every sample while both are on stage
+      const sa = c.states.get(ids[i]), sb = c.states.get(ids[j]);
+      if (sa && sb && sa.mode !== 'off' && sb.mode !== 'off') {
+        const w = Math.abs(sa.x - sb.x) > 2 ? Math.sign(sa.x - sb.x) : o.world;
+        if (o.world && w !== o.world && o.shot !== c.shot.id) o.cut = true;
+        o.world = w; o.shot = c.shot.id;
+      }
       const A = c.byId.get(ids[i]), B = c.byId.get(ids[j]);
       if (!A || !B || A.vis < 0.4 || B.vis < 0.4) continue;
       const dx = A.contact.screen[0] - B.contact.screen[0];
       if (Math.abs(dx) < 0.03 * W) continue;
-      const key = `${g}|${A.id}|${B.id}`, last = this.order.get(key), sign = Math.sign(dx);
-      if (last && last.shot !== c.shot.id && last.sign !== sign) {
+      const last = o.seen, sign = Math.sign(dx);
+      if (last && last.shot !== c.shot.id && last.sign !== sign && o.cut) {
         const side = s => (s < 0 ? 'left' : 'right');
         this.hit(c, { rule: 'axis', actor: A.id, other: B.id, metric: 1, frames: [last.t, c.t],
           message: `${A.id} and ${B.id} swap sides across the cut: ${A.id} was ${side(last.sign)} of ${B.id} in ${last.shot}, now ${side(sign)} in ${c.shot.id}`,
           box: A.screenBox, marks: [{ kind: 'box', box: A.screenBox, label: A.id }, { kind: 'box', box: B.screenBox, label: B.id }] });
       }
-      this.order.set(key, { sign, shot: c.shot.id, t: c.t });
+      o.seen = { sign, shot: c.shot.id, t: c.t }; o.cut = false;
     }
   }
 
@@ -511,7 +588,7 @@ class Linter {
     }
   }
 
-  // ── cut-jump: consecutive shots with nearly the same framing ──
+  // ── cut-jump: consecutive shots with nearly the same framing (and someone in it) ──
   cutJumps() {
     if (!this.on('cut-jump')) return;
     const shots = this.plan.shots || [], fps = this.fps, W = this.W, H = this.H;
@@ -521,7 +598,9 @@ class Linter {
       const ta = Math.max(A.t0, Math.round(A.t1 * fps) / fps - 1 / fps), tb = B.t0, a = A.cameraAt(ta), b = B.cameraAt(tb);
       const zr = Math.max(a.zoom / b.zoom, b.zoom / a.zoom), z = Math.min(a.zoom, b.zoom);
       const sx = Math.abs(a.cx - b.cx) * z / W, sy = Math.abs(a.cy - b.cy) * z / H;
-      if (zr < LIMITS.cutZoom && sx < LIMITS.cutShift && sy < LIMITS.cutShift) {
+      // the same empty view on both sides (a time-lapse running into a title, scenery only) is no jump: nothing moves
+      const empty = t => !frameInfo(this.plan, t).actors.some(x => x.alpha > 0.05 && frac(shown(x), W, H) > 0.02);
+      if (zr < LIMITS.cutZoom && sx < LIMITS.cutShift && sy < LIMITS.cutShift && !(empty(ta) && empty(tb))) {
         this.issue({ rule: 'cut-jump', shot: B.id, scene: B.scene, t: tb, metric: 1 / zr, frames: [ta, tb],
           message: `the cut ${A.id} → ${B.id} joins two nearly identical framings (zoom ×${zr.toFixed(2)}, shift ${pct(Math.max(sx, sy))} of the frame): change the size, the subject or the angle` });
       }

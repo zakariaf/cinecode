@@ -1,6 +1,7 @@
 // Lint: staging and editing checks. A film broken on purpose (each fault in its own shot) must trip each rule,
 // faults the compiler never produces (feet on air, standing in a rock or a stream) are injected into the plan,
-// and the test film must come out clean.
+// and the test film must come out clean. A film that rides, wades and uses scaled cast members (DESIGN §9.4) must
+// come out clean but for its one deliberate fault.
 //   node --test test/lint.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,6 +12,7 @@ import { loadFilm } from '../engine/film/load.mjs';
 import { compile } from '../engine/film/compile.mjs';
 import { frameInfo } from '../engine/film/frame.mjs';
 import { lintPlan, writeLintReport, RULES, LIMITS } from '../engine/lint/lint.mjs';
+import { ZMAX } from '../engine/film/camera.mjs';
 
 // Every fault in its own shot: a1–a2 identical framings (cut-jump), a3 a place that swaps the talkers' sides at
 // the cut (axis), a4 a line from an actor far outside a close-up (offscreen-speaker) and a vo line (fine), a5 a
@@ -197,6 +199,149 @@ test('scale, subject-size and caption-face', async () => {
   const h = frameInfo(grown, tm).actors.find(a => a.id === 'hare').head, dx = (plan.W / 2 - h[0]) / z, dy = (plan.H / 2 - h[1]) / z;
   const cf = lintPlan(perturb(plan, u0, u1, a => (a.id === 'hare' ? { ...a, s: a.s * 1.6, x: a.x + dx, y: a.y + dy, key: a.y + dy } : a)), { rules: ['caption-face'] }).warnings;
   assert.ok(cf.length >= 1 && cf[0].actor === 'hare' && cf[0].marks.some(m => m.kind === 'caption'), JSON.stringify(cf));
+});
+
+// ───────────── riding, wading, cast scale (DESIGN §9.4) ─────────────
+// R (meadow): a squirrel rides a big tortoise (cast scale 1.3) through a full shot while it talks, hops off and back
+// on, then a close-up of a tiny tortoise (cast scale 0.55) at the closest zoom and a pull-out from medium to wide.
+// W (stream): the tortoise wades across with the squirrel on its back (half under, depth 30 units) while the squirrel
+// talks, then wades back in and goes fully under, and speaks from there (the one fault, on purpose).
+// Scene overlays, marks, fx and sfx beats are sprinkled in: none of them may trip a rule.
+function rideFilm() {
+  return {
+    title: 'Riders and waders', format: { width: 1920, height: 1080, fps: 24, captions: 'dialogue' },
+    voices: { narrator: { voice: 'Sulafat' }, nut: { voice: 'Puck' }, shell: { voice: 'Algenib' } },
+    cast: { shell: { rig: 'tortoise', voice: 'shell', scale: 1.3 }, nut: { rig: 'squirrel', voice: 'nut' }, tiny: { rig: 'tortoise', scale: 0.55 } },
+    sets: { m: { kit: 'meadow' }, st: { kit: 'stream' } },
+    scenes: [
+      { id: 'R', set: 'm', time: 'morning', overlays: ['motes'],
+        actors: { shell: { at: 'x:1150,y:1060', face: 'right' }, nut: { on: 'shell', face: 'right', pose: 'sit' }, tiny: { at: 'x:1750,y:1110', face: 'left' } },
+        shots: [
+          { id: 'r1', camera: { size: 'full', on: ['shell'] }, beats: [{ say: 'nut', text: 'Onward, old shell, onward!' }, { do: 'walk', who: 'shell', to: 'x:1300,y:1060', speed: 3, with: 'prev' }, { mark: 'onward' }, { wait: 0.5 }] },
+          { id: 'r2', camera: { size: 'wide', on: ['shell', 'nut'] }, beats: [{ do: 'hop', who: 'nut', to: 'x:1500,y:1000' }, { say: 'nut', text: 'Down I go.' }, { do: 'hop', who: 'nut', to: 'on:shell' }, { wait: 0.8 }] },
+          { id: 'r3', camera: { size: 'close', on: ['tiny'] }, beats: [{ say: 'shell', text: 'Look at the little one.', vo: true }, { wait: 1 }] },
+          { id: 'r4', camera: { size: 'medium', on: ['shell'], move: 'pull-out', to: 'wide' }, beats: [{ fx: 'sparkle', at: 'shell' }, { wait: 2.5 }] },
+        ] },
+      { id: 'W', set: 'st', time: 'noon', overlays: ['fireflies'],
+        actors: { shell: { at: 'x:950,y:1100', face: 'right' }, nut: { on: 'shell', face: 'right', pose: 'sit' } },
+        shots: [
+          { id: 'w1', camera: { size: 'wide', on: ['shell'], move: 'track' }, beats: [
+            { do: 'walk', who: 'shell', to: 'x:1700,y:1100', wade: true, depth: 30, speed: 4 },
+            { say: 'nut', text: 'Keep your chin up!', at: 3 }, { fx: 'splash', at: 'shell', with: 'prev' }, { sfx: 'slosh', with: 'prev' }] },
+          { id: 'w2', camera: { size: 'wide', on: ['shell'] }, beats: [
+            { do: 'walk', who: 'shell', to: 'x:1300,y:1100', wade: true, speed: 4 }, { say: 'shell', text: 'Blub.' }, { mark: 'under' }] },
+        ] },
+    ],
+  };
+}
+let rideCached;
+async function riding() {
+  if (!rideCached) { const plan = compile(await loadFilm(rideFilm())); rideCached = { plan, result: lintPlan(plan) }; }
+  return rideCached;
+}
+// frameInfo actors (by id) at the frame nearest t, and the times of a shot's frames that satisfy pred(info, byId)
+const actorsOf = (plan, t) => new Map(frameInfo(plan, t).actors.map(a => [a.id, a]));
+function framesWhere(plan, s, pred) {
+  const out = [];
+  for (let f = Math.ceil(s.t0 * plan.fps); f < Math.floor(s.t1 * plan.fps); f += 2) { const t = f / plan.fps; if (pred(actorsOf(plan, t), t)) out.push(t); }
+  return out;
+}
+
+test('riding, wading, cast scale, overlays and marks: the only issue is the line spoken from under the water', async () => {
+  const { plan, result } = await riding();
+  assert.deepEqual(Object.keys(plan.marks).sort(), ['onward', 'under']);
+  const all = issues(result);
+  assert.equal(all.length, 1, all.map(i => `${i.rule} ${i.shot} ${i.message}`).join('\n'));
+  const [i] = all;
+  assert.equal(i.rule, 'offscreen-speaker'); assert.equal(i.severity, 'error'); assert.equal(i.shot, 'w2'); assert.equal(i.actor, 'shell');
+  assert.match(i.message, /from under the water/);
+});
+
+test('a rider is on its carrier: not floating, not colliding, in scale at the carrier\'s depth', async () => {
+  const { plan } = await riding();
+  const r1 = shotOf(plan, 'r1'), [t0, t1] = mid(r1), tm = (t0 + t1) / 2, A = actorsOf(plan, tm), nut = A.get('nut'), S = r1.set;
+  assert.equal(nut.contact.kind, 'mount'); assert.equal(nut.carrier, 'shell');
+  // the riding point is far above the ground: the perspective there is not the rider's
+  assert.ok(Math.abs(S.scaleAt(nut.x, nut.y) / nut.s - 1) > LIMITS.scaleTol, 'the riding point sits well above the ground line');
+  // its footprint overlaps its carrier's: standing there on the ground instead is a collision
+  const grounded = perturb(plan, t0, t1, a => (a.id === 'nut' ? { ...a, mode: 'ground', carrier: null, y: A.get('shell').y, key: A.get('shell').y, ground: null } : a));
+  const col = lintPlan(grounded, { rules: ['collision'] }).errors;
+  assert.ok(col.some(x => x.shot === 'r1' && x.actor === 'nut' && x.other === 'shell'), JSON.stringify(col));
+  // a carrier that is not there leaves the rider floating
+  const gone = Object.create(plan); gone.actorsAt = t => plan.actorsAt(t).filter(a => !(a.id === 'shell' && t >= t0 && t < t1));
+  const fl = lintPlan(gone, { rules: ['floating'] }).errors;
+  assert.ok(fl.length >= 1 && fl.every(x => x.actor === 'nut' && x.shot === 'r1') && /rides shell .* but it is not there/.test(fl[0].message), JSON.stringify(fl));
+  // a rider drawn too big is measured against its carrier's depth
+  const big = lintPlan(perturb(plan, t0, t1, a => (a.id === 'nut' ? { ...a, s: a.s * 1.4 } : a)), { rules: ['scale'] }).warnings;
+  assert.ok(big.some(x => x.actor === 'nut' && /1\.40× the set's scale at its carrier shell's depth/.test(x.message)), JSON.stringify(big));
+});
+
+test('a wading actor may stand in the water and is judged by what shows above it', async () => {
+  const { plan } = await riding();
+  const w1 = shotOf(plan, 'w1'), S = w1.set;
+  const wet = framesWhere(plan, w1, A => { const s = A.get('shell'); return S.inWater(s.x, s.y) && s.sink > 20; });
+  assert.ok(wet.length > 10, 'the tortoise is well into the stream for a while');
+  const A = actorsOf(plan, wet[wet.length >> 1]), shell = A.get('shell'), nut = A.get('nut');
+  assert.ok(shell.wade && shell.visibleBox[3] < shell.screenBox[3] - 10, 'part of the tortoise is hidden under the water');
+  assert.equal(nut.waterline, shell.waterline, 'the rider shares its carrier\'s waterline');
+  const L = plan.lines.find(l => l.who === 'nut' && l.text.startsWith('Keep'));
+  assert.ok(wet.some(t => t >= L.t0 && t < L.t1), 'the rider talks while its carrier wades');
+  // the same frames without the wade are a tortoise standing in the stream
+  const [a, b] = [wet[0], wet[wet.length - 1] + 1e-3];
+  const dry = lintPlan(perturb(plan, a, b, x => (x.id === 'shell' ? { ...x, wade: false } : x)), { rules: ['in-water'] }).errors;
+  assert.ok(dry.length >= 1 && dry.every(x => x.actor === 'shell' && x.shot === 'w1'), JSON.stringify(dry));
+});
+
+test('a cast member scaled down that the closest zoom cannot fill is judged at scale 1; a zoom move to another size at its start', async () => {
+  const { plan } = await riding();
+  const r3 = shotOf(plan, 'r3'), [t0, t1] = mid(r3);
+  assert.ok(r3.cameraAt((t0 + t1) / 2).zoom >= ZMAX * 0.98, 'the close-up of the tiny tortoise is at the closest zoom');
+  assert.equal(lintPlan(plan, { rules: ['subject-size'] }).warnings.length, 0);
+  // half as big again is too small even at scale 1
+  const small = lintPlan(perturb(plan, t0, t1, a => (a.id === 'tiny' ? { ...a, s: a.s * 0.5 } : a)), { rules: ['subject-size'] }).warnings;
+  assert.ok(small.some(x => x.shot === 'r3' && x.actor === 'tiny' && /closest zoom.*cast scale 0\.55/.test(x.message)), JSON.stringify(small));
+  // r4 ends at a wide framing: the medium-shot size would be far too small there
+  const r4 = shotOf(plan, 'r4'), end = actorsOf(plan, r4.t1 - 2 / plan.fps).get('shell');
+  assert.ok((end.screenBox[3] - end.screenBox[1]) / plan.H < 0.5 * 0.75, 'the pull-out really ends wide');
+});
+
+// Two talkers on different depth lines. The hare walks up to the fox (x2) and on past it right after the cut (x3): the
+// sides swap during a shot, in view, while their screen positions are too close to call, so it is no axis flip.
+// Placing the hare on the right at the cut instead is.
+function crossFilm(placeAtCut) {
+  return {
+    title: 'Crossing', format: { width: 640, height: 360, fps: 24, captions: 'none' },
+    voices: { hare: { voice: 'Puck' }, fox: { voice: 'Algieba' } },
+    cast: { hare: { rig: 'hare', voice: 'hare' }, fox: { rig: 'fox', voice: 'fox' } },
+    sets: { m: { kit: 'meadow' } },
+    scenes: [{ id: 'X', set: 'm', time: 'morning', actors: { hare: { at: 'x:1000,y:1000', face: 'right' }, fox: { at: 'x:1300,y:1120', face: 'left' } },
+      shots: [
+        { id: 'x1', camera: { size: 'wide', on: ['hare', 'fox'] }, beats: [{ say: 'hare', text: 'I am on the left.' }, { say: 'fox', text: 'So you are.' }] },
+        { id: 'x2', camera: { size: 'establishing' }, beats: [placeAtCut ? { wait: 2 } : { do: 'walk', who: 'hare', to: 'x:1295,y:1000' }] },
+        { id: 'x3', camera: { size: 'full', on: ['hare', 'fox'] }, beats: [{ do: placeAtCut ? 'place' : 'walk', who: 'hare', to: 'x:1600,y:1000', at: 0 }, { say: 'hare', text: 'Now I am on the right.' }] },
+      ] }],
+  };
+}
+
+test('a talker seen walking past the other is no axis flip; one placed there at the cut is', async () => {
+  const walked = lintPlan(compile(await loadFilm(crossFilm(false))), { rules: ['axis'] }).warnings;
+  assert.deepEqual(walked, []);
+  const placed = lintPlan(compile(await loadFilm(crossFilm(true))), { rules: ['axis'] }).warnings;
+  assert.equal(placed.length, 1, JSON.stringify(placed));
+  assert.equal(placed[0].shot, 'x3'); assert.match(placed[0].message, /fox was right of hare in x2, now left in x3/);
+});
+
+test('the same empty view on both sides of a cut (a time-lapse into a title) is no cut-jump', async () => {
+  const film = withFox => ({
+    title: 'Views', format: { width: 640, height: 360, fps: 24, captions: 'none' },
+    cast: { fox: { rig: 'fox' } }, sets: { m: { kit: 'meadow' } },
+    scenes: [{ id: 'V', set: 'm', time: 'morning', actors: withFox ? { fox: { at: 'x:1400,y:1060' } } : {},
+      shots: [{ id: 'v1', camera: { size: 'establishing' }, time: { from: 'night', to: 'morning' }, beats: [{ wait: 2 }] },
+        { id: 'v2', camera: { size: 'establishing' }, beats: [{ title: 'VIEWS', at: 0.2, dur: 1.5 }], dur: 2 }] }],
+  });
+  assert.deepEqual(lintPlan(compile(await loadFilm(film(false))), { rules: ['cut-jump'] }).warnings, []);
+  const seen = lintPlan(compile(await loadFilm(film(true))), { rules: ['cut-jump'] }).warnings;
+  assert.equal(seen.length, 1); assert.equal(seen[0].shot, 'v2');
 });
 
 test('lint is deterministic', async () => {

@@ -3,6 +3,11 @@
 // face) so that the union of those regions fills a set fraction of the frame height, with lead room in the
 // direction the subjects face and size-dependent headroom. Moves interpolate between framings; every camera is
 // clamped by the set so the frame never shows unpainted edges.
+// Round 2 (DESIGN §9.1): a push-in / pull-out may end at another size ("to") on other subjects ("toOn"), or at
+// "zoomTo" × the starting zoom; "moveAt" / "moveDur" confine any move to a window of the shot (eased, holding
+// before and after). Zoom moves keep their subject gliding in a straight line on screen while the zoom changes
+// geometrically. "offset" is frame fractions (|v| ≤ 2) or, larger, a world-pixel shift of the framing.
+// Close shots compose a subject's resting head (sub.rest), not the apex of a jump or gesture.
 import { noise1 } from '../core/lib.mjs';
 import { clamp, lerp, ease, easeIO } from './util.mjs';
 
@@ -36,9 +41,11 @@ const union = (A, B) => (A ? [Math.min(A[0], B[0]), Math.min(A[1], B[1]), Math.m
  */
 export function frameSubjects(subs, size, { W, H, angle = 'eye', zoomK = 1, offset = null, S = null, faceHint = 0, refH = null } = {}) {
   const spec = SIZE_SPEC[size] || SIZE_SPEC.wide;
+  const px = offset && (Math.abs(offset[0]) > 2 || Math.abs(offset[1]) > 2) ? offset : null, frac = px ? null : offset;
   if (!subs.length || size === 'establishing') {
     let cx = S ? S.refX : 0, cy = S ? S.refY : 0;
     if (subs.length) { let R = null; for (const s of subs) R = union(R, s.box); cx = (R[0] + R[2]) / 2; cy = lerp(cy, (R[1] + R[3]) / 2, 0.35); }
+    if (px) { cx += px[0]; cy += px[1]; }
     const widest = S ? S.clampCamera({ cx, cy, zoom: 0.01 }, W, H).zoom : 1;
     return { cx, cy, zoom: widest * zoomK, ref: [cx, cy], scr: [W / 2, H / 2], establishing: true };
   }
@@ -67,8 +74,8 @@ export function frameSubjects(subs, size, { W, H, angle = 'eye', zoomK = 1, offs
   else { wy = (R[1] + R[3]) / 2; sy = spec.centerY * H; }
   if (angle === 'low') { sy += 0.07 * H; zoom *= 1.04; }
   if (angle === 'high') { sy -= 0.07 * H; }
-  if (offset) { sx += offset[0] * W; sy += offset[1] * H; }
-  return at({ ref: [rcx, wy], scr: [sx, sy] }, zoom, W, H);
+  if (frac) { sx += frac[0] * W; sy += frac[1] * H; }
+  return at({ ref: [rcx + (px ? px[0] : 0), wy + (px ? px[1] : 0)], scr: [sx, sy] }, zoom, W, H);
 }
 // Re-solve a composition at another zoom.
 export function at(F, zoom, W, H) {
@@ -87,6 +94,15 @@ export function clampFrame(S, c, W, H) {
   return { cx: out.cx, cy: out.cy, zoom: out.zoom };
 }
 const lerpCam = (a, b, u) => ({ cx: lerp(a.cx, b.cx, u), cy: lerp(a.cy, b.cy, u), zoom: a.zoom * Math.pow(b.zoom / a.zoom, u) });
+// A move between two cameras that keeps the world point P on a straight screen path while the zoom changes
+// geometrically (a plain lerp of the centre lets the subject swing out of frame during a big zoom).
+function anchored(a, b, P, W, H) {
+  const sa = [(P[0] - a.cx) * a.zoom + W / 2, (P[1] - a.cy) * a.zoom + H / 2], sb = [(P[0] - b.cx) * b.zoom + W / 2, (P[1] - b.cy) * b.zoom + H / 2];
+  return u => {
+    const z = a.zoom * Math.pow(b.zoom / a.zoom, u);
+    return { cx: P[0] - (lerp(sa[0], sb[0], u) - W / 2) / z, cy: P[1] - (lerp(sa[1], sb[1], u) - H / 2) / z, zoom: z };
+  };
+}
 
 // Gaussian-smoothed track through sampled framings.
 function smoothTrack(samples, sigma) {
@@ -113,11 +129,14 @@ export function buildCamera({ spec = {}, size, ids, subjectsAt, t0, t1, S, W, H,
   const dur = Math.max(1e-3, t1 - t0);
   const N = Math.max(3, Math.min(72, Math.ceil(dur * 8) + 1));
   const times = Array.from({ length: N }, (_, i) => t0 + (dur * i) / (N - 1) - (i === N - 1 ? 1e-4 : 0));
+  // one subject over the shot: the union of its boxes, and its typical resting head (median over the samples, so a
+  // jump or a gesture's apex doesn't pull a close shot up)
   const unionSub = subs => {
     if (!subs.length) return [];
-    let box = null, head = [0, 0], hh = 0, face = 0;
-    for (const s of subs) { box = union(box, s.box); head = [head[0] + s.head[0], head[1] + s.head[1]]; hh = Math.max(hh, s.hh); face += s.face; }
-    return { box, head: [head[0] / subs.length, Math.min(...subs.map(s => s.head[1]))], hh, face: Math.sign(face) };
+    let box = null, hx = 0, hh = 0, face = 0;
+    for (const s of subs) { box = union(box, s.box); hx += s.head[0]; hh = Math.max(hh, s.hh); face += s.face; }
+    const ys = subs.map(s => (s.rest || s.head)[1]).sort((a, b) => a - b);
+    return { box, head: [hx / subs.length, ys[ys.length >> 1]], hh, face: Math.sign(face) };
   };
   // the union over time keeps each subject separate (regions per subject), so collect per id
   const perId = list => {
@@ -126,17 +145,21 @@ export function buildCamera({ spec = {}, size, ids, subjectsAt, t0, t1, S, W, H,
     return [...by.values()].map(unionSub);
   };
   // the subjects' typical framed height over the shot (median over samples of the tallest region)
-  const refH = list => {
+  const refH = (list, sz = size) => {
     const hs = [];
-    for (const t of times) { let h = 0; for (const s of subjectsAt(t, list)) { const g = regionOf(s, size); h = Math.max(h, g[3] - g[1]); } if (h > 0) hs.push(h); }
+    for (const t of times) { let h = 0; for (const s of subjectsAt(t, list)) { const g = regionOf(s, sz); h = Math.max(h, g[3] - g[1]); } if (h > 0) hs.push(h); }
     hs.sort((a, b) => a - b); return hs.length ? hs[hs.length >> 1] : null;
   };
+  // the move's window: moveAt / moveDur (s from the shot start), else the whole shot
+  const windowed = spec.moveAt !== undefined || spec.moveDur !== undefined;
+  const mAt = clamp(spec.moveAt ?? 0, 0, dur), mDur = Math.max(1e-3, spec.moveDur ?? dur - mAt);
+  const mu = t => easeIO((t - t0 - mAt) / mDur);
   let cameraAt, frames = {};
-  const F = list => frameSubjects(perId(list), size, { ...opts, refH: refH(list) });
+  const F = (list, sz = size) => frameSubjects(perId(list), sz, { ...opts, refH: refH(list, sz) });
   if (move === 'pan' && ids.length >= 2) {
     const A = clampCam(F([ids[0]])), B = clampCam(F([ids[ids.length - 1]]));
     frames = { from: A, to: B };
-    cameraAt = t => clampCam(lerpCam(A, B, easeIO(((t - t0) / dur - 0.12) / 0.76)));
+    cameraAt = windowed ? t => clampCam(lerpCam(A, B, mu(t))) : t => clampCam(lerpCam(A, B, easeIO(((t - t0) / dur - 0.12) / 0.76)));
   } else if (move === 'track') {
     // follow the subjects at a constant zoom: sample every frame, smooth, then keep them inside the frame
     const NT = Math.max(3, Math.min(480, Math.ceil(dur * 24) + 1));
@@ -168,20 +191,27 @@ export function buildCamera({ spec = {}, size, ids, subjectsAt, t0, t1, S, W, H,
       return clampCam(lerpCam(fin[i], fin[i + 1], w));
     };
   } else {
-    const base = F(ids);
-    let A = base, B = base;
-    if (move === 'push-in') { A = at(base, base.zoom / 1.3, W, H); }
+    const base = F(ids), zoomMove = move === 'push-in' || move === 'pull-out';
+    const toIds = spec.toOn ? (typeof spec.toOn === 'string' ? [spec.toOn] : spec.toOn) : null;
+    let A = base, B = base, P = base.ref;
+    if (zoomMove && (spec.to || toIds)) {
+      // from this size's framing to another size's framing (of other subjects): the subject being left (pull-out)
+      // or approached (push-in) glides straight on screen
+      B = F(toIds || ids, spec.to || size);
+      P = move === 'pull-out' ? base.ref : B.ref;
+    } else if (zoomMove && spec.zoomTo) B = at(base, base.zoom * spec.zoomTo, W, H);
+    else if (move === 'push-in') { A = at(base, base.zoom / 1.3, W, H); }
     else if (move === 'pull-out') { B = at(base, base.zoom / 1.3, W, H); }
     else if (move === 'tilt-up' || move === 'tilt-down') {
       const vh = H / base.zoom, d = (move === 'tilt-up' ? 1 : -1) * 0.32 * vh;
       A = { ...base, cy: base.cy + d };
     }
-    if (base.establishing && (move === 'push-in' || move === 'pull-out')) {
+    if (base.establishing && zoomMove && !spec.to && !toIds && !spec.zoomTo) {
       // establishing frames already show the widest view: push from it to 1.3× it (or pull back out to it)
       const tight = at(base, base.zoom * 1.3, W, H);
       if (move === 'push-in') { A = base; B = tight; } else { A = tight; B = base; }
     }
-    const Ac = clampCam(A), Bc = clampCam(B);
+    const Ac = clampCam(A), Bc = clampCam(B), path = anchored(Ac, Bc, P, W, H);
     frames = { from: Ac, to: Bc };
     if (move === 'handheld') {
       const nx = noise1(seed % 9973 + 11), ny = noise1(seed % 9973 + 23), nz = noise1(seed % 9973 + 37);
@@ -193,7 +223,7 @@ export function buildCamera({ spec = {}, size, ids, subjectsAt, t0, t1, S, W, H,
         return clampCam(c);
       };
     } else if (move === 'static') cameraAt = () => Bc;
-    else cameraAt = t => clampCam(lerpCam(Ac, Bc, easeIO((t - t0) / dur)));
+    else cameraAt = t => clampCam(path(windowed ? mu(t) : easeIO((t - t0) / dur)));
   }
   return { cameraAt, size, move, angle, frames };
 }

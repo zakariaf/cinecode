@@ -1,8 +1,9 @@
 // The Frog. The legacy pond frog as a full rig: sits crouched on folded hind legs, hops (small hops to walk, big
 // hops to run) with feet planted until push-off, croaks with a throat sac, flicks its tongue, talks with a wide jaw.
+// Round 2 (DESIGN §9.2): st.tilt tips the front of the body up or down; the pupils follow (+1 up, -1 down).
 import { clamp, lerp, ell, rpoly } from '../core/lib.mjs';
 import { cel, darken, lighten, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
-import { makeRig, quadFeet, leg, mixPose, plus, jumpAt, ease, frac } from './rig.mjs';
+import { makeRig, quadFeet, leg, mixPose, plus, jumpAt, ease, frac, pitchPose, gaze } from './rig.mjs';
 
 const rot = (v, a) => [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a)];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
@@ -46,7 +47,8 @@ function hopper(stride, h, duty) {
 }
 const walk = hopper(G.walk.stride, 5, 0.55), run = hopper(G.run.stride, 14, 0.4);
 
-function paint(T, p, F, o) {
+function paint(T, p0, F, o) {
+  const p = pitchPose(p0, F.pitch, { br: -0.13, hr: -0.12 }, { br: 0.07, hr: 0.1 });   // st.tilt: the front of the body tips up or down
   const { P, t } = o, R = roots(p), op = clamp(F.open), sm = F.smile;
   leg(T, R.H2, [p.h2x, p.h2y], { l1: 6.4, l2: 6.6, meta: 7, ma: p.ha, bend: 1, w: [3, 1.8, 1.3, 1.1], col: darken(P.skin, 0.8), paw: [1.6, 0.6], pawCol: darken(P.skin, 0.75), sh: SH, seed: 290, curl: 0, ink: 0.75 });
   leg(T, R.S2, [p.f2x, p.f2y], { l1: 3, l2: 3, meta: 0.8, ma: p.fa, bend: -1, w: [1.5, 1.1, 0.9, 0.9], col: darken(P.skin, 0.8), paw: [1.3, 0.55], pawCol: darken(P.skin, 0.75), sh: SH, seed: 292, curl: p.f2u, ink: 0.7 });
@@ -72,7 +74,7 @@ function paint(T, p, F, o) {
   // eye bump on top
   T.save(); T.translate(4.2, -6.2); T.rotate(p.hr - F.look * 0.06);
   cel(T, ell(0, 0, 3.6, 3.2, 294, 0.1), P.skin, SH, 0.9, 294);
-  eye(T, 0.5, -0.3, 1.7, 1.7, F.eye, '#14140c', F.look * 0.5, Math.max(F.lid, 0.06), F.tilt, { sclera: P.eye, pupil: F.eye === 'wide' ? 0.42 : 0.55, w: 0.7 });
+  eye(T, 0.5, -0.3, 1.7, 1.7, F.eye, '#14140c', gaze(F, 0.5, 1.7), Math.max(F.lid, 0.06), F.tilt, { sclera: P.eye, pupil: F.eye === 'wide' ? 0.42 : 0.55, w: 0.7 });
   brow(T, 0.4, -3.2, 4, F.browY * 0.5, F.browT * 0.8, darken(P.skin, 0.55), 0.75, 291);
   T.restore();
   o.out.head = T.map(5, -3); o.out.mouth = T.map(7, -0.4 + op * 1.6);

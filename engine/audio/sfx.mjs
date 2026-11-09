@@ -1,6 +1,8 @@
 // Procedural sound effects and ambience beds for a storybook film.
 // Everything is synthesized from seeded noise, oscillators and resonators: physical-ish models
-// (Minnaert bubbles, modal plates, stick-slip friction, pulse-train calls) rather than samples.
+// (Minnaert bubbles, modal plates, stick-slip friction, pulse-train calls) rather than samples. Human sounds (hum, gasp,
+// sniff, snore, breath) are a glottal source by additive synthesis (per-cycle jitter and shimmer) and aspiration noise
+// through vocal-tract formants; SFX_NAMES / SFX_ALIASES list every name a storyboard may use (DESIGN §9.3).
 // makeSfx(name, { seed, dur, ...params }) → Float32Array (mono, 48 kHz, level-calibrated)
 // ambience(name, dur, { seed }) → { L, R } (stereo bed, non-repeating, calibrated loudness)
 import { rng, noise1, clamp } from '../core/lib.mjs';
@@ -408,7 +410,7 @@ function thud(r, p) { // something heavy meets soft ground: a dull, darkening bo
   return x;
 }
 function rustle(r, p) { // leaves and twigs moving: papery ticks following a few pushes of motion
-  const dur = p.dur ?? between(r, 0.7, 1.1), x = buf(dur + 0.08), k = 2 + Math.floor(r() * 3), bumps = [];
+  const dur = Math.max(0.05, p.dur ?? between(r, 0.7, 1.1)), x = buf(dur + 0.08), k = 2 + Math.floor(r() * 3), bumps = [];
   for (let i = 0; i < k; i++) bumps.push(p.soft ? [between(r, 0, 0.3) * dur, between(r, 0.15, 0.4) * dur, between(r, 0.5, 1)] : [between(r, 0.1, 0.8) * dur, between(r, 0.08, 0.25) * dur, between(r, 0.5, 1)]);
   const M = t => Math.min(1.2, bumps.reduce((s, [c, wd, a]) => s + a * Math.exp(-(((t - c) / wd) ** 2)), 0)) * ramp(t, 0, 0.03) * (1 - ramp(t, dur - 0.05, dur));
   const nz = white(r), sw = svf().set(3200, 0.6), sw2 = svf().set(900, 0.8);
@@ -478,6 +480,56 @@ function waterInto(x, r, { busy = 1, seed = 1 } = {}) {
   scatter(r, 0, T, () => 3 * busy, t => bubble(x, t, expRand(r, 150, 330), 0.06 + 0.06 * r(), between(r, 0.4, 0.8), 1.5));
 }
 function stream(r, p) { const x = buf(p.dur ?? 4); waterInto(x, r, { busy: p.busy ?? 1, seed: Math.floor(r() * 1e6) }); return x; }
+/**
+ * Wading: water pushed around a body in surges. Each surge is a swell of wash whose resonance sweeps down as the wave
+ * breaks, a cluster of gulping bubbles and a spatter of droplets. params.dur, size 0..1.
+ */
+function slosh(r, p) {
+  const dur = p.dur ?? 2.2, size = clamp(p.size ?? 0.6), x = buf(dur + 0.7), k = Math.max(2, Math.round(dur / 0.5)), nz = white(r);
+  const surges = Array.from({ length: k }, (_, i) => ({ t: (i / k) * dur + between(r, 0, 0.12), len: between(r, 0.45, 0.7) * (0.8 + 0.4 * size), a: between(r, 0.6, 1) }));
+  const lo = svf(), mid = svf(), hi = svf().set(2600, 0.7);
+  const E = t => surges.reduce((s, g) => s + g.a * strike(t - g.t, g.len * 0.3, g.len * 0.4), 0);
+  for (let i = 0; i < x.length; i++) {
+    const t = i / SR;
+    if ((i & 15) === 0) { // each surge's resonance falls as its wave breaks
+      const g = surges.reduce((b, s) => (t >= s.t && (!b || s.t > b.t) ? s : b), null), u = g ? clamp((t - g.t) / g.len) : 1;
+      lo.set(lerp(700, 260, u) * (1.2 - 0.4 * size), 2.2); mid.set(lerp(1600, 700, u), 1.4);
+    }
+    const n = nz(); lo.tick(n); mid.tick(n); hi.tick(n);
+    const e = E(t); x[i] += e * (lo.bp * 0.24 + mid.bp * 0.07) + e * e * hi.bp * 0.01;
+  }
+  for (const g of surges) {
+    for (let j = 0, nb = Math.round(10 + 14 * size); j < nb; j++) { const t = g.t + between(r, 0.05, 0.8) * g.len; bubble(x, t, expRand(r, 180, 900), (0.04 + 0.1 * r() ** 2) * g.a, between(r, 0.05, 0.25), 1.3); }
+    crackles(x, r, t => 600 * g.a * strike(t - g.t - g.len * 0.25, 0.04, g.len * 0.3), () => 0.2 * g.a, { f: [900, 4000], q: [0.8, 2], d: [0.0005, 0.0025], pw: 2, t0: g.t, t1: Math.min(dur + 0.6, g.t + g.len * 1.4) });
+  }
+  return filt(x, 'lp', 6000, 0.7);
+}
+/** Air escaping under water and breaking the surface: a big first gulp, then glugs that thin out. params.dur, size. */
+function bubbles(r, p) {
+  const dur = p.dur ?? 1.8, size = clamp(p.size ?? 0.6), x = buf(dur + 0.5), lo = 1.4 - 0.7 * size;
+  bubble(x, 0.02, between(r, 170, 230) * lo, 0.9, between(r, 0.15, 0.25), 1.6);
+  bubble(x, 0.07 + 0.03 * r(), between(r, 260, 340) * lo, 0.5, between(r, 0.15, 0.3), 1.4);
+  let t = 0.18;
+  while (t < dur) {
+    const u = t / dur, f0 = expRand(r, 240, 650) * lo, a = (0.25 + 0.55 * r() ** 1.5) * (1 - 0.6 * u);
+    bubble(x, t, f0, a, between(r, 0.12, 0.35), 1.3);
+    if (r() < 0.5) grain(x, t + 0.012, 0.0008, between(r, 2500, 4500), 1, 0.06 * a, r); // the film breaking at the surface
+    t += expRand(r, 0.05, 0.22) * (0.7 + 1.6 * u);
+  }
+  return filt(x, 'lp', 6000, 0.7);
+}
+/** Drops falling from a wet thing: each a tiny impact and a fast-rising "plink" bubble. params.count, dur. */
+function drip(r, p) {
+  const n = p.count ?? 3 + Math.floor(r() * 3), dur = p.dur ?? 2.4, x = buf(dur + 0.3);
+  const ts = Array.from({ length: n }, (_, i) => (i === 0 ? 0.01 : between(r, 0.1, dur - 0.1))).sort((a, b) => a - b);
+  for (const t of ts) {
+    const a = between(r, 0.5, 1), f0 = expRand(r, 1100, 2600);
+    grain(x, t, 0.0006, between(r, 3000, 6000), 1, 0.08 * a, r);
+    bubble(x, t + 0.002, f0, 0.5 * a, between(r, 0.25, 0.45), 1.4);
+    if (r() < 0.3) bubble(x, t + between(r, 0.03, 0.06), f0 * between(r, 1.3, 1.8), 0.15 * a, 0.3);
+  }
+  return x;
+}
 
 // ───────────────────────────── wind, fire ─────────────────────────────
 
@@ -505,6 +557,13 @@ function windInto(x, r, gust, { strength = 0.5, leafy = 0.3, whistle = 0.2, seed
 function wind(r, p) {
   const x = buf(p.dur ?? 4), seed = Math.floor(r() * 1e6), g1 = wander(seed, 0.18), g2 = wander(seed + 1, 1.3);
   windInto(x, r, t => 0.4 + (g1(t) - 0.5) * 1.1 + (g2(t) - 0.5) * 0.45, { strength: p.strength ?? 0.6, leafy: p.leafy ?? 0, whistle: p.whistle ?? 0.35, seed });
+  return filt(x, 'lp', 8000, 0.6);
+}
+/** A rising gust over params.dur, at its strongest at the end (it can be cut there); params.release fades it after. */
+function windSwell(r, p) {
+  const dur = Math.max(0.05, p.dur ?? 2.5), rel = p.release ?? 0.08, x = buf(dur + rel), seed = Math.floor(r() * 1e6), fl = wander(seed + 1, 2.4);
+  windInto(x, r, t => { const u = clamp(t / dur); return 0.04 + 0.96 * u ** 1.6 + (fl(t) - 0.5) * 0.18 * u; }, { strength: p.strength ?? 0.75, leafy: p.leafy ?? 0.2, whistle: p.whistle ?? 0.45, seed });
+  for (let i = 0; i < x.length; i++) { const t = i / SR; x[i] *= ramp(t, 0, 0.4) * (t > dur ? Math.cos((Math.PI / 2) * clamp((t - dur) / rel)) ** 2 : 1); }
   return filt(x, 'lp', 8000, 0.6);
 }
 function fire(r, p) { // a soft breathy roar and hiss under clusters of sharp crackles and the odd pop
@@ -610,6 +669,43 @@ function sparkle(r, p) {
   for (let i = 0; i < x.length; i++) { hs.tick(nz()); x[i] += hs.bp * 0.012 * hann(i / SR / (span + 0.6)); }
   const wet = reverb(x, x, { room: 0.7, damp: 0.35 });
   for (let i = 0; i < x.length; i++) x[i] += (wet.L[i] + wet.R[i]) * 0.5;
+  return x;
+}
+/**
+ * A wind-up music box: pins on a turning cylinder pluck steel comb tines (cantilever modes 1 : 6.27 : 17.55, the upper ones
+ * short-lived), with the pluck's tick, a faint governor whirr and a little box resonance. params.notes ("G4:1 …"),
+ * tempo (bpm), octave (default 1: up an octave, the comb's usual register), slow 0..1 (the spring runs down: the tempo
+ * falls to 1 − slow by the last note, the governor slows with it).
+ */
+function musicBox(r, p) {
+  const notes = parseNotes(p.notes ?? 'G4:1 E4:0.5 G4:0.5 A4:2'), beat = 60 / (p.tempo ?? 96), slow = clamp(p.slow ?? 0), oct = p.octave ?? 1;
+  // the tempo runs down towards the last pluck: speed 1 at the first note, 1 − slow at the last
+  const total = Math.max(1e-6, notes.slice(0, -1).reduce((s, n) => s + n.beats, 0)), speed = u => 1 - slow * clamp(u) ** 1.5, hits = [];
+  let b = 0, t = 0.02;
+  for (const nt of notes) {
+    if (nt.midi !== null) hits.push({ t, f: mtof(nt.midi + 12 * oct), a: between(r, 0.8, 1) * (1 - 0.25 * slow * clamp(b / total) ** 2) });
+    for (let s = 0; s < 16; s++) { t += (beat * nt.beats) / 16 / speed((b + (nt.beats * (s + 0.5)) / 16) / total); }
+    b += nt.beats;
+  }
+  const last = hits.length ? hits[hits.length - 1].t : 0, x = buf(last + 2.6);
+  for (const h of hits) {
+    const dec = 2.2 * Math.pow(523 / h.f, 0.5), j = 1 + (r() - 0.5) * 0.002;
+    partials(x, h.t, [[h.f * j, h.a, dec, r() * TAU], [h.f * j * 1.0012 + 0.4, h.a * 0.12, dec * 0.9, r() * TAU], [h.f * 2 * j, h.a * 0.05, dec * 0.25],
+      [h.f * 6.267 * j, h.a * 0.3, dec * 0.11], [h.f * 17.55 * j, h.a * 0.08, dec * 0.035]], 0.0003);
+    grain(x, h.t - 0.0015, 0.0012, between(r, 4500, 7000), 1.2, 0.12 * h.a, r); // the pin lets the tine go
+  }
+  // the governor fan whirring, slowing as the spring runs down
+  const nz = white(r), wh = svf().set(1800, 1.2), end = last + 0.6;
+  let ph = 0;
+  for (let i = 0; i < x.length; i++) {
+    const tt = i / SR; if (tt > end + 0.3) break;
+    ph += (TAU * 26 * speed(clamp(tt / Math.max(0.1, end)))) / SR; wh.tick(nz());
+    x[i] += wh.bp * 0.006 * (0.6 + 0.4 * Math.sin(ph)) * ramp(tt, 0, 0.05) * (1 - ramp(tt, end, end + 0.3));
+  }
+  const body = resonate(x, [[between(r, 420, 520), 0.02, 0.6], [between(r, 1100, 1300), 0.012, 0.4]]);
+  for (let i = 0; i < x.length; i++) x[i] += body[i] * 0.5;
+  const wet = reverb(x, x, { room: 0.35, damp: 0.5 });
+  for (let i = 0; i < x.length; i++) x[i] += (wet.L[i] + wet.R[i]) * 0.15;
   return x;
 }
 
@@ -808,6 +904,260 @@ function frog(r, p) {
   return y;
 }
 
+// ───────────────────────────── voices: hum, gasp, sniff, snore, breath ─────────────────────────────
+
+const NOTE_PC = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
+/** "G4:1 E4:0.5 r:1" (string or token array) → [{ midi | null for a rest, beats }]. */
+export function parseNotes(s) {
+  const toks = Array.isArray(s) ? s : String(s ?? '').trim().split(/\s+/).filter(Boolean);
+  return toks.map(tok => {
+    const [n, b = '1'] = String(tok).split(':'), beats = +b, m = /^([A-Ga-g])([#♯b♭]?)(-?\d)$/.exec(n);
+    if (!(beats > 0) || (!m && !/^(r|rest|-)$/i.test(n))) throw new Error(`bad note "${tok}" (expected e.g. G4:1, F#3:0.5 or r:1)`);
+    return { midi: m ? 12 * (+m[3] + 1) + NOTE_PC[m[1].toLowerCase()] + ('#♯'.includes(m[2]) && m[2] ? 1 : m[2] ? -1 : 0) : null, beats };
+  });
+}
+const gauss = r => (r() + r() + r() - 1.5) * 2; // ≈ unit variance
+/** |H(f)| of a pole pair at F Hz with bandwidth B, unity at DC (a cascade formant). */
+function pole(f, F, B) { const a = Math.PI * B, b = TAU * F, w = TAU * f; return (a * a + b * b) / Math.sqrt((a * a + (w - b) ** 2) * (a * a + (w + b) ** 2)); }
+/**
+ * Tract magnitude at f. res entries [F, B] are cascade formants (a real tract's envelope, steep above); entries
+ * [F, Q, dB] are parallel resonances (amplitudes set by hand). zero: an antiresonance [F, B] (cascade) or [F, Q, depth].
+ */
+function tract(f, res, zero) {
+  let g = res[0]?.length === 2 ? 1 : 0;
+  for (const R of res) {
+    if (R.length === 2) g *= pole(f, R[0], R[1]);
+    else { const [F, Q, dB] = R, u = f / F - F / f; g += Math.pow(10, dB / 20) / Math.sqrt(1 + Q * Q * u * u); }
+  }
+  if (zero?.length === 2) g /= pole(f, zero[0], zero[1]);
+  else if (zero) { const [F, Q, d] = zero, u = f / F - F / f; g *= 1 - d / Math.sqrt(1 + Q * Q * u * u); }
+  return g;
+}
+/**
+ * A voiced sound by additive synthesis, band-limited at any pitch. f0 and amp are per-sample arrays. Each glottal cycle
+ * gets its own period (jitter) and amplitude (shimmer); harmonic k is weighted by the source roll-off k^−tilt (less steep
+ * as the voice gets louder: `bright`), a fundamental boost h1 (breathy voices) and the tract. Returns the glottal
+ * open-phase pulse (0..1) per sample, so breath noise can ride the cycles. move: per-sample tract scale (formants drift).
+ */
+function voiced(x, f0, amp, r, { res, zero = null, tilt = 1, h1 = 1, jitter = 0, shimmer = 0, bright = 0, maxF = 8000, at = 0, move = null }) {
+  const i0 = Math.round(at * SR), n = Math.min(f0.length, x.length - i0), pulse = new Float32Array(Math.max(0, n)), K = 96, hk = new Float64Array(K + 1);
+  let ph = 0, jit = 1, shim = 1, nk = 0;
+  for (let i = 0; i < n; i++) {
+    const f = f0[i] * jit;
+    if ((i & 31) === 0) {
+      nk = f > 20 ? Math.min(K, Math.floor(maxF / f)) : 0;
+      const tl = tilt - bright * amp[i], m = move ? move[i] : 1;
+      for (let k = 1; k <= nk; k++) hk[k] = (k === 1 ? h1 : 1) * Math.pow(k, -tl) * tract((k * f) / m, res, zero) * Math.cos((Math.PI / 2) * clamp((k * f - 0.6 * maxF) / (0.4 * maxF))) ** 2;
+    }
+    ph += (TAU * f) / SR;
+    if (ph >= TAU) { ph -= TAU; jit = 1 + jitter * gauss(r); shim = Math.max(0, 1 + shimmer * gauss(r)); }
+    const s1 = Math.sin(ph), c2 = 2 * Math.cos(ph);
+    let a = 0, sp = 0, sk = s1;
+    for (let k = 1; k <= nk; k++) { a += hk[k] * sk; const nx = c2 * sk - sp; sp = sk; sk = nx; }
+    x[i0 + i] += a * amp[i] * shim;
+    pulse[i] = 0.5 - 0.5 * Math.cos(ph);
+  }
+  return pulse;
+}
+/** Per-sample array of fn(t) over `dur` s. */
+const track = (dur, fn) => { const a = new Float32Array(nlen(dur)); for (let i = 0; i < a.length; i++) a[i] = fn(i / SR); return a; };
+/** Noise through parallel band-passes [[F | t→F, Q, gain]], shaped by env(t), added into x from `at` s. */
+function breathNoise(x, r, at, dur, bands, env, { color = 'pink', rasp = null } = {}) {
+  const nz = color === 'pink' ? pink(r) : white(r), fs = bands.map(() => svf()), i0 = Math.round(at * SR), n = nlen(dur);
+  for (let i = 0; i < n && i0 + i < x.length; i++) {
+    const t = i / SR;
+    if ((i & 15) === 0) bands.forEach(([F, Q], k) => fs[k].set(typeof F === 'function' ? F(t) : F, Q));
+    const v = nz(); let s = 0;
+    for (let k = 0; k < fs.length; k++) { fs[k].tick(v); s += fs[k].bp * bands[k][2]; }
+    if (i0 + i >= 0) x[i0 + i] += s * env(t) * (rasp ? rasp(t, i) : 1);
+  }
+}
+
+/** Klatt cascade resonator: unity gain at DC, so a chain of them gives a real vocal tract's envelope (steep above F). */
+class Reso {
+  constructor() { this.y1 = 0; this.y2 = 0; this.a = 1; this.b = 0; this.c = 0; }
+  set(F, B) { const q = Math.exp((-Math.PI * B) / SR); this.c = -q * q; this.b = 2 * q * Math.cos((TAU * clamp(F, 20, SR * 0.45)) / SR); this.a = 1 - this.b - this.c; return this; }
+  tick(v) { const y = this.a * v + this.b * this.y1 + this.c * this.y2; this.y2 = this.y1; this.y1 = y; return y; }
+}
+/**
+ * Breath through a vocal tract, added into x from `at` s: aspiration noise through cascade formants [[F | t→F, B Hz]]
+ * (peaks well above the valleys, like a throat and mouth, not a hiss), plus `hiss` of high frication at the teeth or
+ * nostrils. env(t) shapes it; rasp(t) multiplies it (flutter, a rattle).
+ */
+function tractNoise(x, r, at, dur, formants, env, { hiss = 0, hissF = 4500, rasp = null } = {}) {
+  const nz = white(r), rs = formants.map(() => new Reso()), hs = svf().set(hissF, 0.7), i0 = Math.round(at * SR), n = nlen(dur);
+  for (let i = 0; i < n && i0 + i < x.length; i++) {
+    const t = i / SR;
+    if ((i & 15) === 0) formants.forEach(([F, B], k) => rs[k].set(typeof F === 'function' ? F(t) : F, B));
+    const v = nz(); let y = v;
+    for (let k = 0; k < rs.length; k++) y = rs[k].tick(y);
+    hs.tick(v);
+    if (i0 + i >= 0) x[i0 + i] += (y + hs.bp * hiss) * env(t) * (rasp ? rasp(t) : 1);
+  }
+}
+
+/**
+ * Humming voices. A closed-lips "mm" is a nasal murmur: one strong low resonance, an antiresonance where the sealed mouth
+ * cavity absorbs energy, and faint upper nasal formants. A child hums high, where the murmur leaves a light, round voice
+ * (strong low harmonics, a faint nasal sheen) that wavers more than it vibrates; the elder is breathier, with a slower,
+ * wider, less regular vibrato, a little shimmer and a creak as the voice catches.
+ * res: tract (cascade [F, B] and parallel [F, Q, dB] resonances); zero: antiresonance; tilt/h1/bright: glottal source.
+ * vib: [rate Hz, depth cents, onset s into a note]; waver: irregular pitch unsteadiness (cents; a child's wavers more than
+ * it vibrates); err: pitch accuracy (cents); scoop: cents from below at a phrase start;
+ * dip: loudness dip between notes (a soft re-articulation); inhale: [s, level]; zeta: pitch damping (overshoot on intervals);
+ * centre: the middle of the voice's comfortable humming range (Hz): a tune is hummed in the octave nearest to it;
+ * air: the nasal airflow noise bands [[F, Q, gain]] that ride the voice; pulsed: how much of it comes in glottal bursts.
+ */
+const HUM = {
+  child: { centre: 390, res: [[430, 360], [1640, 1220], [3280, 1270], [3550, 1490]], zero: [1320, 260], air: [[520, 0.8, 1], [1250, 1.1, 0.3]], pulsed: 0.85, tilt: 1.76, h1: 1, bright: 0.15, jitter: 0.01, shimmer: 0.08, breath: 0.18, waver: 14, vib: [5.8, 6, 0.6], err: 16, scoop: 45, drift: 10, dip: 0.5, zeta: 0.6, inhale: [0.3, 0.1], release: 0.26, sag: 0.35, att: 0.06, creak: 0 },
+  adult: { centre: 300, res: [[380, 450], [1300, 950], [2600, 1050], [3300, 1150]], zero: [1350, 600], air: [[900, 1.2, 1], [2000, 1.5, 0.4], [3500, 1.2, 0.15]], pulsed: 0.6, tilt: 1.15, h1: 1.1, bright: 0.25, jitter: 0.005, shimmer: 0.05, breath: 0.45, waver: 5, vib: [5.4, 24, 0.3], err: 8, scoop: 45, drift: 7, dip: 0.45, zeta: 0.65, inhale: [0.36, 0.14], release: 0.3, sag: 0.3, att: 0.07, creak: 0 },
+  elder: { centre: 215, res: [[270, 200], [1480, 700], [3000, 1500], [3800, 1500]], zero: [1070, 250], air: [[450, 0.7, 1], [1480, 1.2, 0.3], [3000, 1.2, 0.08]], pulsed: 0.45, tilt: 1.05, h1: 1.5, bright: 0.25, jitter: 0.012, shimmer: 0.09, breath: 0.45, waver: 6, vib: [4.5, 30, 0.25], err: 12, scoop: 55, drift: 12, dip: 0.5, zeta: 0.55, inhale: [0.45, 0.2], release: 0.42, sag: 0.6, att: 0.09, creak: 0.35 },
+};
+/**
+ * Someone humming a tune with closed lips: params.notes ("G4:1 E4:0.5 …"), tempo (bpm), voice (child | adult | elder).
+ * People hum in their own range: the tune moves by whole octaves to sit around the voice's centre (an old woman hums
+ * "G4 E4 G4 A4" as G3 E3 G3 A3), unless params.transpose (semitones) says otherwise.
+ */
+function hum(r, p) {
+  const V = HUM[p.voice ?? 'adult'];
+  if (!V) throw new Error(`hum: unknown voice "${p.voice}" (child, adult, elder)`);
+  const notes = parseNotes(p.notes ?? 'G4:1 E4:0.5 G4:0.5 A4:2'), beat = 60 / (p.tempo ?? 90), mids = notes.filter(n => n.midi !== null).map(n => n.midi).sort((a, b) => a - b);
+  const tr = p.transpose ?? (mids.length ? -12 * Math.round(Math.log2(mtof(mids[mids.length >> 1]) / V.centre)) : 0), lead = V.inhale[0] + 0.05 + (V.creak ? 0.06 : 0);
+  const ev = []; let t = lead;
+  notes.forEach((nt, i) => { // a person's timing breathes: notes stretch and squeeze a little, the last one is savoured
+    const d = nt.beats * beat * (1 + (r() - 0.5) * 0.07) * (i === notes.length - 1 ? 1.05 : 1);
+    ev.push({ midi: nt.midi === null ? null : nt.midi + tr, t0: t, t1: t + d, err: ((r() - 0.5) * 2 * V.err) / 100, lvl: 1 + (r() - 0.5) * 0.18, mouth: 1 + (r() - 0.5) * 0.14, speed: between(r, 1, 1.6), zeta: V.zeta * between(r, 0.9, 1.4), prep: between(r, 0.02, 0.06) });
+    t += d;
+  });
+  const end = t, x = buf(end + V.release + 0.5), n = nlen(end + V.release), f0 = new Float32Array(n), amp = new Float32Array(n), mv = new Float32Array(n);
+  const drift = wander(Math.floor(r() * 1e6), 5), slow = wander(Math.floor(r() * 1e6), 0.7), trem = wander(Math.floor(r() * 1e6), 3.5), vr = wander(Math.floor(r() * 1e6), 1.3), tw = wander(Math.floor(r() * 1e6), 1.1);
+  const w = TAU * 8, first = ev.find(e => e.midi !== null)?.midi ?? 67;
+  let y = first - V.scoop / 100, v = 0, vph = r() * TAU, j = 0, mouth = ev[0].mouth, vk = 1, vdk = 1;
+  const wav = wander(Math.floor(r() * 1e6), 4.5);
+  let cDrift = 0, cVr = 0, cVr2 = 0, cWav = 0, cTrem = 0, cTw = 0; // slow controls, updated every 16 samples
+  for (let i = 0; i < n; i++) {
+    const tt = i / SR;
+    if ((i & 15) === 0) { cDrift = ((drift(tt) - 0.5) * 2 * V.drift + (slow(tt) - 0.5) * V.drift) / 100; cVr = vr(tt); cVr2 = vr(tt * 0.7 + 9); cWav = ((wav(tt) - 0.5) * 2 * V.waver) / 100; cTrem = trem(tt); cTw = tw(tt); }
+    while (j < ev.length - 1 && tt >= ev[j + 1].t0) j++;
+    const e = ev[j], on = e.midi !== null, tn = tt - e.t0, prev = j > 0 ? ev[j - 1] : null;
+    // pitch: the note (with its own small error) through a damped second-order response: glides, slight overshoot
+    let tgt = (on ? e.midi + e.err : y) + cDrift;
+    if (on && prev && prev.midi !== null && e.midi > prev.midi) tgt -= ((0.35 * V.scoop) / 100) * Math.exp(-tn / 0.04); // a tiny scoop into a higher note
+    if (tt > end) tgt -= V.sag * ((tt - end) / V.release) ** 2; // the voice relaxes and sags as it lets go
+    if (p.voice === 'elder' && on) tgt -= 0.06 * clamp(tn / (e.t1 - e.t0)); // and an old voice drifts flat on a held note
+    const nx = j + 1 < ev.length ? ev[j + 1] : null; // preparation: the pitch leans away from the next note just before moving to it
+    if (on && nx && nx.midi !== null && e.midi !== null && tt > nx.t0 - 0.07) tgt -= Math.sign(nx.midi - e.midi) * (nx.prep * 0.5) * Math.sin(Math.PI * clamp((tt - nx.t0 + 0.07) / 0.07));
+    const wj = w * e.speed; v += (wj * wj * (tgt - y) - 2 * e.zeta * wj * v) / SR; y += v / SR;
+    // vibrato grows into each held note; every cycle has its own rate and width, like a muscle, not an oscillator
+    const vd = (V.vib[1] / 100) * ramp(tn, V.vib[2], V.vib[2] + 0.5) * (0.6 + 0.8 * cVr) * vdk;
+    vph += (TAU * V.vib[0] * vk * (0.9 + 0.2 * cVr2)) / SR;
+    if (vph >= TAU) { vph -= TAU; vk = between(r, 0.86, 1.14); vdk = between(r, 0.65, 1.3); }
+    f0[i] = 440 * Math.pow(2, (y + vd * (Math.sin(vph) + 0.12 * Math.sin(2 * vph + 1)) + cWav - 69) / 12);
+    // loudness: a soft onset, a swell through long notes, a dip at each new note, the release
+    let a = on ? e.lvl * (1 + (e.t1 - e.t0 > 0.7 ? 0.14 * Math.sin(Math.PI * clamp(tn / (e.t1 - e.t0))) : 0)) : 0;
+    if (e.t0 > lead + 0.01) a *= 1 - V.dip * Math.exp(-(((tt - e.t0 - 0.008) / 0.026) ** 2));
+    if (e.t1 < end - 0.01) a *= 1 - V.dip * Math.exp(-(((tt - e.t1 - 0.008) / 0.026) ** 2));
+    a *= ramp(tt, lead - 0.01, lead + V.att) * (tt > end ? Math.cos((Math.PI / 2) * clamp((tt - end) / V.release)) ** 2 : 1) * (0.92 + 0.16 * cTrem);
+    amp[i] = a;
+    // the tongue and jaw shift a little behind the closed lips: the resonances move from note to note and drift
+    mouth += (e.mouth - mouth) * 0.0004; mv[i] = mouth * (0.95 + 0.1 * cTw) * Math.pow(f0[i] / V.centre, 0.15); // resonances follow the pitch a little
+  }
+  const pulse = voiced(x, f0, amp, r, { res: V.res, zero: V.zero, tilt: V.tilt, h1: V.h1, jitter: V.jitter, shimmer: V.shimmer, bright: V.bright, maxF: 7000, move: mv });
+  if (V.creak) { // an old voice catches before it settles: a few slow, irregular glottal pulses
+    const cl = 0.11, cf = track(cl, u => 95 + 60 * u / cl), ca = track(cl, u => V.creak * Math.sin(Math.PI * clamp(u / cl)) ** 2);
+    voiced(x, cf, ca, r, { res: V.res, zero: V.zero, tilt: 0.9, jitter: 0.12, shimmer: 0.45, maxF: 5000, at: lead - 0.07 });
+  }
+  // air through the nose: turbulence that rides the glottal cycles, coloured by the nasal tract
+  const N1 = V.res[0][0], bounds = ev.slice(1).map(e => e.t0), puffs = tt => bounds.reduce((s, b) => s + Math.exp(-(((tt - b) / 0.02) ** 2)), 0);
+  breathNoise(x, r, 0, end + V.release, V.air, tt => { const i = Math.min(n - 1, Math.round(tt * SR)); return amp[i] * V.breath * (V.pulsed * pulse[i] ** 2 + 1 - V.pulsed) + V.breath * 0.4 * puffs(tt); }, { color: 'white' });
+  // the breath in through the nose before the phrase, and a little breath out after it
+  tractNoise(x, r, lead - V.inhale[0] - 0.04 - (V.creak ? 0.06 : 0), V.inhale[0], [[tt => (700 + 500 * tt / V.inhale[0]) * (N1 / 300) ** 0.5, 260], [2300 * (N1 / 300) ** 0.3, 400]], tt => V.inhale[1] * Math.sin(Math.PI * clamp(tt / V.inhale[0])) ** 1.3, { hiss: 0.25, hissF: 3800 });
+  tractNoise(x, r, end + V.release * 0.35, 0.45, [[N1 * 1.8, 300], [2000, 400]], tt => V.inhale[1] * 0.5 * Math.sin(Math.PI * clamp(tt / 0.45)) ** 1.5 * (p.voice === 'elder' ? 1.6 : 1), { hiss: 0.15, hissF: 3500 });
+  return filt(x, 'lp', 9000, 0.7);
+}
+
+/** A sharp intake of breath in surprise: air sucked in past the teeth and a half-open "huh", a catch of voice, then held. */
+function gasp(r, p) {
+  const [fv, k] = { child: [540, 1.25], adult: [330, 1], elder: [300, 0.95] }[p.voice ?? 'adult'] ?? [330, 1];
+  const dur = between(r, 0.3, 0.36) * (p.dur ? p.dur / 0.33 : 1), x = buf(dur + 0.25), pk = 0.025, fl = wander(Math.floor(r() * 1e6), 25);
+  // an in-breath: the flow builds (a crescendo, not an outward burst) and stops dead when the breath is caught
+  const E = t => (t < pk ? 0.6 * Math.sin((Math.PI / 2) * (t / pk)) ** 2 : t < dur ? 0.6 + 0.4 * Math.sin((Math.PI / 2) * clamp((t - pk) / (0.7 * (dur - pk)))) : Math.max(0, 1 - (t - dur) / 0.015));
+  tractNoise(x, r, 0, dur + 0.016, [[t => (620 + 160 * clamp(t / dur)) * k, 200], [t => (1500 + 250 * clamp(t / dur)) * k, 240], [2700 * k, 320], [3700 * k, 420]], t => E(t) * (0.85 + 0.3 * fl(t)), { hiss: 0.5, hissF: 3400 });
+  // the voice catches at the top of the breath: a short, thin, rough "uh" rising in pitch, cut off with it
+  const vl = 0.08, f0 = track(vl, t => fv * (1.05 + 0.3 * (t / vl) ** 0.7)), amp = track(vl, t => 0.14 * Math.sin((Math.PI / 2) * clamp(t / 0.03)) ** 2 * (1 - clamp((t - vl + 0.012) / 0.012)));
+  voiced(x, f0, amp, r, { res: [[700 * k, 4, 0], [1600 * k, 5, -2], [2700 * k, 6, -10]], tilt: 1.5, h1: 0.7, jitter: 0.04, shimmer: 0.3, maxF: 5000, at: dur - vl + 0.004 });
+  thump(x, dur + 0.008, 170, 130, 0.01, 0.006, 0.015); // the breath held: the glottis closes
+  return filt(x, 'hp', 160, 0.7);
+}
+
+/**
+ * A wet sniff (params.count of them; the last is the big one). Air rushes up a narrow nose: the nasal resonances rise
+ * and whistle as the flow builds, the nostrils hiss, mucus flutters and crackles (params.wet 0..1), and it stops dead.
+ */
+function sniff(r, p) {
+  const count = p.count ?? 2, wet = clamp(p.wet ?? 0.6), k = p.pitch ?? 1, x = buf(count * 0.36 + 0.25);
+  let t0 = 0.005;
+  for (let c = 0; c < count; c++) {
+    const main = c === count - 1, len = main ? between(r, 0.18, 0.24) : between(r, 0.09, 0.12), a = main ? 1 : 0.6, fl = wander(Math.floor(r() * 1e6), 40);
+    // an in-breath builds: a quick start, a crescendo as the flow grows, then it stops dead
+    const E = t => a * (t < 0.02 ? Math.sin((Math.PI / 2) * (t / 0.02)) ** 2 * 0.55 : t < len ? 0.55 + 0.45 * ((t - 0.02) / (len - 0.02)) ** 0.8 : Math.max(0, 1 - (t - len) / 0.01));
+    const rasp = t => 1 + wet * 1.5 * (fl(t) - 0.5) * 2 * (0.4 + 0.6 * Math.exp(-t / (len * 0.4)));
+    tractNoise(x, r, t0, len + 0.01, [[t => (1500 + 900 * clamp(t / len) ** 0.6) * k, 250], [t => (3300 + 700 * clamp(t / len)) * k, 450]], E, { hiss: 0.6, hissF: 5500, rasp });
+    // mucus: a crackle through the sniff and a wet snatch as it is pulled up at the end
+    crackles(x, r, t => wet * (1200 * E(t - t0) + 9000 * Math.exp(-(((t - t0 - len * 0.85) / 0.025) ** 2))), t => wet * 0.35 * Math.max(E(t - t0), 0.3), { f: [1200, 5000], q: [1, 3], d: [0.0003, 0.0018], pw: 2, t0, t1: t0 + len + 0.01 });
+    t0 += len + between(r, 0.08, 0.14);
+  }
+  return filt(filt(x, 'hp', 700, 0.7), 'lp', 9000, 0.7);
+}
+
+/**
+ * A snore like a contrabassoon. On the in-breath the soft palate flaps: a low, reedy, irregular tone, with the air chopped
+ * into bursts by each flap and coloured by an open "aw" mouth; the out-breath is a soft airy "pfoo" with a ghost of the
+ * reed sliding down. params.dur fits whole breaths into that time; params.pitch scales the reed.
+ */
+function snore(r, p) {
+  const dur = Math.max(0.05, p.dur ?? 2.4), cycles = Math.max(1, Math.round(dur / 2.4)), per = dur / cycles, k = p.pitch ?? 1, x = buf(dur + 0.3);
+  const aw = [[560, 3, 0], [880, 4, -4], [2400, 5, -18]], reed = [[260, 2.4, 0], [520, 3, -2], [1100, 4, -12]];
+  for (let c = 0; c < cycles; c++) {
+    const t0 = c * per + 0.01, li = per * 0.52, le = per * 0.34, te = t0 + li + per * 0.05, fl = wander(Math.floor(r() * 1e6), 6);
+    const fa = between(r, 46, 54) * k, fb = fa * between(r, 1.15, 1.25);
+    // breath first, then the palate starts to flap; it stops just before the breath does
+    const air = t => Math.sin((Math.PI / 2) * clamp(t / 0.3)) ** 2 * (1 - clamp((t - li + 0.12) / 0.12) ** 2);
+    const flap = t => ramp(t, 0.08, 0.35) * (1 - ramp(t, li - 0.2, li - 0.05)) * (0.75 + 0.5 * fl(t));
+    const f0 = track(li, t => fa + (fb - fa) * Math.sin((Math.PI / 2) * clamp(t / li))), amp = track(li, t => 0.55 * flap(t));
+    const pulse = voiced(x, f0, amp, r, { res: [...reed, ...aw.map(([F, Q, g]) => [F, Q, g - 6])], tilt: 1.2, h1: 0.5, jitter: 0.045, shimmer: 0.22, maxF: 3500, at: t0 });
+    const chop = t => { const pp = pulse[Math.min(pulse.length - 1, Math.round(t * SR))]; return 0.35 + flap(t) * (2.2 * pp ** 3 - 0.3); };
+    tractNoise(x, r, t0, li, aw.map(([F]) => [F, F * 0.18]), t => air(t) * chop(t), { hiss: 0.04, hissF: 3000 });
+    // the out-breath: a soft "pfoo" through loose lips, the reed sliding down under it
+    tractNoise(x, r, te, le, [[t => 520 - 160 * t / le, 160], [1100, 260]], t => 0.55 * Math.sin(Math.PI * clamp(t / le)) ** 1.5 * (1 - 0.4 * t / le), { hiss: 0.05, hissF: 2500 });
+    const g0 = track(le * 0.8, t => fa * 1.05 * (1 - (0.2 * t) / le)), ga = track(le * 0.8, t => 0.22 * Math.sin(Math.PI * clamp(t / (le * 0.8))) ** 2);
+    voiced(x, g0, ga, r, { res: reed, tilt: 1.4, h1: 0.8, jitter: 0.03, shimmer: 0.12, maxF: 2500, at: te + 0.03 });
+  }
+  return filt(filt(x, 'hp', 55, 0.7), 'lp', 7000, 0.7);
+}
+
+/**
+ * Breathing through the mouth. params.heavy 0..1: from one quiet breath to laboured panting (faster, louder, rasping,
+ * with a tired voiced sigh on each out-breath). params.count breaths (or params.dur), params.pitch for the sigh's voice.
+ */
+function breath(r, p) {
+  const heavy = clamp(p.heavy ?? 0), per = lerp(2.6, 1.25, heavy), count = p.count ?? (p.dur ? Math.max(1, Math.round(p.dur / per)) : heavy > 0.5 ? 3 : 1);
+  const x = buf(count * per + 0.5), fv = (p.pitch ?? 1) * 105, fl = wander(Math.floor(r() * 1e6), 12); // turbulence flutters
+  for (let c = 0; c < count; c++) {
+    const t0 = c * per * between(r, 0.97, 1.03) + 0.01, li = per * between(r, 0.36, 0.42), le = per * between(r, 0.48, 0.55), te = t0 + li + 0.02, a = between(r, 0.85, 1.1);
+    const rasp = heavy > 0 ? (t => 1 + heavy * 0.35 * Math.sin(TAU * 72 * t) * (0.5 + fl(t * 3))) : null;
+    // in: a hollow, hissier "hhh" over the tongue
+    tractNoise(x, r, t0, li, [[t => 520 + 120 * t / li, 160], [t => 1500 + 200 * t / li, 200], [2600, 300], [3600, 400]], t => a * (0.5 + 0.35 * heavy) * Math.sin(Math.PI * clamp(t / li)) ** 0.9 * (0.8 + 0.4 * fl(t0 + t)), { hiss: 0.12, hissF: 3800, rasp });
+    // out: a fuller "haah", the jaw dropping
+    tractNoise(x, r, te, le, [[t => 760 - 120 * t / le, 130], [1220, 160], [2500, 250], [3500, 350]], t => a * (0.7 + 0.5 * heavy) * Math.sin((Math.PI / 2) * clamp(t / 0.1)) ** 2 * Math.max(0, 1 - clamp((t - 0.1) / (le - 0.1)) ** 1.6) * (0.8 + 0.4 * fl(te + t)), { hiss: 0.04, hissF: 4000, rasp });
+    if (heavy > 0.2) { // a tired, breathy sigh of voice under the out-breath
+      const vl = le * 0.7, f0 = track(vl, t => fv * (1.08 - (0.16 * t) / vl)), amp = track(vl, t => 0.35 * heavy * a * Math.sin(Math.PI * clamp(t / vl)) ** 1.5);
+      voiced(x, f0, amp, r, { res: [[740, 4, 0], [1220, 5, -5], [2500, 5, -16]], tilt: 1.6, h1: 1.4, jitter: 0.025, shimmer: 0.15, maxF: 4000, at: te + 0.04 });
+    }
+  }
+  return filt(x, 'hp', 120, 0.7);
+}
+
 // ───────────────────────────── registry ─────────────────────────────
 
 const GEN = {
@@ -815,8 +1165,9 @@ const GEN = {
   hop, land, whoosh, splash, plop, rustle, thud, pop, chime, sparkle, 'owl-hoot': owl, birdsong, cricket, 'frog-croak': frog,
   wind, stream, fire, 'door-creak': doorCreak, bell: bellSound, 'mouse-squeak': squeak, 'songbird-tweet': tweet, 'wing-flap': wingFlap,
   knock: knocks, woodpecker, anvil,
+  hum, 'music-box': musicBox, gasp, sniff, snore, breath, slosh, bubbles, 'wind-swell': windSwell, drip,
 };
-const ALIAS = { footstep: 'footstep-grass', squeak: 'mouse-squeak', tweet: 'songbird-tweet', flap: 'wing-flap', hoot: 'owl-hoot', croak: 'frog-croak', creak: 'door-creak', leaves: 'rustle', bird: 'birdsong' };
+const ALIAS = { footstep: 'footstep-grass', squeak: 'mouse-squeak', tweet: 'songbird-tweet', flap: 'wing-flap', hoot: 'owl-hoot', croak: 'frog-croak', creak: 'door-creak', 'gate-creak': 'door-creak', leaves: 'rustle', bird: 'birdsong' };
 /**
  * Calibrated level of each effect: loudest 200 ms window in LUFS (continuous sounds: integrated LUFS).
  * Dialogue sits at about −20 LUFS in the mix, so these keep effects natural and under the voices.
@@ -826,6 +1177,7 @@ const LEVEL = {
   splash: -23, plop: -28, rustle: -30, thud: -25, pop: -29, chime: -27, sparkle: -29, 'owl-hoot': -27, birdsong: -28,
   cricket: -33, 'frog-croak': -28, wind: -30, stream: -28, fire: -29, 'door-creak': -27, bell: -24, 'mouse-squeak': -29,
   'songbird-tweet': -28, 'wing-flap': -30, knock: -27, woodpecker: -29, anvil: -27,
+  hum: -22, 'music-box': -26, gasp: -25, sniff: -26, snore: -25, breath: -29, slosh: -25, bubbles: -28, 'wind-swell': -27, drip: -30,
 };
 const CONTINUOUS = new Set(['wind', 'stream', 'fire', 'cricket']);
 export const SFX_NAMES = Object.keys(GEN);
@@ -847,8 +1199,10 @@ function render(key, seed, params) {
 /**
  * Synthesize a named effect. Deterministic for a given (name, seed, params).
  * Common params: weight (0..1, footsteps/hop/land), surface (hop/land), pitch (multiplier), dur (continuous
- * effects, whoosh, rustle, door-creak), species (birdsong), kind (owl-hoot, cricket, frog-croak), size (splash,
- * frog-croak, bell), count, f0 (bell), close (door-creak), level (dB trim).
+ * effects, whoosh, rustle, door-creak, snore, slosh, bubbles, wind-swell, drip, breath), species (birdsong), kind
+ * (owl-hoot, cricket, frog-croak), size (splash, frog-croak, bell, slosh, bubbles), count (sniff, drip, breath, …),
+ * f0 (bell), close (door-creak), level (dB trim); notes + tempo (hum, music-box), voice (hum: child | adult | elder;
+ * gasp), transpose (hum), octave + slow (music-box), heavy (breath), wet (sniff), strength/release (wind-swell).
  */
 export function makeSfx(name, { seed = 1, ...params } = {}) {
   const key = ALIAS[name] ?? name;
