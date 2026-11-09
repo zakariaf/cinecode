@@ -1,0 +1,73 @@
+{
+  "title": "{{title}}",
+  "logline": "A girl looking for a friend wakes a sleepy hare and races him to the pond.",
+  "format": { "width": 1920, "height": 1080, "fps": 24, "captions": "dialogue" },
+  "titles": {
+    "open": { "title": "{{title}}", "subtitle": "a cinecode film", "dur": 4 },
+    "end": { "lines": ["The End"], "dur": 4 }
+  },
+  "score": { "key": "G", "motif": "D5:1 B4:0.5 D5:0.5 E5:2 G5:3" },
+  "voices": {
+    "narrator": { "voice": "Sulafat", "tone": "warm, gentle, unhurried" },
+    "pip": { "voice": "Leda", "tone": "bright, eager" },
+    "hare": { "voice": "Algenib", "tone": "dry, drowsy" }
+  },
+  "cast": {
+    "pip": { "rig": "human", "name": "Pip", "voice": "pip",
+             "params": { "age": "child", "hairStyle": "braids", "hair": "#3b2a20", "skin": "#e8b896", "bottom": "dress", "dress": "#d9a441", "scarf": "#c8443a" } },
+    "hare": { "rig": "hare", "name": "Hare", "voice": "hare" },
+    "owl": { "rig": "owl", "name": "Owl" }
+  },
+  "sets": { "meadow": { "kit": "meadow" } },
+  "scenes": [
+    {
+      "id": "s01", "set": "meadow", "time": "morning",
+      "music": { "mood": "pastoral", "intensity": 0.35, "motif": 4, "motifVoice": "flute" },
+      "ambience": "auto",
+      "actors": {
+        "owl": { "at": "low_branch", "face": "right", "pose": "sleep" },
+        "hare": { "at": "stump_front", "face": "left", "pose": "sleep" },
+        "pip": { "offstage": "left" }
+      },
+      "shots": [
+        { "id": "s01-01", "camera": { "size": "establishing", "move": "push-in" },
+          "beats": [
+            { "say": "narrator", "text": "At the edge of the old forest, a girl named Pip went looking for a friend.", "tone": "softly", "at": 0.5 }
+          ], "hold": 0.8 },
+        { "id": "s01-02", "camera": { "size": "full", "on": ["pip"], "move": "track" },
+          "beats": [
+            { "do": "enter", "who": "pip", "from": "left", "to": "meadow_right" },
+            { "do": "look", "who": "pip", "to": "hare" },
+            { "say": "pip", "text": "Hello? Is anybody out here?", "tone": "curious", "expr": "curious" },
+            { "do": "wake", "who": "hare", "with": "prev", "after": 0.8 }
+          ], "hold": 0.4 },
+        { "id": "s01-03", "camera": { "size": "medium", "on": ["hare"] },
+          "beats": [
+            { "do": "look", "who": "hare", "to": "pip" },
+            { "say": "hare", "text": "Only me. I was having a nap.", "tone": "grumbling", "expr": "sleepy" }
+          ], "hold": 0.5 },
+        { "id": "s01-04", "camera": { "size": "full", "on": ["pip", "hare"] },
+          "beats": [
+            { "do": "gesture", "who": "pip", "name": "jump-for-joy" },
+            { "say": "pip", "text": "Then wake up! Race you to the pond!", "tone": "excited", "expr": "happy", "with": "prev", "after": 0.3 },
+            { "music": "sting", "name": "surprise", "with": "prev" },
+            { "do": "emote", "who": "hare", "expr": "smug", "after": 0.2 }
+          ], "hold": 0.4 },
+        { "id": "s01-05", "camera": { "size": "wide", "on": ["hare", "pip"], "move": "track" },
+          "beats": [
+            { "do": "hop", "who": "hare", "to": "pond_far" },
+            { "do": "run", "who": "pip", "to": "pond_edge", "with": "prev", "after": 0.3 },
+            { "sfx": "owl-hoot", "with": "prev", "after": 0.6 }
+          ], "hold": 0.3 },
+        { "id": "s01-06", "camera": { "size": "full", "on": ["pip", "hare"], "move": "push-in" },
+          "beats": [
+            { "do": "look", "who": "hare", "to": "pip" },
+            { "do": "gesture", "who": "pip", "name": "jump-for-joy", "after": 0.2 },
+            { "do": "custom", "name": "glints", "who": "pip", "dur": 1.6, "with": "prev" },
+            { "do": "gesture", "who": "hare", "name": "laugh", "with": "prev", "after": 0.4 },
+            { "say": "narrator", "text": "And that is how the summer began.", "tone": "softly", "after": 0.2 }
+          ], "hold": 1.2 }
+      ]
+    }
+  ]
+}

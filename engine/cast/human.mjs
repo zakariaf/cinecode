@@ -1,4 +1,6 @@
-// Human rig: a parametric storybook person (child / teen / adult / elder) in a 3/4 side view.
+// Human rig: a parametric storybook person (child / teen / adult / elder) seen from the side: by default with a true
+// profile head (one eye, the nose and lips on the outline, like the animals; params.view 'profile'), or with the older
+// 3/4 head that shows both eyes (params.view 'three-quarter').
 // (x, y) passed to draw() is the contact point: the ground under the feet, or the seat surface for
 // 'sit-seat' (the feet are then planted `seatHeight` units below it, or dangle if the legs are too short).
 // Poses are plain numeric objects; legs can be posed by angles or by IK foot targets (ik = 0..1),
@@ -26,6 +28,11 @@
 // elbow-first so the arm never crosses her face; 'point-up' / 'point-down' name the aims for storyboards. st.look is in
 // screen direction (multiplied by face, as the other rigs do). The bun is combed hair with a soft, bundled hairline,
 // an off-centre coil at the back of the crown with a hairpin, and loose wisps at the temple and nape.
+// Round 5: the profile head (params.view, default 'profile'; see profileGeo / drawHeadP). One eye set back from the nose
+// bridge, the brow doing most of the acting; the nose, lips and chin are the front of the outline; talking drops the
+// jaw about its hinge in front of the ear and opens a notch between the lips; the ear sits mid-head behind the jaw;
+// hair, beards, glasses (one lens and its temple arm) and hats are drawn side-on. st.look moves the pupil and carries
+// the head a little toward the look (never showing the far eye); pose.turn narrows the face and swings the iris.
 import { clamp, lerp, smooth, easeInOut, poly, path, shift, arcPts, quad, noise1, canvas, INK } from '../core/lib.mjs';
 
 // Same algorithms as lib.mjs wobble/ink/ell, with noise tables cached per seed (a rig draws hundreds of strokes a frame).
@@ -52,7 +59,9 @@ function ink(ctx, P, w, { closed = true, color = INK, seed = 1, taper = !closed 
     const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1, nx = -dy / d, ny = dx / d;
     if (i) s += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
     let ww = w * (0.55 + 0.9 * f(s / 80));
-    if (taper) ww *= Math.pow(Math.sin(Math.PI * clamp(i / (n - 1), 0.02, 0.98)), 0.6);
+    // taper: true thins the whole stroke toward its ends; a number e thins only the first and last e of it
+    if (typeof taper === 'number') ww *= Math.pow(clamp(Math.min(i / (n - 1), 1 - i / (n - 1)) / taper, 0.04, 1), 0.6);
+    else if (taper) ww *= Math.pow(Math.sin(Math.PI * clamp(i / (n - 1), 0.02, 0.98)), 0.6);
     L.push([P[i][0] + (nx * ww) / 2, P[i][1] + (ny * ww) / 2]); R.push([P[i][0] - (nx * ww) / 2, P[i][1] - (ny * ww) / 2]);
   }
   ctx.fillStyle = color; ctx.beginPath();
@@ -154,7 +163,7 @@ function ik2(root, tgt, a, b, bend = 1) {
 export const DEFAULTS = {
   age: 'child', build: 'average', height: 1, seed: 7,
   skin: '#f2c9a8', blush: 0.5, eyes: '#5a3a24',
-  hairStyle: 'short', hair: '#4a3222', beard: 'none',
+  view: 'profile', hairStyle: 'short', hair: '#4a3222', beard: 'none',
   shirt: '#e0703a', sleeves: 'long', bottom: 'trousers', pants: '#3d5a8a', dress: null, shoes: '#5a3a2a', socks: '#f2ede2',
   scarf: false, glasses: false, hat: false, apron: false, backpack: false,
   tear: 0, hem: null, scarfLength: 1, dressStyle: null, top: 'shirt', under: null,
@@ -196,6 +205,7 @@ export function look(params = {}) {
   if (age === 'child' || age === 'teen') p.beard = 'none';
   if (!['none', 'short', 'full'].includes(p.beard)) p.beard = 'none';
   if (!HAIR_STYLES.includes(p.hairStyle)) p.hairStyle = 'short';
+  if (p.view !== 'three-quarter') p.view = 'profile';    // 'three-quarter': the older 3/4 head with both eyes
   if (!['trousers', 'shorts', 'skirt', 'dress'].includes(p.bottom)) p.bottom = 'trousers';
   p.height = clamp(+p.height || 1, 0.6, 1.5);
   p.tear = clamp(+p.tear || 0, 0, 1);
@@ -277,6 +287,62 @@ function headGeo(M, yaw) {
     ear: [xc - 0.74, eyeY + 0.06], neck: [-0.2, 0.62],
   };
 }
+// The profile head (view 'profile', the default): a true side view with one eye, like the animals, so a person talks
+// across the frame to her partner instead of to the lens. Head space is headGeo's (units of k, facing +x, crown at
+// y = -1, the neck at the same place) and CP keeps its indices for the skull (0 crown, 1 front top, 8–10 the back), so
+// the body, hair, bun and hats keep their places; CP[3..5] are the nose tip, lips and chin, which a raised arm keeps
+// clear of. The face is the front of the outline: brow ridge, nose, lips, chin. Landmarks are eye-line relative, for
+// a child (c, j = 0) and an adult (a, j = 1), blended by M.jaw; an elder's nose is longer with a softer, lower tip and
+// her lips thinner. ear: [x, y, rx, ry]; eye: its x behind the nasion. yaw (pose.turn) narrows the face a little.
+const PRO_FACE = {
+  c: { fh: [0.775, -0.55], brow: [0.78, -0.16], nas: [0.732, 0.02], bri: [0.765, 0.105], tip: [0.862, 0.182], tipU: [0.852, 0.236], sub: [0.752, 0.262], ul: [0.766, 0.33], st: [0.734, 0.375], ll: [0.743, 0.415], sul: [0.697, 0.46], chin: [0.706, 0.535], men: [0.6, 0.628], uj: [0.36, 0.68], go: [-0.02, 0.56], ear: [-0.12, 0.13, 0.12, 0.2], eye: 0.215 },
+  a: { fh: [0.72, -0.51], brow: [0.79, -0.19], nas: [0.745, -0.01], bri: [0.835, 0.14], tip: [0.948, 0.29], tipU: [0.928, 0.346], sub: [0.8, 0.375], ul: [0.81, 0.455], st: [0.778, 0.515], ll: [0.786, 0.565], sul: [0.725, 0.64], chin: [0.758, 0.74], men: [0.64, 0.86], uj: [0.33, 0.88], go: [-0.08, 0.68], ear: [-0.17, 0.18, 0.125, 0.23], eye: 0.23 },
+};
+function profileGeo(M, yaw) {
+  const j = M.jaw, eyeY = 0.17 - 0.12 * j, A = PRO_FACE.c, B = PRO_FACE.a, F = {}, elder = M.age === 'elder';
+  for (const key of ['fh', 'brow', 'nas', 'bri', 'tip', 'tipU', 'sub', 'ul', 'st', 'll', 'sul', 'chin', 'men', 'uj', 'go']) F[key] = [lerp(A[key][0], B[key][0], j), lerp(A[key][1], B[key][1], j) + eyeY];
+  if (elder) {                                         // a longer nose, its tip a little lower and softer; thinner lips
+    F.tip = add(F.tip, [0.02, 0.035]); F.tipU = add(F.tip, [-0.04, 0.062]); F.sub = add(F.sub, [0, 0.025]); F.bri = add(F.bri, [0.012, 0.01]);
+    F.ul = add(F.ul, [-0.02, 0.02]); F.st = add(F.st, [-0.014, 0.01]); F.ll = add(F.ll, [-0.022, 0]); F.chin = add(F.chin, [-0.016, 0]); F.uj = [0.36, F.uj[1] + 0.03];
+  }
+  const er = [0, 1, 2, 3].map(i => lerp(A.ear[i], B.ear[i], j)); er[1] += eyeY; if (elder) er[3] *= 1.08;
+  const xr = er[0] + 0.14, cf = 1 - 0.22 * Math.abs(yaw);
+  if (cf < 1) for (const key in F) if (F[key][0] > xr) F[key] = [xr + (F[key][0] - xr) * cf, F[key][1]];
+  const CP = [[-0.08, -1.0], [lerp(0.5, 0.48, j), lerp(-0.84, -0.86, j)], F.fh, F.tip, F.st, F.chin, F.men, F.go, [-0.78, 0.3], [-0.98, -0.28], [-0.72, -0.8]];
+  const eye = [F.nas[0] - lerp(A.eye, B.eye, j) * cf, eyeY];
+  const G = {
+    pro: true, CP, F, xc: 0.4, cf: 1, eyeY, j, eyeN: eye, eyeF: null, nose: F.tip, mouth: F.st, ear: [er[0], er[1]], earR: [er[2], er[3]], neck: [-0.2, 0.62],
+    hinge: [er[0] + 0.17, er[1] - 0.03], jawK: lerp(0.26, 0.3, j),
+  };
+  G.outline = m => proOutline(G, m);
+  G.pts = G.outline({ o: 0, c: 0.45, w: 0.8 }).pts;
+  return G;
+}
+// The profile outline for a mouth state m = { o: openness 0..1, c: curve (-1 frown .. 1 smile), w: width, round }.
+// The jaw drops (the lower lip, chin and jaw turn about the hinge in front of the ear) and the open mouth is a notch
+// cut into the outline between the lips, back to the corner; it fades in from a closed mouth, so talk never pops.
+// Returns the outline in three pieces (up: nape → over the skull → nose → upper lip; mid: the notch; lo: lower lip →
+// chin → jaw → under the skull), their union pts, goI (where the jaw meets the neck, in lo: the ink stops there), the
+// notch polygon and its upper edge, the lips' points (stU, stL), the corner, the closed corner Cm0 and the turned jaw L.
+function proOutline(G, m) {
+  const { F, hinge: H, CP } = G, o = clamp(m.o || 0), a = o * G.jawK, f = smooth(0, 0.14, o), rnd = (m.round ? 1 : 0) * f, c = m.c || 0;
+  const R = q => add(H, rot(sub(q, H), a)), push = q => [q[0] + 0.03 * rnd, q[1]];
+  const st = F.st, depth = m.round ? 0.07 : 0.085 + 0.08 * (m.w ?? 0.8);
+  const Cm0 = [st[0] - depth, st[1] - 0.04 * c + 0.006], Cm = add(H, rot(sub(Cm0, H), a * 0.45));
+  const stU = [st[0] + 0.02 * rnd, st[1] - 0.012 * o], stL = R([st[0] + 0.02 * rnd, st[1] + 0.008 * o]);
+  const L = { ll: R(push(F.ll)), sul: R(F.sul), chin: R(F.chin), men: R(F.men), uj: R(F.uj), go: R(F.go) };
+  const up = spline([[-0.62, 0.52], [-0.88, 0.16], CP[9], CP[10], CP[0], CP[1], F.fh, F.brow, F.nas, F.bri, F.tip, F.tipU, F.sub, push(F.ul), stU], 5, false);
+  const lo = spline([stL, L.ll, L.sul, L.chin, L.men, L.uj, L.go, [-0.34, 0.72]], 5, false), goI = 30;
+  let mid0 = [], notch = null, upper = [stU];
+  const Cn = add(mid(stU, stL), mul(sub(Cm, mid(stU, stL)), f));
+  if (f > 0.005) {
+    upper = quad(stU, add(mid(stU, Cn), [0, -0.012 * c * f - 0.025 * rnd]), Cn, 6);
+    const lower = quad(Cn, add(mid(Cn, stL), [0.012, (0.05 * o + 0.03 * rnd) * f]), stL, 6);
+    mid0 = [...upper.slice(1), ...lower.slice(1, -1)];
+    notch = [...upper, ...lower.slice(1)];
+  }
+  return { up, mid: mid0, lo, pts: [...up, ...mid0, ...lo], goI, notch, upper, stU, stL, Cn, Cm, Cm0, L, f, o };
+}
 
 function solve(p0, M, st = {}, lk = {}) {
   const p = { ...POSE0, ...p0 };
@@ -324,13 +390,16 @@ function solve(p0, M, st = {}, lk = {}) {
   let lF = mkF(p.tFy), lB = mkB(p.tBy);
 
   // head; st.tilt pitches it (+1 = chin up as far as a person comfortably can, -1 = down) and the eyes follow (see drawHead)
-  const tu = clamp(st.tilt || 0, -1, 1), pitch = tu > 0 ? -0.62 * tu : -0.42 * tu;
-  const yaw = clamp(BASE_YAW + p.turn + 0.3 * (st.look || 0), 0.12, 1.3), G = headGeo(M, yaw), k = M.k;
+  // A profile head never turns far enough to show its far eye: a look moves the pupil, pitches the head a touch and
+  // carries it a little toward what she looks at (the neck follows); pose.turn narrows the face (see profileGeo).
+  const tu = clamp(st.tilt || 0, -1, 1), pitch = tu > 0 ? -0.62 * tu : -0.42 * tu, pro = lk.view !== 'three-quarter';
+  const yaw = pro ? clamp(p.turn, -1, 1) : clamp(BASE_YAW + p.turn + 0.3 * (st.look || 0), 0.12, 1.3), G = pro ? profileGeo(M, yaw) : headGeo(M, yaw), k = M.k;
   const th = a2 + p.tilt + pitch - M.stoop * 0.85 + (st.look ? 0.04 * st.look : 0);
-  const nTop = add(neck, mul(upv(a2 + (p.tilt + pitch) * 0.35 - M.stoop * 0.4), M.neck + k * 0.1));
+  let nTop = add(neck, mul(upv(a2 + (p.tilt + pitch) * 0.35 - M.stoop * 0.4), M.neck + k * 0.1));
+  if (pro && st.look) nTop = add(nTop, mul(fwd(th), 0.06 * k * clamp(st.look, -1, 1)));
   const hc = sub(nTop, rot(mul(G.neck, k), th));
   const HT = q => add(hc, rot(mul(q, k), th));
-  const headPts = spline(G.CP, 5).map(HT);
+  const headPts = (G.pts || spline(G.CP, 5)).map(HT);
 
   // ground: the lowest of every part that could touch it (soles, knees, seat, back, head, hands)
   const legC = l => [l.heel, l.toe, add(l.knee, [0, M.kneeW])];
@@ -393,9 +462,9 @@ function solve(p0, M, st = {}, lk = {}) {
     // the upper arm passes under the face (clear of the jaw by the sleeve) and the elbow bends so the forearm and finger
     // still carry the aim: a child's big head sits low over her shoulder, so she points up at the sky elbow-first
     let cap = Infinity;
-    for (const i of [3, 4, 5]) {                                                  // cheek, jaw, chin front (not under the chin)
+    for (const i of [3, 4, 5]) {                                                  // cheek, jaw, chin front (profile: nose tip, lips, chin)
       const v = sub(HT(G.CP[i]), shN), d = len(v);
-      if (v[0] > 0) cap = Math.min(cap, Math.PI / 2 + Math.atan2(-v[1], v[0]) - Math.asin(clamp((M.armW * 1.15) / d)));
+      if (v[0] > 0) cap = Math.min(cap, Math.PI / 2 + Math.atan2(-v[1], v[0]) - Math.asin(clamp((M.armW * (G.pro ? 1.7 : 1.15)) / d)));   // a profile's lips are on its outline
     }
     const el = 0.14, Ua = Math.min(D - (el * M.foreArm) / (M.upArm + M.foreArm), cap), a = arm(shN, lerp(p.shF, Ua - ar, wA), lerp(p.elF, Math.max(el, D - Ua), wA));
     a.hand = add(a.wr, mul(down(a.dir), M.hand * 0.75)); Object.assign(aF, a);
@@ -432,7 +501,7 @@ function extent(J, lk) {
   put(J.chest, M.chest * 0.55); put(J.hip, M.hipW * 0.55);
   if (lk.hairStyle === 'bun') put(J.HT(BUN.c), (BUN.rx + 0.04) * J.k);
   if (lk.hairStyle === 'ponytail') put(J.HT([-1.3, 0.2]), 0.35 * J.k);
-  if (lk.hairStyle === 'long') { put(J.HT([-0.9, 1.6]), 0.2 * J.k); }
+  if (lk.hairStyle === 'long' && !J.G.pro) { put(J.HT([-0.9, 1.6]), 0.2 * J.k); }
   if (lk.hairStyle === 'braids') for (const near of [true, false]) { const B = braidPath(J, lk, near).P; put(B[B.length - 1], 0.2 * J.k); put(B[Math.floor(B.length / 2)], 0.2 * J.k); }
   if (lk.hat || lk.hairStyle === 'cap') put(J.HT([0.2, -1.05]), 0.7 * J.k);
   if (lk.scarf) { J.tor = J.tor || torsoShape(J); const { front, back } = scarfTails(J, lk); for (const P of [front, back]) put(P[P.length - 1], SCARF_W * 1.4); }
@@ -440,6 +509,13 @@ function extent(J, lk) {
   if (lk.apron) { J.tor = J.tor || torsoShape(J); for (const q of skirtGeo(J, apronHem(lk)).P) put(q, 1.2); }
   if (lk.backpack) put(add(J.chest, [-M.chest * 0.85, 0]), 6);
   if (lk.top === 'cardigan') for (const q of cardiganShape(J).P) put(q, 1.2);
+  if (J.G.pro) {                                      // the profile's own reach: curls, the fall of long hair, brims seen side-on
+    const { G, HT, k } = J, xc = G.xc;
+    if (lk.hairStyle === 'curly') J.headPts.forEach(q => put(q, 0.31 * k));
+    if (lk.hairStyle === 'long') longHairP(J).P.forEach(q => put(q, 0.14 * k));   // (with room for the sway)
+    if (lk.hairStyle === 'cap') put(HT([xc + 0.05 + 0.93 * 0.7, -0.42]), 0.1 * k);
+    if (lk.hat && lk.hairStyle !== 'cap') for (const q of [[-1.3, -0.3], [xc + 1.0, -0.42]]) put(HT(q), 0.1 * k);
+  }
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
@@ -808,18 +884,21 @@ const HAIR_VOL = { short: 0.12, long: 0.1, ponytail: 0.07, bun: 0.07, braids: 0.
 // Hair that hangs behind the body (drawn before the torso): long sheet, ponytail.
 function drawHairBehind(ctx, J, lk) {
   const { G, HT } = J, t = J.t, sw = 0.05 * Math.sin(t * 1.9) + 0.1 * J.p.gait * Math.sin(t * 7.3), hair = lk.hair;
-  if (lk.hairStyle === 'long') {
+  if (lk.hairStyle === 'long' && !G.pro) {
     const P = spline([[-0.2, -0.9], [-0.98, -0.5], [-1.12, 0.2], [-1.08 + sw, 1.0], [-0.95 + sw * 1.6, 1.62], [-0.5 + sw * 1.4, 1.75], [-0.1 + sw, 1.45], [0.05, 0.7], [0.2, 0.1]], 4).map(HT);
     cel(ctx, P, darken(hair, 0.9), 1.1, 401);
     if (!J.simple) for (let i = 0; i < 3; i++) stroke(ctx, quad([-0.9 + i * 0.22, 0.2], [-0.95 + i * 0.25 + sw, 1.0], [-0.8 + i * 0.25 + sw * 1.5, 1.55], 10).map(HT), 0.5, 402 + i, rgba(darken(hair, 0.55), 0.6));
   }
   if (lk.hairStyle === 'ponytail') {
+    const hatted = G.pro && lk.hat;                    // in profile a hat's brim hides the tail's root
+    if (hatted) { ctx.save(); hatClip(ctx, J); }
     const g = -J.th, extra = clamp((Math.abs(g) - 0.6) / 0.92, 0, 1) * 1.62 * Math.sign(g);   // hangs with gravity, lies along the floor when the head is down
     const a = g + extra + 0.2 * Math.sin(t * 2.3) * (1 - Math.abs(extra) / 1.62) + 0.25 * J.p.gait * Math.sin(t * 8.1);
     const R = q => add([-0.86, -0.5], rot(q, a));
     const P = spline([[0.05, -0.12], [-0.3, -0.05], [-0.48, 0.35], [-0.42, 0.85], [-0.25, 1.05], [-0.14, 0.75], [-0.05, 0.35], [0.12, 0.1]].map(R), 4).map(HT);
     cel(ctx, P, hair, 1.1, 403);
     if (!J.simple) stroke(ctx, [[-0.12, 0.05], [-0.3, 0.45], [-0.25, 0.85]].map(R).map(HT), 0.5, 404, rgba(darken(hair, 0.55), 0.6));
+    if (hatted) ctx.restore();
   }
 }
 // A hanging chain (hair, cloth): leaves `root` along d0, bends toward gravity g by `bend` of its length, ripples with a
@@ -849,10 +928,10 @@ function chainFrame(P) {
 // gravity and a little sway; on the ground they lie flat. Ties use the scarf colour (as the ponytail band does).
 function braidPath(J, lk, near) {
   const { G, HT, k, th } = J, t = J.t, er = G.ear, ph = near ? 0 : 1.3;
-  const root = HT(near ? [er[0] - 0.1, er[1] + 0.26] : [G.xc - 0.22, 0.5]);
+  const root = HT(near ? [er[0] - 0.1, er[1] + 0.26] : G.pro ? [er[0] - 0.24, er[1] + 0.2] : [G.xc - 0.22, 0.5]);   // in profile both hang behind the ear
   const sw = 0.07 * Math.sin(t * 1.9 + ph) + 0.18 * J.p.gait * Math.sin(t * 7.3 + ph);
   const Lb = (near ? 1.75 : 1.5) * k * (J.M.child ? 1 : 1.25);
-  return { P: hangChain(J, root, rot([0, 1], th), [(near ? -0.16 : 0.05) + sw, 1], Lb), w0: 0.21 * k, w1: 0.13 * k };
+  return { P: hangChain(J, root, rot([0, 1], th), [(near ? -0.16 : G.pro ? -0.22 : 0.05) + sw, 1], Lb), w0: 0.21 * k, w1: 0.13 * k };
 }
 function drawBraid(ctx, J, lk, near) {
   const { P, w0, w1 } = braidPath(J, lk, near), hair = near ? lk.hair : darken(lk.hair, 0.88), k = J.k;
@@ -930,12 +1009,12 @@ function drawBunHair(ctx, J, lk, P, sh) {
   drawBun(ctx, J, lk, sh);
   // loose wisps that escaped the pins: at the temple in front of the ear, and at the nape
   const sw = 0.02 * Math.sin(t * 1.7), W = [
-    [[er[0] + 0.16, er[1] - 0.26], [er[0] + 0.27 + sw, er[1] - 0.06], [er[0] + 0.19 + sw, er[1] + 0.16]],
+    G.pro ? [[er[0] + 0.2, er[1] - 0.32], [er[0] + 0.29 + sw, er[1] - 0.16], [er[0] + 0.23 + sw, er[1] - 0.0]] : [[er[0] + 0.16, er[1] - 0.26], [er[0] + 0.27 + sw, er[1] - 0.06], [er[0] + 0.19 + sw, er[1] + 0.16]],
     [[xc - 0.2, -0.36], [xc - 0.13 + sw, -0.24], [xc - 0.19 + sw, -0.14]],
     [[-0.62, 0.28], [-0.8 + sw, 0.42], [-0.68 + sw, 0.58]],
     [[-0.56, 0.3], [-0.6 + sw, 0.44], [-0.52 + sw, 0.52]],
   ];
-  for (const [i, w] of (simple ? W.slice(0, 1) : W).entries()) {
+  for (const [i, w] of (simple ? W.slice(0, 1) : G.pro ? W.filter((_, n) => n !== 1) : W).entries()) {   // (in profile the second would lie on the forehead)
     const Q = quad(...w, 8).map(HT);
     stroke(ctx, Q, simple ? 0.8 : 0.75, 460 + i, rgba(dk, 0.85));
     if (!simple) stroke(ctx, Q, 0.38, 470 + i, rgba(lighten(hair, 0.15), 0.9));
@@ -986,6 +1065,7 @@ function hairStrands(ctx, J, P, lk, seed) {
   ctx.restore();
 }
 function drawHead(ctx, J, lk, ex, st) {
+  if (J.G.pro) return drawHeadP(ctx, J, lk, ex, st);
   const { G, HT, k } = J, xc = G.xc, simple = J.simple, hair = lk.hair, style = lk.hairStyle;
   const skin = lk.skin, talk = clamp(st.talk || 0), o = Math.max(ex.mouth.open || 0, talk);
   const CP = G.CP.map((q, i) => (i >= 4 && i <= 6 ? [q[0], q[1] + o * (i === 4 ? 0.03 : 0.07)] : q));
@@ -1072,6 +1152,34 @@ function drawHead(ctx, J, lk, ex, st) {
   if (lk.hat && style !== 'cap') drawHat(ctx, J, lk, sh);
   return head;
 }
+function curls(P, a, step = 0.15) {                // an open edge broken into round curls (cusps between them) bulging away from the skull
+  const S = [P[0]]; let acc = 0;
+  for (let i = 1; i < P.length; i++) { acc += len(sub(P[i], P[i - 1])); if (acc >= step) { S.push(P[i]); acc = 0; } }
+  if (S[S.length - 1] !== P[P.length - 1]) S.push(P[P.length - 1]);
+  const out = [S[0]];
+  for (let i = 0; i < S.length - 1; i++) {
+    const A = S[i], B = S[i + 1], d = sub(B, A), L = len(d) || 1e-3, t = mul(d, 1 / L), m = mid(A, B);
+    let n = [-t[1], t[0]]; if (m[0] * n[0] + (m[1] + 0.12) * n[1] < 0) n = mul(n, -1);
+    const h = Math.min(a, L * 0.45) / (L / 2);
+    for (let j = 1; j <= 6; j++) { const q = (j / 6) * Math.PI; out.push(add(m, add(mul(t, -Math.cos(q) * L / 2), mul(n, Math.sin(q) * h * L / 2)))); }
+  }
+  return out;
+}
+// An open edge broken into tufts: uneven flicks leaning back toward the start of the edge (a fringe's upper edge, drawn
+// from the back of the head forward), pointing away from the skull.
+function tufts(P, a, step, seed) {
+  const S = [P[0]]; let acc = 0;
+  for (let i = 1; i < P.length; i++) { acc += len(sub(P[i], P[i - 1])); if (acc >= step) { S.push(P[i]); acc = 0; } }
+  if (S[S.length - 1] !== P[P.length - 1]) S.push(P[P.length - 1]);
+  const out = [S[0]], fr = x => x - Math.floor(x);
+  for (let i = 0; i < S.length - 1; i++) {
+    const A = S[i], B = S[i + 1], d = sub(B, A), L = len(d) || 1e-3, t = mul(d, 1 / L), m = mid(A, B);
+    let n = [-t[1], t[0]]; if (m[0] * n[0] + (m[1] + 0.12) * n[1] < 0) n = mul(n, -1);
+    const h = a * (0.35 + 0.65 * fr(Math.sin((i + 1) * 12.9898 + seed * 78.233) * 43758.5453)) * (i === S.length - 2 ? 0.4 : 1);
+    out.push(add(mid(A, B, 0.2), mul(n, h * 0.2)), add(mid(A, B, 0.38), mul(n, h)), add(mid(A, B, 0.62), mul(n, h * 0.25)), B);
+  }
+  return out;
+}
 function scallop(P, a) {                             // bumpy outline for curly hair
   const out = [], step = 5;
   for (let i = 0; i < P.length; i += step) {
@@ -1102,10 +1210,11 @@ function drawGlasses(ctx, J, lk, rx, ry) {
 }
 function drawCap(ctx, J, lk, sh) {
   const { G, HT, CP = G.CP } = J, xc = G.xc, col = lk.hat || '#c8443a';
-  const back = hairCap(G, 0.06, 'none', lk).map(HT); cel(ctx, back, lk.hair, 1, 450, sh);
+  const back = (G.pro ? hairCapP(G, 0.06, 'none') : hairCap(G, 0.06, 'none', lk)).map(HT); cel(ctx, back, lk.hair, 1, 450, sh);
   const dome = spline([radial(CP[9], 0.08), radial(CP[10], 0.1), radial(CP[0], 0.1), radial(CP[1], 0.08), [xc + 0.46, -0.42], [xc + 0.1, -0.36], [-0.5, -0.26], [-0.92, -0.1]], 4).map(HT);
   cel(ctx, dome, col, 1.1, 451, sh);
-  const brim = spline([[xc + 0.05, -0.42], [xc + 0.6, -0.5], [xc + 0.98, -0.42], [xc + 0.96, -0.34], [xc + 0.55, -0.34], [xc + 0.1, -0.3]], 3).map(HT);
+  const R = G.pro ? 0.7 : 1, bx = v => xc + 0.05 + (v - 0.05) * R;   // in profile the peak sticks out less (it is seen side-on)
+  const brim = spline([[bx(0.05), -0.42], [bx(0.6), -0.5], [bx(0.98), -0.42], [bx(0.96), -0.34], [bx(0.55), -0.34], [bx(0.1), -0.3]], 3).map(HT);
   cel(ctx, brim, darken(col, 0.85), 1.05, 452, sh);
   const b = HT([CP[0][0] + 0.02, CP[0][1] - 0.1]); dot(ctx, b[0], b[1], 0.06 * J.k, darken(col, 0.7));
   if (!J.simple) stroke(ctx, quad([CP[0][0] + 0.02, CP[0][1] - 0.08], [xc + 0.1, -0.8], [xc + 0.3, -0.42], 8).map(HT), 0.45, 453, rgba(darken(col, 0.5), 0.6));
@@ -1118,6 +1227,347 @@ function drawHat(ctx, J, lk, sh) {
   cel(ctx, band, darken(col, 0.6), 0.8, 461, sh);
   const brim = spline([[-1.3, -0.3], [-0.6, -0.5], [xc + 0.3, -0.55], [xc + 1.0, -0.42], [xc + 0.95, -0.34], [xc + 0.2, -0.42], [-0.6, -0.36], [-1.28, -0.22]], 4).map(HT);
   cel(ctx, brim, lighten(col, 0.08), 1.1, 462, sh);
+}
+
+// ───────────────────────── the profile head ─────────────────────────
+// The near eye in profile: a rounded front (the cornea) and a pointed back corner, the upper lid arched higher than
+// the lower; the iris an upright oval near the front, looking where the face points (st.gaze[0] moves it forward /
+// back). Lids, blink, the laughing arc, the lower-lid squint and the tear work as in drawEye; an elder gets a soft fold
+// above the lid and a little bag below.
+function drawEyeP(ctx, HT, k, e, rx, ry, st, lk, simple, seed) {
+  const E = (x, y) => HT([e[0] + x, e[1] + y]), skin = lk.skin, iris = lk.eyes, lash = '#2a1e22', elder = lk.age === 'elder';
+  if (st.shape === 'arc' || st.lid > 0.94) {
+    const up = st.shape === 'arc';
+    const P = arcPts(0, 0, rx * 1.12, ry * (up ? 0.7 : 0.42), up ? Math.PI * 1.06 : Math.PI * 0.06, up ? Math.PI * 1.94 : Math.PI * 0.94, 0.02).map(q => E(q[0], q[1] + (up ? ry * 0.3 : -ry * 0.02)));
+    stroke(ctx, up ? P.slice().reverse() : P, simple ? 1.7 : 1.6, seed);
+    if (!simple) stroke(ctx, [E(-rx * 1.1, up ? ry * 0.28 : -ry * 0.02), E(-rx * 1.5, up ? ry * 0.12 : ry * 0.08)], 0.75, seed + 1, lash);   // the lashes at the back corner
+    if (st.tear > 0.01) tearP(ctx, E, k, up ? [rx * 0.95, ry * 0.26] : [rx * 0.9, ry * 0.1], ry, st.tear, simple, seed);   // at the front end of the arc
+    return;
+  }
+  const wide = st.shape === 'wide' ? 1.12 : 1, RX = rx * wide, RY = ry * wide;
+  const q = x => clamp(x / RX, -1, 1), hh = x => (x >= 0 ? Math.sqrt(1 - q(x) ** 2) : 1 - q(x) ** 2);
+  const top = x => -RY * hh(x) - RY * 0.06 * Math.max(0, -q(x)), bot = x => RY * 0.82 * hh(x) - RY * 0.06 * Math.max(0, -q(x));
+  const N = 18, xs = Array.from({ length: N + 1 }, (_, i) => -RX + (i / N) * 2 * RX);
+  const gx = clamp(st.gaze[0], -1, 1) * RX * 0.5 + RX * 0.32, gy = clamp(st.gaze[1], -1, 1) * RY * 0.3;
+  const iy = RY * (st.shape === 'wide' ? 0.62 : 0.74), ix = iy * 0.66;
+  if (simple) {                                        // small on screen: a dark upright oval with a glint
+    const W = [...xs.map(x => E(x, top(x))), ...xs.slice(1, -1).reverse().map(x => E(x, bot(x)))], I = E(gx * 0.8, gy * 0.5 + RY * 0.04);
+    ctx.save(); path(ctx, W); ctx.clip();
+    fillP(ctx, W, '#fbf8f2');
+    ctx.fillStyle = darken(iris, 0.45); ctx.beginPath(); ctx.ellipse(I[0], I[1], ix * k * 1.05, iy * k * 1.05, 0, 0, 7); ctx.fill();
+    const g = E(gx * 0.8 - ix * 0.3, gy * 0.5 - iy * 0.35); dot(ctx, g[0], g[1], ix * k * 0.42, '#fff');
+    if (st.lid > 0.25) { const y = -RY + st.lid * RY * 2; fillP(ctx, [E(-RX * 1.3, -RY * 1.3), E(RX * 1.3, -RY * 1.3), E(RX * 1.3, y), E(-RX * 1.3, y)], skin); }
+    ctx.restore();
+    const lid = st.lid > 0.25 ? -RY + st.lid * RY * 2 : null;
+    stroke(ctx, xs.map(x => E(x, lid === null ? top(x) : Math.max(top(x), lid))), 1.3, seed + 3, lash);
+    stroke(ctx, [E(-RX, top(-RX)), E(-RX * 1.45, -RY * 0.35)], 0.8, seed + 4, lash);
+    if (st.tear > 0.01) tearP(ctx, E, k, [RX * 0.72, bot(RX * 0.72)], RY, st.tear, simple, seed);
+    return;
+  }
+  const lid = clamp(st.lid, 0, 1), ly = -RY + lid * RY * 1.9;
+  const lidY = x => ly + RY * 0.14 * (1 - lid) * (1 - q(x) ** 2) + x * 0.06;          // a little lower toward the back corner
+  const topY = x => Math.max(top(x), lidY(x)), by = x => bot(x) - st.low * RY * 1.15 * hh(x);
+  const botY = x => Math.max(topY(x), st.low > 0.02 ? by(x) : bot(x));
+  // only the open part is painted (covering a white with lid skin would leave its antialiased rim showing)
+  const Wv = [...xs.map(x => E(x, topY(x))), ...xs.slice(1, -1).reverse().map(x => E(x, botY(x)))];
+  fillP(ctx, Wv, '#fbf8f2');
+  ctx.save(); path(ctx, Wv); ctx.clip();
+  const I = E(gx, gy + RY * 0.06);
+  ctx.fillStyle = iris; ctx.beginPath(); ctx.ellipse(I[0], I[1], ix * k, iy * k, 0, 0, 7); ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.ellipse(I[0], I[1], ix * k, iy * k, 0, 0, 7); ctx.clip();
+  ctx.fillStyle = darken(iris, 0.62); ctx.beginPath(); ctx.ellipse(I[0], I[1] - iy * k * 0.75, ix * k * 1.3, iy * k * 0.7, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = lighten(iris, 0.28); ctx.beginPath(); ctx.ellipse(I[0] + ix * k * 0.1, I[1] + iy * k * 0.95, ix * k * 0.85, iy * k * 0.55, 0, 0, 7); ctx.fill(); ctx.restore();
+  ctx.fillStyle = '#1c1418'; ctx.beginPath(); ctx.ellipse(I[0] + ix * k * 0.08, I[1], ix * k * (st.shape === 'wide' ? 0.42 : 0.52), iy * k * (st.shape === 'wide' ? 0.4 : 0.5), 0, 0, 7); ctx.fill();
+  const h1 = E(gx - ix * 0.28, gy - iy * 0.3), h2 = E(gx + ix * 0.4, gy + iy * 0.42);
+  dot(ctx, h1[0], h1[1], iy * k * 0.24, '#ffffff'); dot(ctx, h2[0], h2[1], iy * k * 0.1, 'rgba(255,255,255,.85)');
+  ctx.fillStyle = 'rgba(70,50,70,.16)'; ctx.beginPath(); poly(ctx, [...xs.map(x => E(x, topY(x))), ...xs.slice().reverse().map(x => E(x, topY(x) + RY * 0.22))]); ctx.fill();
+  ctx.restore();
+  // the lash line along the visible top, heaviest at the back, with lashes flicking back off the outer corner; the
+  // lower lid a fine line; an elder's soft fold above the lid and a bag below
+  const lt = xs.map(x => E(x, topY(x)));
+  stroke(ctx, lt, 1.45, seed + 3, lash);
+  const oc = E(-RX, topY(-RX));
+  stroke(ctx, [oc, E(-RX * 1.42, topY(-RX) - RY * 0.3)], 0.75, seed + 4, lash);
+  stroke(ctx, [E(-RX * 0.7, topY(-RX * 0.7)), E(-RX * 1.1, topY(-RX * 0.7) - RY * 0.42)], 0.6, seed + 7, lash);
+  stroke(ctx, xs.slice(1).map(x => E(x, botY(x))), 0.5, seed + 5, 'rgba(60,40,50,.55)');
+  if (st.tear > 0.01) {                                // a wet glint along the lower lid, and the tear itself on the skin
+    stroke(ctx, xs.slice(5, -2).map(x => E(x, botY(x) - RY * 0.04)), 0.5, seed + 6, `rgba(255,255,255,${0.7 * st.tear})`);
+    tearP(ctx, E, k, [RX * 0.72, botY(RX * 0.72)], RY, st.tear, simple, seed);
+  }
+  if (elder) {
+    const wc = rgba(darken(skin, 0.55), 0.55);
+    stroke(ctx, xs.slice(2, -4).map(x => E(x, Math.min(top(x), lidY(x)) - RY * 0.32)), 0.45, seed + 8, wc);
+    stroke(ctx, xs.slice(4, -3).map(x => E(x, bot(x) + RY * 0.32)), 0.4, seed + 9, rgba(darken(skin, 0.55), 0.4));
+  }
+}
+// A tear in profile sits outside the eye, so it reads against the skin and not as eye white or a glint on the lens: a
+// glassy bead hanging from the lower-lid rim at the front corner (c, eye-local), and once it is full (tear 0.7 and up) a
+// wet streak running down the cheek toward the blush.
+function tearP(ctx, E, k, c, RY, tear, simple, seed) {
+  const r = RY * (simple ? 0.4 : 0.3), cy = c[1] + r * 1.05, P = [E(c[0], c[1] - r * 0.15)];
+  for (let i = 0; i <= 14; i++) { const a = -Math.PI / 2 + 0.55 + (i / 14) * (2 * Math.PI - 1.1); P.push(E(c[0] + r * Math.cos(a), cy + r * Math.sin(a))); }
+  const st = clamp((tear - 0.6) / 0.3);
+  if (st > 0) stroke(ctx, [[c[0] - r * 0.1, cy + r * 0.6], [c[0] - r * 0.5, cy + r * 2.4], [c[0] - r * 1.3, cy + r * 4.6]].map(q => E(q[0], q[1])), 1.2, seed + 9, `rgba(225,242,255,${0.6 * st})`);
+  fillP(ctx, P, `rgba(214,236,252,${0.8 * tear})`);
+  if (!simple) stroke(ctx, P.slice(2, -2), 0.4, seed + 10, `rgba(140,185,225,${0.9 * tear})`);
+  const h = E(c[0] + r * 0.3, cy - r * 0.25); dot(ctx, h[0], h[1], r * k * 0.32, `rgba(255,255,255,${0.95 * tear})`);
+}
+// The open mouth's inside, in the notch the dropped jaw cuts into the outline: dark, the upper teeth along the upper
+// lip (smiles, and bared in anger), the tongue low at the back.
+function drawMouthInsideP(ctx, J, O, mo, o) {
+  const P = O.notch.map(J.HT);
+  fillP(ctx, P, LIP);
+  ctx.save(); path(ctx, P); ctx.clip();
+  if (o > 0.15 && (mo.teeth || mo.curve >= 0) && !mo.o) {
+    const U = O.upper.slice(0, -1), d = 0.03 + 0.035 * Math.min(1, o * 1.5);
+    fillP(ctx, [...U, ...U.slice().reverse().map(q => [q[0], q[1] + d])].map(J.HT), TEETH);
+  }
+  if (o > 0.3) { const c = J.HT(add(mid(O.Cn, O.stL, 0.45), [0, -0.012])), w = len(sub(O.Cn, O.stL)) * J.k; ctx.fillStyle = TONGUE; ctx.beginPath(); ctx.ellipse(c[0], c[1], w * 0.42, w * 0.2, J.th + 0.35, 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+// The mouth line: from between the lips back to the corner (along the open mouth's upper lip), curling up past the
+// corner in a smile and down in a frown, wavy when worried; a cheek crease beside a big smile.
+function drawMouthP(ctx, J, O, mo, simple, skin) {
+  const c = mo.curve, f = O.f, Cl = add(O.Cm0, mul(sub(O.Cm, O.Cm0), f)), s = O.stU, T = J.HT;
+  const ctl = add(mid(s, Cl), [0, 0.014 * c - 0.012 * c * f]);
+  let P = quad(s, ctl, Cl, 8);
+  if (mo.wavy && f < 0.5) P = P.map((q, i) => [q[0], q[1] + 0.012 * Math.sin((i / 8) * Math.PI * 2)]);
+  const curl = Math.abs(c) > 0.12 ? [add(Cl, [-0.035, -0.04 * c])] : [];
+  stroke(ctx, [s, ...P.slice(1), ...curl].map(T), simple ? 1.35 : 1.1, 44);
+  if (!simple && c > 0.6) stroke(ctx, quad(add(Cl, [-0.01, -0.05]), add(Cl, [-0.042, -0.008]), add(Cl, [-0.018, 0.035]), 6).map(T), 0.45, 45, rgba(darken(skin, 0.5), 0.5));
+}
+// The ear: a C-shaped rim with its lobe, attached in front, tilted back a little, one fold inside and a soft hollow.
+function drawEarP(ctx, J, lk, sh) {
+  const { G, HT } = J, [ex, ey] = G.ear, [rx, ry] = G.earR, skin = lk.skin;
+  const Q = ([u, v]) => HT(add([ex, ey], rot([u * rx, v * ry], -0.2)));
+  const P = spline([[0.36, -0.86], [-0.2, -1.0], [-0.82, -0.74], [-1.0, -0.12], [-0.84, 0.4], [-0.48, 0.74], [-0.08, 1.0], [0.3, 0.9], [0.4, 0.58], [0.5, 0.15], [0.55, -0.4]], 4).map(Q);
+  cel(ctx, P, skin, 0, 42, mul(sh, 0.7));
+  // a light rim in a darker skin tone (not the head's ink), fading out at the front where the ear joins the cheek
+  const rim = darken(skin, 0.45), R = 32;           // P[R]: the lobe's front ([0.4, 0.58]); from there on the front edge
+  stroke(ctx, P.slice(0, R + 1), J.simple ? 0.8 : 0.7, 42, rgba(rim, 0.9));
+  stroke(ctx, [...P.slice(R), P[0]], 0.5, 48, rgba(rim, 0.45));
+  if (J.simple) { stroke(ctx, [[0.05, -0.55], [-0.45, -0.35], [-0.4, 0.25]].map(Q), 0.7, 43, rgba(darken(skin, 0.5), 0.8)); return; }
+  ctx.save(); path(ctx, P); ctx.clip(); const h = Q([0.12, 0.08]);
+  ctx.fillStyle = rgba(darken(skin, 0.7), 0.35); ctx.beginPath(); ctx.ellipse(h[0], h[1], rx * J.k * 0.3, ry * J.k * 0.3, J.th - 0.2, 0, 7); ctx.fill(); ctx.restore();
+  stroke(ctx, spline([[0.18, -0.64], [-0.4, -0.6], [-0.62, -0.1], [-0.46, 0.38], [-0.08, 0.5]], 4, false).map(Q), 0.6, 43, rgba(darken(skin, 0.5), 0.85));
+  stroke(ctx, [[0.42, 0.02], [0.3, 0.2], [0.34, 0.36]].map(Q), 0.45, 47, rgba(darken(skin, 0.5), 0.6));
+}
+// Hair in profile: the mass over the skull (as hairCap: 5 outer controls, the front, then the hairline, so the bun's
+// indices hold), its hairline running from the forehead back along the temple, in front of the ear (a short
+// sideburn), over it and down behind it to the nape. fringe as hairCap's: 'locks' are bangs on the forehead line.
+function hairCapP(G, vol, fringe) {
+  const { CP } = G, [ex, ey] = G.ear, ery = G.earR[1], et = ey - ery, eb = ey + ery, H = mid(CP[1], G.F.fh, 0.6);
+  const outer = [CP[8], CP[9], CP[10], CP[0], CP[1]].map(q => radial(q, vol));
+  outer[0] = radial([-0.66, 0.42], vol * 0.5);
+  const front = radial([H[0] + 0.02, H[1] - 0.05], vol * 0.6);
+  const L = {
+    locks: [[0.12, 0.17], [0.05, 0.11], [0.065, 0.24], [-0.03, 0.15], [-0.04, 0.25], [-0.13, 0.17]],
+    sweep: [[0.05, 0.07], [-0.08, 0.12]],
+    back: [[0.0, 0.02], [-0.05, 0.0], [-0.1, 0.07], [-0.17, 0.08], [-0.23, 0.15]],
+    part: [[0.04, 0.05], [-0.1, 0.1]],
+  }[fringe] || [[0.01, 0.04], [-0.14, 0.1]];
+  const line = [...L.map(([u, v]) => [H[0] + u, H[1] + v]), [ex + 0.27, et - 0.2], [ex + 0.22, et + 0.05], [ex + 0.1, et - 0.04], [ex - 0.04, et - 0.08], [ex - 0.18, et + 0.04], [ex - 0.2, eb - 0.05], [-0.52, 0.5]];
+  return spline([...outer, front, ...line], 4);
+}
+// A beard in profile: from the sideburn down the jaw, under and round the chin to below the lower lip (it drops with
+// the jaw), back along the cheek; full stands out past the chin and has a moustache over the upper lip.
+function drawBeardP(ctx, J, lk, O, head) {
+  const { G, HT } = J, [ex, ey] = G.ear, et = ey - G.earR[1], L = O.L, full = lk.beard === 'full', x = full ? 0.08 : 0.02, F = G.F;
+  const Q = [[ex + 0.22, et + 0.02], [ex + 0.18, et + 0.22], radial(L.go, x * 0.5), radial(L.uj, x), [L.men[0] + x * 0.4, L.men[1] + x * 0.9], [L.chin[0] + x, L.chin[1] + x * 0.3], [L.sul[0] + x * 0.4, L.sul[1]],
+    [L.ll[0] - 0.04, L.ll[1] + 0.035], [O.Cm[0] - 0.03, O.Cm[1] + 0.05], [G.eyeN[0] - 0.06, G.eyeY + 0.4], [ex + 0.3, et + 0.22]];
+  const P = spline(Q, 4).map(HT);
+  if (!full) {                                         // stubble: a shadow of the hair colour on the jaw, flecked, no outline
+    // feathered: the patch is laid five times, its upper edge (the sideburn top and the cheek line) drawn a step further
+    // down toward the jaw each time, so it thickens toward the jaw and fades out on the cheek
+    const fr = x => x - Math.floor(x), hash = i => fr(Math.sin(i * 12.9898 + 4.1) * 43758.5453);
+    const to = { 0: L.go, 1: L.go, 8: L.sul, 9: L.uj, 10: L.go };
+    ctx.save(); path(ctx, head); ctx.clip();
+    for (const u of [0, 0.18, 0.36, 0.54, 0.72]) fillP(ctx, spline(Q.map((q, i) => (to[i] ? mid(q, to[i], u) : q)), 4).map(HT), rgba(darken(lk.hair, 0.8), 0.055));
+    path(ctx, P); ctx.clip();
+    if (!J.simple) {                                   // flecks scattered at random, denser along the jaw and chin
+      ctx.fillStyle = rgba(darken(lk.hair, 0.6), 0.32);
+      const bz = (a, b, c, u) => mid(mid(a, b, u), mid(b, c, u), u), top = u => bz(Q[10], Q[9], Q[8], u), bot = u => bz(L.go, L.uj, L.chin, u);
+      for (let i = 0; i < 70; i++) {
+        const u = hash(i), v = Math.sqrt(hash(i + 97)), q = HT(mid(top(u), bot(u), v));
+        ctx.beginPath(); ctx.arc(q[0], q[1], (0.006 + 0.008 * hash(i + 211)) * J.k, 0, 7); ctx.fill();
+      }
+    }
+    ctx.restore();
+    return;
+  }
+  cel(ctx, P, lk.hair, 1, 430, mul(SH, 0.6));
+  if (!J.simple) for (let i = 0; i < 4; i++) stroke(ctx, quad([L.chin[0] - 0.42 + i * 0.1, L.chin[1] - 0.2], [L.chin[0] - 0.36 + i * 0.11, L.chin[1] + 0.0], [L.men[0] - 0.3 + i * 0.12, L.men[1] + 0.06], 6).map(HT), 0.45, 431 + i, rgba(darken(lk.hair, 0.6), 0.6));
+  const s = O.stU, c = O.Cm;                           // the moustache over the upper lip
+  cel(ctx, spline([[F.sub[0] + 0.005, F.sub[1] + 0.01], [F.ul[0] + 0.025, F.ul[1] + 0.01], [s[0] + 0.01, s[1] + 0.01], [c[0] + 0.02, c[1] + 0.02], [c[0] - 0.04, c[1] + 0.0], [c[0] - 0.02, c[1] - 0.06], [F.sub[0] - 0.1, F.sub[1] + 0.02]], 3).map(HT), darken(lk.hair, 0.95), 0.8, 45, mul(SH, 0.25));
+}
+// Glasses in profile: one round lens in front of the eye, a stub of the bridge toward the nose and the temple arm
+// running back to the ear, one glint on the lens.
+function drawGlassesP(ctx, J, lk, rx, ry) {
+  const { G, HT, k } = J, c = lk.glasses, e = G.eyeN, r1 = ry * 1.3, lr = r1 * 0.68, C = [e[0] + rx * 0.5, e[1] + 0.01];
+  const [ex, ey] = G.ear, et = ey - G.earR[1];
+  const A = ell(C[0], C[1], lr, r1, 440, 0).map(HT);
+  ctx.fillStyle = 'rgba(220,235,245,.18)'; path(ctx, A); ctx.fill();
+  // the temple arm (three quarters of the rim's weight, so it holds at every size) runs back to the ear and hooks down
+  // over the top of it
+  const t0 = [C[0] - lr * 0.92, C[1] - r1 * 0.32], a1 = [ex + 0.1, et - 0.03];
+  ln(ctx, [...quad(t0, mid(t0, a1, 0.5), a1, 6), ...quad(a1, [ex - 0.01, et - 0.06], [ex - 0.07, et + 0.03], 4).slice(1)].map(HT), 0.72, { closed: false, taper: 0.12, seed: 444, color: c });
+  ln(ctx, A, 0.95, { seed: 442, color: c });
+  ln(ctx, quad([C[0] + lr * 0.9, C[1] - r1 * 0.4], [lerp(C[0] + lr * 0.9, G.F.nas[0], 0.5), C[1] - r1 * 0.5], [G.F.nas[0] - 0.01, G.F.nas[1] - 0.02], 4).map(HT), 0.72, { closed: false, taper: 0.3, seed: 443, color: c });
+  const lx = Math.sign(SH[0]) || -1, a0 = Math.atan2(-1, lx);
+  if (J.simple) { const q = HT([C[0] + lx * lr * 0.45, C[1] - r1 * 0.5]); dot(ctx, q[0], q[1], 0.055 * k, 'rgba(255,255,255,.9)'); }
+  else stroke(ctx, arcPts(C[0], C[1], lr * 0.7, r1 * 0.7, a0 - 0.38, a0 + 0.3, 0.01).map(HT), 1.15, 445, 'rgba(255,255,255,.92)');
+}
+// Long hair in profile: one fall of hair from the crown, tucked behind the ear, down over the back of the neck onto the
+// shoulders in three uneven pointed ends. Above the nape it stays with the head; below, it hangs with gravity (it turns
+// back by the head's angle about a root at the nape, as the ponytail does) and sways. Returns the outline (canvas
+// units), where its inked silhouette ends (from there it is the hairline, behind the ear and round to the forehead) and
+// R, the head-space map that hangs a point.
+function longHairP(J) {
+  const { G, t } = J, vol = HAIR_VOL.long, { CP } = G, [ex, ey] = G.ear, ery = G.earR[1], et = ey - ery, eb = ey + ery, H = mid(CP[1], G.F.fh, 0.6);
+  const sw = 0.05 * Math.sin(t * 1.9 + 0.5) + 0.1 * J.p.gait * Math.sin(t * 7.3), root = [-0.6, eb], y0 = eb - 0.1, g = -clamp(J.th, -1.2, 1.2) + sw;
+  const R = q => { const u = smooth(y0, y0 + 0.7, q[1]); return u > 0 ? add(root, rot(sub(q, root), g * u)) : q; };
+  const front = radial([H[0] + 0.02, H[1] - 0.05], vol * 0.6);
+  const sil = spline([front, ...[CP[1], CP[0], CP[10], CP[9]].map(q => radial(q, vol)), radial([-1.0, 0.1], vol), [-1.11, 0.6], [-1.19, 1.12], [-1.12, 1.62]], 5, false);
+  const tips = [[-0.94, 1.43], [-0.78, 1.73], [-0.64, 1.47], [-0.47, 1.6]];
+  const fe = spline([[-0.47, 1.6], [ex - 0.25, 1.22], [ex - 0.13, 0.86], [ex - 0.13, eb + 0.12]], 5, false).slice(1);
+  const hl = spline([[ex - 0.13, eb + 0.12], [ex - 0.19, eb - 0.06], [ex - 0.16, et + 0.06], [ex - 0.04, et - 0.08], [ex + 0.1, et - 0.04], [ex + 0.22, et + 0.05], [ex + 0.27, et - 0.2], [H[0] - 0.08, H[1] + 0.12], [H[0] + 0.05, H[1] + 0.07], front], 4, false).slice(1, -1);
+  return { P: wobble([...sil, ...tips, ...fe, ...hl].map(R).map(J.HT), 415, 0.2), inkEnd: sil.length + tips.length + fe.length - 1, R, ex, eb };
+}
+function drawLongHairP(ctx, J, lk, hsh) {
+  const { P, inkEnd, R, ex, eb } = longHairP(J), hair = lk.hair, dk = darken(hair, 0.55), T = q => J.HT(R(q));
+  cel(ctx, P, hair, 0, 410, hsh);
+  ln(ctx, P.slice(0, inkEnd + 1), 1.1, { closed: false, seed: 410, taper: 0.03 });   // the silhouette, down the back, the ends and the lock's front edge
+  stroke(ctx, [...P.slice(inkEnd), P[0]], J.simple ? 0.8 : 0.6, 409, rgba(darken(hair, 0.6), J.simple ? 0.9 : 0.75));   // the hairline: soft
+  if (J.simple) return;
+  hairStrands(ctx, J, P, lk, 411);
+  ctx.save(); path(ctx, P); ctx.clip();               // strand splits down the fall, ending in the notches between the ends
+  stroke(ctx, quad([ex - 0.3, eb + 0.05], [ex - 0.36, 1.08], [-0.64, 1.47], 10).map(T), 0.6, 416, rgba(dk, 0.7));
+  stroke(ctx, quad([-0.76, 0.2], [-0.92, 0.85], [-0.94, 1.43], 10).map(T), 0.5, 417, rgba(dk, 0.55));
+  stroke(ctx, quad([-0.5, 0.45], [-0.6, 1.0], [-0.76, 1.5], 8).map(T), 0.45, 418, rgba(dk, 0.45));
+  stroke(ctx, quad([-1.0, 0.2], [-1.06, 0.7], [-1.04, 1.1], 8).map(T), 1.2, 419, rgba(lighten(hair, 0.45), 0.45));
+  ctx.restore();
+}
+// Under a hat (not a cap) hair shows only below the brim: clip to the region under the brim's top edge (head space).
+function hatClip(ctx, J) {
+  const xc = J.G.xc;
+  path(ctx, [[-1.3, -0.3], [-0.6, -0.5], [xc + 0.3, -0.55], [xc + 1.0, -0.42], [xc + 1.6, -0.42], [xc + 1.6, 3], [-2.2, 3], [-2.2, -0.3]].map(J.HT)); ctx.clip();
+}
+function drawHeadP(ctx, J, lk, ex, st) {
+  const { G, HT, k } = J, F = G.F, simple = J.simple, hair = lk.hair, style = lk.hairStyle, skin = lk.skin, ery = G.earR[1];
+  const talk = clamp(st.talk || 0), mo = ex.mouth, o = clamp(Math.max(mo.open || 0, talk > 0.05 ? 0.06 + talk * 0.78 : 0), 0, 1);
+  const O = G.outline({ o, c: mo.curve, w: mo.w, round: mo.o });
+  const vol = HAIR_VOL[style] ?? 0.1, sh = mul(SH, 0.8), hsh = [SH[0] * 1.2, SH[1] * 1.3];   // hsh: gentler than the 3/4's side light
+  if (O.notch) drawMouthInsideP(ctx, J, O, mo, o);
+  // skin: the outline's ink runs from the nape over the head and face to the angle of the jaw, where the neck takes over
+  const up = wobble(O.up.map(HT), 41, 0.2, false), lo = wobble(O.lo.map(HT), 47, 0.2, false), mi = O.mid.map(HT);
+  const head = [...up, ...mi, ...lo], shut = [...up, ...lo];
+  // lit from above: shade under the nose, chin and jaw, not a band down the face. It is taken from the outline with the
+  // mouth shut (an open mouth casts nothing on the lip) and kept off the philtrum and upper lip (no moustache); then a
+  // light edge just inside the front of the face (brow, nose, lips, chin), so the profile reads against a dark ground
+  ctx.save(); path(ctx, head); ctx.clip(); ctx.fillStyle = skin; ctx.fillRect(-900, -900, 1800, 1800);
+  ctx.beginPath(); ctx.rect(-900, -900, 1800, 1800);
+  poly(ctx, [[F.sub[0] - 0.2, F.sub[1] - 0.005], [F.tip[0] + 0.3, F.sub[1] - 0.005], [F.tip[0] + 0.3, O.stU[1] + 0.006], [O.Cm[0] - 0.1, O.Cm[1] + 0.012]].map(HT));
+  ctx.save(); ctx.clip('evenodd');
+  ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = SHADE;
+  ctx.beginPath(); ctx.rect(-900, -900, 1800, 1800); poly(ctx, shift(shut, SH[0] * 0.3, SH[1] * 0.75)); ctx.fill('evenodd');
+  ctx.restore();
+  ctx.fillStyle = lighten(skin, 0.28); ctx.beginPath(); ctx.rect(-900, -900, 1800, 1800); poly(ctx, shift(shut, -1.7 * LW, 0)); ctx.fill('evenodd');
+  if (style === 'bald' && (lk.age === 'child' || lk.age === 'teen')) {   // a shaved head: a faint stubble shadow under the ink
+    const C = hairCapP(G, 0, 'none').map(HT), c0 = HT([-0.25, -0.45]);
+    ctx.globalAlpha = 0.35; fillP(ctx, C, hair); ctx.globalAlpha = 1;
+    if (!simple) {                                   // a soft hairline: a fine darker line and a few root flecks inside it
+      const hl = C.slice(21, -2), fc = rgba(darken(hair, 0.6), 0.28);
+      stroke(ctx, hl, 0.5, 412, rgba(darken(hair, 0.75), 0.35));
+      for (let i = 1; i < hl.length - 1; i += 2) {
+        const q = hl[i], d = sub(c0, q), u = mul(d, 1 / (len(d) || 1)), h = Math.sin(i * 12.9898) * 43758.5453, j = h - Math.floor(h);
+        dot(ctx, q[0] + u[0] * (0.025 + 0.04 * j) * k, q[1] + u[1] * (0.025 + 0.04 * j) * k, (0.008 + 0.006 * j) * k, fc);
+      }
+    }
+  }
+  ctx.restore();
+  ln(ctx, [...up, ...mi, ...lo.slice(0, O.goI + 1)], 1.15, { closed: false, seed: 41, taper: 0.06 });
+  const [ex0, ey0] = G.ear, et = ey0 - ery, eb = ey0 + ery, hatted = lk.hat && style !== 'cap';
+  if (style === 'bald' && lk.age !== 'child' && lk.age !== 'teen') {   // a fringe of hair round the back, below the crown
+    if (hatted) { ctx.save(); hatClip(ctx, J); }
+    // a tufty band, thick at the back and the nape, thinner over the ear, ending in a sideburn that tapers to a point
+    // in front of the ear
+    const top = tufts(spline([radial([-0.92, -0.4], 0.035), [-0.66, -0.31], [-0.4, -0.22], [ex0 + 0.04, et - 0.13], [ex0 + 0.15, et - 0.07]], 6, false), 0.075, 0.13, 3);
+    const P = [...top, ...spline([[ex0 + 0.15, et - 0.07], [ex0 + 0.175, et + 0.08], [ex0 + 0.15, ey0 + 0.01], [ex0 + 0.11, et + 0.1], [ex0 + 0.06, et + 0.0], [ex0 - 0.04, et - 0.05], [ex0 - 0.17, et + 0.04],
+      [ex0 - 0.2, eb - 0.06], [-0.55, 0.5], radial([-0.84, 0.22], 0.035), radial([-0.97, -0.12], 0.04)], 4, false)].map(HT);
+    cel(ctx, P, hair, 0.85, 409, sh);
+    if (!simple) {
+      ctx.save(); path(ctx, P); ctx.clip();
+      for (const [i, [a, b, c]] of [[[-0.5, -0.2], [-0.78, -0.12], [-0.86, 0.12]], [[ex0 + 0.02, et - 0.08], [-0.5, -0.1], [-0.8, 0.2]], [[-0.66, -0.24], [-0.9, -0.05], [-0.72, 0.36]]].entries())
+        stroke(ctx, quad(a, b, c, 8).map(HT), 0.5, 408 + i * 3, rgba(darken(hair, 0.6), 0.6));
+      stroke(ctx, quad([-0.62, -0.26], [-0.86, -0.18], [-0.92, 0.0], 8).map(HT), 1.1, 407, rgba(lighten(hair, 0.4), 0.5));
+      ctx.restore();
+    }
+    if (hatted) ctx.restore();
+  }
+  // blush on the cheek
+  const bl = clamp(lk.blush + (ex.blush || 0), 0, 1.2), e = G.eyeN;
+  if (bl > 0.02) {
+    const c = HT([e[0] - 0.05, G.eyeY + 0.27]), r = 0.15, g = ctx.createRadialGradient(c[0], c[1], 0, c[0], c[1], r * k);
+    g.addColorStop(0, `rgba(238,120,120,${0.42 * bl})`); g.addColorStop(1, 'rgba(238,120,120,0)');
+    ctx.save(); path(ctx, head); ctx.clip(); ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(c[0], c[1], r * k, r * k * 0.75, 0, 0, 7); ctx.fill(); ctx.restore();
+  }
+  if (lk.beard !== 'none') drawBeardP(ctx, J, lk, O, head);
+  drawMouthP(ctx, J, O, mo, simple, skin);
+  // the nose: its wing (the ala) curls round the nostril above the lip, so the bump on the outline reads as a nose
+  if (!simple) {
+    const s = F.sub, t = F.tipU, ns = lerp(0.85, 1.1, G.j) * (lk.age === 'elder' ? 1.1 : 1), a = [lerp(s[0], t[0], 0.5) - 0.03, s[1] - 0.06 * ns];
+    stroke(ctx, quad(add(s, [0.025, -0.008]), add(a, [-0.07 * ns, 0.035]), add(a, [-0.02, -0.04 * ns]), 8).map(HT), 0.6, 46, rgba(darken(skin, 0.45), 0.85));
+    if (lk.age === 'elder') { const c = HT(add(F.tip, [-0.04, 0.0])); dot(ctx, c[0], c[1], 0.05 * k, 'rgba(230,120,110,.25)'); }
+  }
+  // the eye (one: the near one)
+  const es = { shape: ex.eye, lid: clamp(ex.lid + (lk.age === 'elder' ? 0.12 : 0) + (1 - ex.lid) * clamp(st.blink || 0) - 0.1 * Math.max(0, J.tu), 0, 1), low: ex.low, gaze: [(ex.gaze?.[0] || 0) + 0.6 * (st.look || 0) + 0.8 * J.yaw, (ex.gaze?.[1] || 0) - 0.7 * J.tu], tear: lk.tear };   // the iris swings with a turn of the head
+  if (J.p.sleep > 0.5) es.lid = 1;
+  if ((st.blink || 0) > 0.85 && es.shape === 'wide') es.shape = 'open';
+  const eK = J.M.eye, rx = 0.1 * eK, ry = 0.158 * eK;
+  drawEyeP(ctx, HT, k, e, rx, ry, es, lk, simple, 50);
+  // wrinkles and laugh lines: crow's feet at the outer (back) corner, the cheek lifted under a smiling eye; an elder's
+  // fold from the nose wing to the mouth and a line across the brow
+  if (!simple) {
+    const wc = rgba(darken(skin, 0.55), 0.55);
+    if (lk.age === 'elder' || (lk.age === 'adult' && ex.low > 0.2)) {
+      stroke(ctx, [[e[0] - rx * 1.55, e[1] - 0.01], [e[0] - rx * 2.0, e[1] - 0.04]].map(HT), 0.4, 70, wc);
+      stroke(ctx, [[e[0] - rx * 1.5, e[1] + 0.06], [e[0] - rx * 1.95, e[1] + 0.1]].map(HT), 0.4, 71, wc);
+    }
+    if (ex.eye === 'arc' || (ex.low > 0.15 && (lk.age === 'adult' || lk.age === 'elder'))) stroke(ctx, quad([e[0] - rx * 0.9, e[1] + ry * 1.35], [e[0], e[1] + ry * 1.75], [e[0] + rx * 1.2, e[1] + ry * 1.25], 8).map(HT), 0.45, 74, rgba(darken(skin, 0.55), 0.45));
+    if (lk.age === 'elder') {
+      const s = F.sub;
+      stroke(ctx, quad([s[0] - 0.06, s[1] - 0.04], [s[0] - 0.16, s[1] + 0.08], [O.Cm[0] - 0.05, O.Cm[1] + 0.02], 8).map(HT), 0.45, 72, wc);
+      stroke(ctx, quad([F.fh[0] - 0.24, F.fh[1] + 0.06], [F.fh[0] - 0.12, F.fh[1] + 0.03], [F.fh[0] - 0.03, F.fh[1] + 0.07], 6).map(HT), 0.4, 73, wc);
+    }
+  }
+  // the brow, which does most of the acting: its front (inner) end lifts when worried or sad and drops when angry
+  const bc = style === 'bald' && lk.age === 'child' ? darken(hair, 0.8) : darken(hair, lk.age === 'elder' ? 0.85 : 0.7), [braise, inner] = ex.brow;
+  const by = e[1] - ry - 0.075 - braise - (ex.browSplit || 0) * 0.5, inr = inner * 0.85;
+  const Bf = [e[0] + rx * 1.05 + 0.03, by - inr], Bb = [e[0] - rx * 1.3, by + 0.035], Bm = [e[0] + rx * 0.05, by - 0.04 - inr * 0.3];
+  stroke(ctx, spline([Bb, Bm, Bf], 4, false).map(HT), (simple ? 1.7 : 1.85) * (lk.age === 'elder' ? 1.2 : 1), 80, bc);
+  // hair over the skull, then the ear on top of it (long hair falls behind it), glasses, hat
+  if (style === 'bald') {
+    if (lk.age !== 'child' && lk.age !== 'teen' && !simple) stroke(ctx, quad([-0.55, -0.72], [-0.3, -0.9], [-0.02, -0.93], 8).map(HT), 2.4, 409, 'rgba(255,255,255,.4)');   // (a child's stubble is under the skin's ink)
+  } else if (style !== 'cap') {
+    if (hatted) { ctx.save(); hatClip(ctx, J); }      // under a hat no hair shows above its brim
+    if (style === 'long') drawLongHairP(ctx, J, lk, hsh);
+    else {
+      const fr = { short: 'locks', ponytail: 'sweep', bun: 'back', braids: 'part', curly: 'locks' }[style] || 'locks';
+      let C = hairCapP(G, vol, fr);
+      if (style === 'curly') C = [...curls(C.slice(0, 22), 0.07), ...C.slice(22)];   // round curls along the silhouette, a plain hairline
+      const P = C.map(HT);
+      if (style === 'bun') drawBunHair(ctx, J, lk, P, sh);
+      else { cel(ctx, P, hair, 1.1, 410, hsh); hairStrands(ctx, J, P, lk, 411); }
+    }
+    if (style === 'braids' && !simple) stroke(ctx, quad([0.5, -0.74], [0.1, -0.95], [-0.3, -0.98], 8).map(HT), 0.7, 418, rgba(lighten(lk.skin, 0.1), 0.85));
+    if (style === 'ponytail') { const c = HT([-0.86, -0.52]); cel(ctx, ell(c[0], c[1], 0.09 * k, 0.12 * k, 417, 0, 0.6), lk.scarf || '#d0506a', 0.8, 417, sh); }
+    if (hatted) ctx.restore();
+  }
+  if (style === 'cap') drawCap(ctx, J, lk, sh);
+  drawEarP(ctx, J, lk, sh);
+  if (lk.glasses) drawGlassesP(ctx, J, lk, rx, ry);
+  if (lk.hat && style !== 'cap') drawHat(ctx, J, lk, sh);
+  return head;
 }
 
 // ───────────────────────── torso, clothes, accessories ─────────────────────────

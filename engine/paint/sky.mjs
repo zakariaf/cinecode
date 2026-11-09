@@ -13,9 +13,14 @@ export function clouds(x, r, w, n, yMin, yMax, pal, light = [-0.6, -0.75]) {
   for (let i = 0; i < n; i++) { const cw = 300 + r() * 500, ch = 90 + r() * 140; clump(x, r() * w, yMin + r() * (yMax - yMin), cw, ch, pal, Math.round(cw / 3.4), r, { size: 0.09, light }); }
 }
 
-// A cel-painted cumulus: one merged silhouette of overlapping puffs arched over a flat base. The lit
-// regions are the same silhouette shifted toward the light, so the shadow is a crescent on the far side
-// plus the underside (three hard tones, like the characters' cel shading).
+// A cel-painted cumulus: one merged silhouette of overlapping puffs arched over a flat base, in hard tones
+// (pal: shade → lit), like the characters' cel shading. Each tone after the first is the silhouette shifted up (and a
+// little sideways with the light) and clipped to it, so every terminator follows the cloud's underside (its flat base
+// and the bottoms of its puffs), never its top: lit from above, the shade is a broad band along the underside; lit from
+// below (a low sun), the underside glows in bands and the top stays in one shade. Each band is a good part of the
+// cloud's height deep, so no tone reads as an outline round the cloud.
+export const CLOUD_BANDS = [0.2, 0.4, 0.6];      // how far (× the cloud's height h) each lighter tone's shape is shifted
+export const CLOUD_SIDE = 0.5;                   // how much of the light's sideways lean the bands take (they hug the underside)
 export function cumulus(x, r, cx, cy, w, h, pal, light = [-0.6, -0.75]) {
   const seed = Math.floor(r() * 1e6), K = 5 + Math.floor(r() * 4), base = cy + h * 0.3, P = [];
   P.push([cx, base - h * 0.16, w * 0.46, h * 0.2]);
@@ -23,14 +28,19 @@ export function cumulus(x, r, cx, cy, w, h, pal, light = [-0.6, -0.75]) {
     const u = (i + 0.2 + r() * 0.6) / K, arch = Math.sin(Math.PI * u), rr = h * (0.2 + 0.24 * arch) * (0.85 + r() * 0.3);
     P.push([cx + (u - 0.5) * w * 0.86, base - rr * 0.6 - arch * h * (0.22 + r() * 0.16), rr, rr * 0.9]);
   }
-  const lx = light[0], ly = light[1];
-  const shape = (dx, dy, k) => { x.beginPath(); for (const [i, [px, py, rx, ry]] of P.entries()) { const m = Math.min(rx, ry); poly(x, ell(px + dx * m, py + dy * m, rx * k, ry * k, seed + i * 7, m * 0.04)); } };
+  // lit from below, the tones go the other way: the whole cloud in its lightest tone, then darker ones shifted up
+  const below = light[1] > 0, L = Math.hypot(light[0], light[1]) || 1, lx = (light[0] / L) * (below ? -h : h) * CLOUD_SIDE, ly = (light[1] / L) * (below ? -h : h);
+  const tones = below ? pal.slice().reverse() : pal;
+  const shape = (dx, dy) => { x.beginPath(); for (const [i, [px, py, rx, ry]] of P.entries()) { const m = Math.min(rx, ry); poly(x, ell(px + dx, py + dy, rx, ry, seed + i * 7, m * 0.04)); } };
   x.save(); x.beginPath(); x.rect(cx - w, cy - h * 3, w * 2, base - cy + h * 3); x.clip();
-  x.fillStyle = pal[0]; shape(0, 0, 1); x.fill();
-  shape(0, 0, 1); x.clip();
-  x.fillStyle = pal[1]; shape(lx * 0.22, ly * 0.26, 1); x.fill();
-  x.fillStyle = pal[2]; shape(lx * 0.5, ly * 0.56, 0.94); x.fill();
-  if (pal[3]) { x.fillStyle = pal[3]; shape(lx * 0.8, ly * 0.86, 0.8); x.fill(); }
+  x.fillStyle = tones[0]; shape(0, 0); x.fill();
+  shape(0, 0); x.clip();
+  // (each tone also covers everything higher than its band, so the bands stay on the underside and no sliver of another
+  // tone shows in a notch between the puffs on top)
+  for (let k = 1; k < tones.length; k++) {
+    const d = CLOUD_BANDS[k - 1]; x.fillStyle = tones[k]; shape(lx * d, ly * d);
+    x.rect(cx - w, cy - h * 3, w * 2, base + ly * d - h * 0.15 - (cy - h * 3)); x.fill();
+  }
   x.restore();
 }
 // A long thin streak of cloud (sunset, high cirrus).
@@ -82,10 +92,11 @@ function moon(x, cx, cy, rad, phase) {
   x.drawImage(m, cx - c, cy - c);
 }
 
-// Each time of day: gradient stops, the sun/moon, cloud style, and the haze colour that far layers take.
+// Each time of day: gradient stops, the sun/moon, cloud style, and the haze colour that far layers take. Dawn's
+// cumulus stay high (their bases clear the far hills of an establishing view; only streaks lie low).
 export const SKY_STYLE = {
   dawn: { grad: [[0, '#3a527f'], [0.3, '#8a88b4'], [0.5, '#e6b8a8'], [0.66, '#ffd9ae'], [1, '#fff0d0']], sun: { x: 0.66, y: 0.72, r: 34, col: '#fff6dc', rgb: '255,226,180', glow: 900, a: 0.95 },
-    clouds: { n: 7, y: [0.12, 0.5], pal: ['#8f86ae', '#c3a6bc', '#f2c6aa', '#ffe2c0'], light: [0.5, 0.7], kind: 'cumulus', size: 0.85 }, streaks: { n: 5, y: [0.5, 0.62], pal: ['#e8b4a8', '#f2c4ac', '#d8a8b0'] }, haze: '236,214,206', stars: 60 },
+    clouds: { n: 7, y: [0.08, 0.32], pal: ['#a48cb4', '#e0aab4', '#ffd6b4'], light: [0.5, 0.7], kind: 'cumulus', size: 0.85 }, streaks: { n: 5, y: [0.5, 0.62], pal: ['#e8b4a8', '#f2c4ac', '#d8a8b0'] }, haze: '236,214,206', stars: 60 },
   morning: { grad: [[0, '#4f8bc6'], [0.42, '#86bce2'], [0.62, '#cfe5ee'], [1, '#eef3e4']], sun: { x: 0.16, y: 0.18, r: 0, rgb: '255,250,226', glow: 700, a: 0.55 },
     clouds: { n: 6, y: [0.06, 0.46], pal: ['#a9b2d2', '#d0d6e8', '#eef1f6', '#ffffff'], light: [-0.6, -0.75], kind: 'cumulus', size: 1.1 }, haze: '226,236,232' },
   noon: { grad: [[0, '#3a7cc4'], [0.45, '#74b2e4'], [0.7, '#bcdcef'], [1, '#e8f2ea']], sun: { x: 0.4, y: -0.02, r: 0, rgb: '255,255,240', glow: 800, a: 0.6 },
@@ -93,13 +104,13 @@ export const SKY_STYLE = {
   afternoon: { grad: [[0, '#4a7fb8'], [0.4, '#8db8d8'], [0.66, '#e0e2d2'], [1, '#f6ecd0']], sun: { x: 0.2, y: 0.26, r: 0, rgb: '255,240,200', glow: 800, a: 0.55 },
     clouds: { n: 6, y: [0.06, 0.46], pal: ['#a8a8c4', '#d6d2de', '#f6eedf', '#fff9ee'], light: [-0.7, -0.6], kind: 'cumulus', size: 1.1 }, haze: '238,232,214' },
   golden: { grad: [[0, '#6f86b4'], [0.38, '#c4a2a6'], [0.58, '#f2b47c'], [0.74, '#ffd396'], [1, '#ffe8bc']], sun: { x: 0.74, y: 0.68, r: 44, col: '#fff3d2', rgb: '255,214,150', glow: 900, a: 0.95 },
-    clouds: { n: 7, y: [0.1, 0.48], pal: ['#9e7f9c', '#c99aa2', '#f2b89a', '#ffdcb0'], light: [0.6, 0.55], kind: 'cumulus', size: 0.9 }, haze: '246,214,176' },
+    clouds: { n: 7, y: [0.1, 0.48], pal: ['#9e7f9c', '#f2b89a', '#ffdcb0'], light: [0.6, 0.55], kind: 'cumulus', size: 0.9 }, haze: '246,214,176' },
   sunset: { grad: [[0, '#3c3a72'], [0.32, '#8a5a88'], [0.52, '#e2786a'], [0.68, '#ff9a5c'], [0.82, '#ffc27a'], [1, '#ffd89a']], sun: { x: 0.7, y: 0.8, r: 58, col: '#ffe6b0', rgb: '255,150,90', glow: 1000, a: 1 },
-    clouds: { n: 4, y: [0.12, 0.4], pal: ['#5a3c66', '#8a4a6a', '#d0606a', '#ffa070'], light: [0.5, 0.8], kind: 'cumulus', size: 0.7 }, streaks: { n: 9, y: [0.45, 0.74], pal: ['#7a4a72', '#a85a72', '#d8706e', '#f09070'] }, haze: '232,160,140', stars: 40 },
+    clouds: { n: 4, y: [0.12, 0.4], pal: ['#5a3c66', '#d0606a', '#ffa070'], light: [0.5, 0.8], kind: 'cumulus', size: 0.7 }, streaks: { n: 9, y: [0.45, 0.74], pal: ['#7a4a72', '#a85a72', '#d8706e', '#f09070'] }, haze: '232,160,140', stars: 40 },
   twilight: { grad: [[0, '#141c40'], [0.4, '#3c3c6c'], [0.62, '#86607e'], [0.78, '#e08a6c'], [1, '#f2b484']], moon: { x: 0.24, y: 0.3, r: 44, phase: 0 },
-    clouds: { n: 4, y: [0.3, 0.55], pal: ['#3a3058', '#5a4468', '#8a5670', '#c47070'], light: [0.6, 0.6], kind: 'cumulus', size: 0.7 }, streaks: { n: 5, y: [0.62, 0.76], pal: ['#9a5c70', '#c46c6c', '#d88470'] }, haze: '128,112,150', stars: 320 },
+    clouds: { n: 4, y: [0.3, 0.55], pal: ['#3a3058', '#8a5670', '#c47070'], light: [0.6, 0.6], kind: 'cumulus', size: 0.7 }, streaks: { n: 5, y: [0.62, 0.76], pal: ['#9a5c70', '#c46c6c', '#d88470'] }, haze: '128,112,150', stars: 320 },
   night: { grad: [[0, '#081028'], [0.45, '#18264e'], [0.78, '#2e3a68'], [1, '#424a76']], moon: { x: 0.3, y: 0.24, r: 44, phase: 0 },
-    clouds: { n: 4, y: [0.34, 0.62], pal: ['#121a36', '#18223f', '#222e52', '#4a5688'], light: [-0.6, -0.75], kind: 'cumulus', size: 0.8 }, haze: '60,72,118', stars: 900, milky: true },
+    clouds: { n: 4, y: [0.34, 0.62], pal: ['#283363', '#36427a', '#4c5890'], light: [-0.6, -0.75], kind: 'cumulus', size: 0.8 }, haze: '60,72,118', stars: 900, milky: true },
 };
 
 export function skyHaze(name) { return (SKY_STYLE[name] || SKY_STYLE.morning).haze; }

@@ -1,0 +1,87 @@
+{
+  "title": "A Light for Tilly",
+  "logline": "Caught in the forest after dark, a little mouse is too frightened to find her way home, until a firefly lights the path.",
+  "format": { "width": 1920, "height": 1080, "fps": 24, "captions": "dialogue" },
+  "titles": {
+    "end": { "lines": ["The End"], "dur": 2.5 }
+  },
+  "score": { "key": "G", "motif": "B4:1 D5:0.5 E5:0.5 G5:2" },
+  "voices": {
+    "tilly": { "voice": "Leda", "tone": "small, high" },
+    "glim": { "voice": "Puck", "tone": "bright, kind" }
+  },
+  "cast": {
+    "tilly": { "rig": "mouse", "name": "Tilly", "voice": "tilly", "scale": 1.2,
+               "params": { "fur": "#a08670", "belly": "#efe4d0" } },
+    "glim": { "rig": "firefly", "name": "Glim", "voice": "glim", "scale": 1.4 }
+  },
+  "sets": { "forest": { "kit": "forest" } },
+  "scenes": [
+    {
+      "id": "s01", "set": "forest", "time": "night", "ambience": "auto",
+      "music": { "mood": "night", "intensity": 0.3 },
+      "overlays": [{ "name": "glow", "params": { "who": "glim" } }],
+      "rim": { "dir": "upper-left", "color": "#cfd8ff", "strength": 0.5 },
+      "note": "Tilly is stranded on the fallen log; home is the den under the old oak to the left (west).",
+      "actors": {
+        "tilly": { "at": "log_top", "face": "left", "pose": "sit", "expr": "worried" },
+        "glim": { "offstage": "right" }
+      },
+      "shots": [
+        { "id": "1.1", "camera": { "size": "wide", "on": ["tilly"], "zoom": 0.55, "move": "push-in" },
+          "note": "A tiny mouse in a huge dark forest. Title in the sky. The owl hoot makes her flinch.",
+          "beats": [
+            { "title": "A Light for Tilly", "dur": 3.2, "place": "upper" },
+            { "sfx": "owl-hoot", "at": 1.6, "gain": 0.8 },
+            { "do": "gesture", "who": "tilly", "name": "gasp", "at": 1.9 },
+            { "do": "emote", "who": "tilly", "expr": "scared", "with": "prev" }
+          ], "hold": 0.2 },
+        { "id": "1.2", "camera": { "size": "close", "on": ["tilly"] },
+          "note": "She looks down the dark path toward home and can't go.",
+          "beats": [
+            { "do": "look", "who": "tilly", "to": "left" },
+            { "say": "tilly", "text": "It's too dark. I can't see home.", "tone": "trembling", "expr": "scared", "after": 0.2 }
+          ], "hold": 0.4 },
+        { "id": "1.3", "camera": { "size": "medium", "on": ["tilly", "glim"] },
+          "note": "A warm light buzzes in from the right: Glim. She turns to him.",
+          "beats": [
+            { "music": { "mood": "wonder", "intensity": 0.4, "motif": 2, "motifVoice": "celesta" } },
+            { "do": "enter", "who": "glim", "from": "right", "to": "right-of:tilly", "gait": "fly" },
+            { "music": "sting", "name": "magic", "with": "prev", "after": 0.2 },
+            { "do": "look", "who": "tilly", "to": "glim", "with": "prev", "after": 0.6 },
+            { "do": "emote", "who": "tilly", "expr": "surprised", "with": "prev", "after": 0.6 },
+            { "say": "glim", "text": "Need a light? Follow me!", "tone": "cheerful", "expr": "happy", "after": 0.1 }
+          ], "hold": 0.3 },
+        { "id": "1.4", "camera": { "size": "close", "on": ["tilly"] },
+          "note": "The turn: scared to happy. She nods.",
+          "beats": [
+            { "do": "emote", "who": "tilly", "expr": "happy", "after": 0.3 },
+            { "do": "gesture", "who": "tilly", "name": "nod", "with": "prev" }
+          ], "hold": 0.5 },
+        { "id": "1.5", "camera": { "size": "wide", "on": ["tilly", "glim"], "move": "track" },
+          "note": "Glim leads left along the path; Tilly jumps off the log and scurries after him in his light.",
+          "beats": [
+            { "do": "fly", "who": "glim", "to": "x:1640,y:1080", "face": "left" },
+            { "do": "run", "who": "tilly", "to": "oak_front", "speed": 1.3, "with": "prev", "after": 0.4 }
+          ], "hold": 0.2 },
+        { "id": "1.6", "camera": { "size": "full", "on": ["tilly", "glim"] },
+          "note": "Home: she turns back to thank him.",
+          "beats": [
+            { "music": { "mood": "tender", "intensity": 0.4, "motif": 4, "motifVoice": "music-box" } },
+            { "do": "turn", "who": "tilly", "face": "right" },
+            { "do": "pose", "who": "tilly", "pose": "sit", "dur": 0.5, "with": "prev" },
+            { "say": "tilly", "text": "Thank you, Glim!", "tone": "grateful", "expr": "happy", "after": 0.1 },
+            { "do": "gesture", "who": "glim", "name": "jump", "after": 0.1 }
+          ], "hold": 0.3 },
+        { "id": "1.7", "camera": { "size": "wide", "on": ["tilly", "glim"], "move": "pull-out" },
+          "note": "Tilly peeks out of her den and waves at a forest full of lights.",
+          "beats": [
+            { "do": "place", "who": "tilly", "to": "den", "face": "right" },
+            { "fx": "fireflies", "n": 1.5 },
+            { "do": "gesture", "who": "tilly", "name": "wave", "after": 0.6 },
+            { "do": "emote", "who": "tilly", "expr": "happy", "with": "prev" }
+          ], "hold": 1.2 }
+      ]
+    }
+  ]
+}

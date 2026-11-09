@@ -5,7 +5,7 @@
 // crest keeps a moonlit rim, the far ranges drop back, and the standing stone is washed with moonlight on its
 // moonward face — so under the night grade the stone is the brightest shape on the land and the crest still reads.
 import { smooth, clump, path } from '../../core/lib.mjs';
-import { makeSet } from '../set.mjs';
+import { makeSet, resTier, scaleOf } from '../set.mjs';
 import { paper, blades, contactShadow, RIGHT, GRASS, ridge, flowers, grassField, farHills, dirtPath, pathBand, standingStone, standingStoneMoon, standingStoneFoot, stoneSkirt, stoneTop, boulder, tuft, crown, paintTrunk, nightLevel } from '../../paint/paint.mjs';
 import { worldCanvas } from '../../paint/structures.mjs';
 
@@ -13,6 +13,7 @@ export const hillGround = x => 1190 - 430 * smooth(300, 2150, x) + 8 * Math.sin(
 export const STONE = { x: 2420, w: 120, h: 270 };
 STONE.base = hillGround(STONE.x); STONE.scarf = [STONE.x, STONE.base - STONE.h * 0.21];
 export const BAND = 60;
+export const STONE_RES = 8;   // the stone's sharpest sprite: close-ups frame its tip at zoom 8–10
 const ROCKS = [{ id: 'rock_low', x: 900, w: 60, h: 26 }, { id: 'rock_mid', x: 1700, w: 46, h: 22 }, { id: 'rock_high', x: 2900, w: 70, h: 30 }];
 const THORN = { x: 3120 };
 // the grass at the stone's foot, in the slope's own sunlit greens
@@ -61,7 +62,7 @@ export default function hill(params = {}) {
       { k: 1.3, front: true, paint(x, r, S, E) { blades(x, r, E.x0, E.x1, px => 1700 + 16 * Math.sin(px / 77), Math.round((E.x1 - E.x0) / 5), { len: [40, 160], w: 7, clumps: 1, pal: ['#4a7a34', '#5a8a3c', '#6a9a44', '#7aa84c'] }); } },
     ],
     props: [
-      { id: 'standing_stone', x: STONE.x, y: STONE.base + 4, base: STONE.base, inkFloor: stoneSkirt(STONE).inkFloor, solid: { rx: 66, ry: 12 }, bounds: [STONE.x - 90, STONE.base - STONE.h - 20, STONE.x + 90, STONE.base + 20],
+      { id: 'standing_stone', x: STONE.x, y: STONE.base + 4, base: STONE.base, inkFloor: stoneSkirt(STONE).inkFloor, solid: { rx: 66, ry: 12 }, closeRes: STONE_RES, bounds: [STONE.x - 90, STONE.base - STONE.h - 20, STONE.x + 90, STONE.base + 20],
         paint: (x, r) => standingStone(x, r, STONE, { light: L, grass: STONE_GRASS }), ground: x => contactShadow(x, STONE.x - 20, STONE.base + 6, 110, 14, 0.42),
         anchors: { stone_top: { type: 'surface', x: STONE.x + 6, y: stoneTop(STONE, STONE.x + 6) + 2, depth: STONE.base + 5, surface: 'stone' } } },
       ...ROCKS.map(k => ({ id: k.id, x: k.x, y: g(k.x) + 2, base: g(k.x) + 6, solid: { rx: k.w * 0.5, ry: 8 }, bounds: [k.x - k.w * 0.6, g(k.x) - k.h - 6, k.x + k.w * 0.6, g(k.x) + 12],
@@ -127,14 +128,16 @@ function addNight(S) {
   const lay = (x, K, op, a) => { if (!(a > 0.01)) return; x.save(); x.globalCompositeOperation = op; x.globalAlpha = Math.min(1, a); x.drawImage(K.c, K.x0, K.y0, K.w, K.h); x.restore(); };
   S._nightLand = x => { const n = S.night; if (!(n > 0.01)) return; lay(x, shadeK(), 'multiply', n); lay(x, crestK(), 'multiply', n); lay(x, rimK(), 'screen', n * 0.8); };
   S._nightFar = (x, k) => lay(x, farK(k, k < 0.5 ? farA : farC), 'multiply', S.night * 0.8);
-  // the stone washed with moonlight (its foot grass left out), and the crest's night shade for that grass (multiply)
+  // the stone washed with moonlight (its foot grass left out), and the crest's night shade for that grass (multiply),
+  // as sharp as the stone's own sprite at the scale drawn (1.5 at least)
   const SB = [STONE.x - STONE.w, STONE.base - STONE.h - 30, STONE.x + STONE.w, STONE.base + 40];
-  const stone = () => cache.stone ??= worldCanvas(SB, 1.5, x => standingStoneMoon(x, STONE, { light: RIGHT, grass: STONE_GRASS }));
-  const foot = () => cache.foot ??= worldCanvas(SB, 1.5, x => { standingStoneFoot(x, STONE, { grass: STONE_GRASS }); x.globalCompositeOperation = 'source-in'; x.fillStyle = '#8e97c2'; x.fillRect(SB[0], SB[1], SB[2] - SB[0], SB[3] - SB[1]); });
+  const resAt = ctx => Math.max(1.5, resTier(1, STONE_RES, scaleOf(ctx)));
+  const stone = res => cache[`stone@${res}`] ??= worldCanvas(SB, res, x => standingStoneMoon(x, STONE, { light: RIGHT, grass: STONE_GRASS }));
+  const foot = res => cache[`foot@${res}`] ??= worldCanvas(SB, res, x => { standingStoneFoot(x, STONE, { grass: STONE_GRASS }); x.globalCompositeOperation = 'source-in'; x.fillStyle = '#8e97c2'; x.fillRect(SB[0], SB[1], SB[2] - SB[0], SB[3] - SB[1]); });
   const level = opts => (opts?.night != null ? Math.max(0, Math.min(1, +opts.night)) : opts?.haze != null ? nightLevel(opts.haze) : opts?.sky != null ? nightLevel(opts.sky) : null);
   const sky0 = S.drawSky, back0 = S.drawBack, props0 = S.propsSorted;
   S.drawSky = (ctx, cam, sky, t) => { S.night = nightLevel(sky ?? S.defaultSky); return sky0(ctx, cam, sky, t); };
   S.drawBack = (ctx, cam, opts = {}) => { const l = level(opts); if (l != null) S.night = l; return back0(ctx, cam, opts); };
-  S.propsSorted = () => props0().map(it => it.id !== 'standing_stone' ? it : { ...it, draw: ctx => { it.draw(ctx); if (S.night > 0.01) { lay(ctx, stone(), 'source-over', S.night); lay(ctx, foot(), 'multiply', S.night); } } });
+  S.propsSorted = () => props0().map(it => it.id !== 'standing_stone' ? it : { ...it, draw: ctx => { it.draw(ctx); if (S.night > 0.01) { const res = resAt(ctx); lay(ctx, stone(res), 'source-over', S.night); lay(ctx, foot(res), 'multiply', S.night); } } });
   return S;
 }

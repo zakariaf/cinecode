@@ -145,14 +145,13 @@ async function cmdNew(opts, ctx) {
   mkdirSync(dir, { recursive: true });
   const tpl = join(ROOT, 'templates'), made = [];
   if (existsSync(join(tpl, 'film.json'))) {
+    // text templates keep their own layout; every {{title}} in them becomes the title (JSON-escaped in .json files)
+    const fill = (f, text) => text.replaceAll('{{title}}', () => (f.endsWith('.json') ? JSON.stringify(title).slice(1, -1) : title));
     for (const f of readdirSync(tpl)) {
       const src = join(tpl, f), dst = join(dir, f);
       if (!statSync(src).isFile() || (existsSync(dst) && !opts.force)) continue;
-      if (f === 'film.json') {
-        const text = readFileSync(src, 'utf8');
-        let data = null; try { data = JSON.parse(text); } catch { /* not plain JSON: copy as is */ }
-        writeFileSync(dst, data ? `${JSON.stringify({ ...data, title }, null, 2)}\n` : text);
-      } else copyFileSync(src, dst);
+      if (/\.(json|md|mjs|txt)$/.test(f)) writeFileSync(dst, fill(f, readFileSync(src, 'utf8')));
+      else copyFileSync(src, dst);
       made.push(f);
     }
     say(ctx, 'new', `${rel(ctx, dir)}/ from templates/ (${made.join(', ')})`);
@@ -160,7 +159,7 @@ async function cmdNew(opts, ctx) {
     writeFileSync(json, `${JSON.stringify(starterFilm(title), null, 2)}\n`);
     say(ctx, 'new', `${rel(ctx, json)} (minimal starter; no templates/film.json found)`);
   }
-  say(ctx, 'next', `edit film.json, then: cinecode check ${rel(ctx, dir)}`);
+  say(ctx, 'next', `${made.includes('screenplay.md') ? 'write screenplay.md, ' : ''}edit film.json, then: cinecode check ${rel(ctx, dir)}`);
 }
 
 async function cmdCheck(opts, ctx) {
@@ -397,7 +396,7 @@ const TO = { type: 'time', arg: 'T', desc: 'end time (seconds or m:ss), for a pa
 
 export const COMMANDS = {
   new: { args: '<slug>', summary: 'scaffold a film from templates/', run: cmdNew,
-    detail: 'Creates films/<slug>/ (or the given path) with film.json from templates/, or a minimal valid starter.',
+    detail: 'Creates films/<slug>/ (or the given path) from templates/: a starter film.json, screenplay.md and custom.mjs, with {{title}} filled in. Without templates/film.json, writes a minimal valid starter.',
     options: { title: { type: 'string', arg: 'TEXT', desc: 'film title (default: from the slug)' }, force: { type: 'bool', desc: 'overwrite existing files' } } },
   check: { args: '<film>', summary: 'validate film.json (and custom.mjs)', run: cmdCheck, options: {} },
   plan: { args: '<film>', summary: 'compile and print the shot list with times and durations', run: cmdPlan, options: {},

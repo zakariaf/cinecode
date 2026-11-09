@@ -13,7 +13,7 @@
 // Subjects carry `now` (where the drawing really is when it is framed elsewhere, as an exit is) for the camera; a
 // two-shot whose staging can't come near its size is a plan warning.
 // Round 5: a speaker who has no look of their own in the scene yet (or only "down") talks to the nearest actor in front
-// of them.
+// of them. Cameras frame a subject on a slope as it is drawn: turned about its contact by the pitch it takes there.
 import { Actor, RouteLeg, JumpLeg, FlyLeg, groundPos, anchorPos } from './actor.mjs';
 import { buildCamera, frameSubjects, clampFrame } from './camera.mjs';
 import { skyList, mixGrade, mixStory, spanU, STORY, isNight } from './grade.mjs';
@@ -724,6 +724,9 @@ class Compiler {
       const pr = g ? gestureProfile(A, g, t) : profile(A.rig, moving ? 'stand' : A.basePoseName(t), A.paramsAt(t), hd), s = pos.s;
       const yb = pos.y - (pos.lift || 0) * s, b = pr.box;
       let box = face > 0 ? [pos.x + b[0] * s, yb + b[1] * s, pos.x + b[2] * s, yb + b[3] * s] : [pos.x - b[2] * s, yb + b[1] * s, pos.x - b[0] * s, yb + b[3] * s];
+      // on a slope the drawing turns about the contact point (the pitch it takes there)
+      const th = A.pitchFor(pos, t), turn = th ? turnAbout(pos.x, pos.y, th) : null;
+      if (turn) box = turn.box(box);
       // a carrier is framed with its riders (one figure); they move with its framing position (an entrance's end)
       if (!override) {
         const real = A.posAt(t), dx = pos.x - real.x, dy = pos.y - real.y;
@@ -739,7 +742,9 @@ class Compiler {
       const rest = moving || !g ? pr : profile(A.rig, A.basePoseName(t), A.paramsAt(t), hd), y0 = A.actionAt(t) === 'fly' ? yb : pos.y;
       // now: where the drawing really is when it is framed elsewhere (an exit framed where it starts)
       const real = override ? pos : A.posAt(t), now = real.x !== pos.x || real.y !== pos.y ? [box[0] + real.x - pos.x, box[1] + real.y - pos.y, box[2] + real.x - pos.x, box[3] + real.y - pos.y] : null;
-      return { id, box, head: [pos.x + face * pr.head[0] * s, yb + pr.head[1] * s], rest: [pos.x + face * rest.head[0] * s, y0 + rest.head[1] * s], hh: A.sz.headHeight * s, face, vx, key: pos.key ?? pos.y, moving, now };
+      let head = [pos.x + face * pr.head[0] * s, yb + pr.head[1] * s], restHead = [pos.x + face * rest.head[0] * s, y0 + rest.head[1] * s];
+      if (turn) { head = turn.pt(head); restHead = turn.pt(restHead); }
+      return { id, box, head, rest: restHead, hh: A.sz.headHeight * s, face, vx, key: pos.key ?? pos.y, moving, now };
     }
     const T = parseTarget(id);
     let x, y, s, raised = false;
@@ -994,6 +999,11 @@ function gestureProfile(A, g, t) {
     A._gp.set(key, { box: r.bounds.slice(), head: r.head.slice() });
   }
   return A._gp.get(key);
+}
+// Turning by th about (cx, cy) (world): a point, and a box (the box of its turned corners).
+function turnAbout(cx, cy, th) {
+  const c = Math.cos(th), s = Math.sin(th), pt = ([x, y]) => [cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c];
+  return { pt, box: b => { const Q = [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]].map(pt), xs = Q.map(q => q[0]), ys = Q.map(q => q[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; } };
 }
 function insideCollider(S, x, y, gx, gy) {
   for (const c of S.colliders()) { const dx = (x - c.x) / (c.rx + gx), dy = (y - c.y) / (c.ry + gy); if (dx * dx + dy * dy < 1) return true; }

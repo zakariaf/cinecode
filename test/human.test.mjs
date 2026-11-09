@@ -1,4 +1,4 @@
-// Human rig: contract, proportions, determinism, grounding (nothing floats or sinks), gait foot planting, lip-sync.
+// Human rig: contract, proportions, determinism, grounding (nothing floats or sinks), gait foot planting, lip-sync, the profile head.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { canvas } from '../engine/core/lib.mjs';
@@ -647,4 +647,98 @@ test('the bun is a coil at the back of the head, not a bobble perched on top', (
     assert.ok(bun.top >= short.top - 0.04 * bun.k, `${age}: the bun adds no height (${bun.top} vs ${short.top})`);
     assert.ok(bun.back <= short.back - 0.1 * bun.k, `${age}: the bun stands out behind the head (${bun.back} vs ${short.back})`);
   }
+});
+
+// ───────────────────────── the profile head (the default view) ─────────────────────────
+// A face close-up (zoom z) facing `f`, with draw()'s anchors in canvas pixels.
+function faceAt(params, st = {}, f = 1, z = 8, W = 480) {
+  const [c, x] = canvas(W, W); x.fillStyle = '#fff'; x.fillRect(0, 0, W, W);
+  const sk = skeleton(POSES.stand, params);
+  const r = rig.draw(x, W / 2 - sk.head[0] * z * f, W / 2 - sk.head[1] * z, z, f, { params, shadow: false, t: 0.4, ...st });
+  return { d: x.getImageData(0, 0, W, W).data, W, r, k: sk.metrics.k * z };
+}
+// Connected blobs (4-neighbour) of pixels passing `hit` that are at least a sixth the size of the largest (a highlight
+// or a lid can cut a sliver off an iris).
+function blobs(d, W, hit) {
+  const seen = new Uint8Array(W * W), out = [];
+  for (let i = 0; i < W * W; i++) {
+    if (seen[i] || !hit(d, i * 4)) continue;
+    let n = 0; const st = [i]; seen[i] = 1;
+    while (st.length) { const j = st.pop(); n++; for (const m of [j - 1, j + 1, j - W, j + W]) if (m >= 0 && m < W * W && !seen[m] && Math.abs((m % W) - (j % W)) <= 1 && hit(d, m * 4)) { seen[m] = 1; st.push(m); } }
+    out.push(n);
+  }
+  const big = Math.max(0, ...out);
+  return out.filter(n => n >= big / 6);
+}
+const GREEN_IRIS = (d, i) => d[i + 1] > 190 && d[i] < 130 && d[i + 2] < 130;
+const PRO_LOOKS = [...AGES.map(age => ({ age })), { age: 'teen', hairStyle: 'ponytail' }, NELL, YOUNG];
+
+test('profile is the default view; the 3/4 head stays available as params.view = "three-quarter"', () => {
+  assert.equal(rig.params.view, 'profile');
+  assert.equal(look({}).view, 'profile');
+  assert.equal(look(NELL).view, 'profile', 'the film\'s Nells are drawn in profile without saying so');
+  assert.equal(look({ view: 'three-quarter' }).view, 'three-quarter');
+  assert.equal(look({ view: 'nonsense' }).view, 'profile', 'unknown view → profile');
+  for (const params of [{ age: 'child' }, NELL]) {
+    assert.ok(pixDiff(faceAt(params).d, faceAt({ ...params, view: 'three-quarter' }).d) > 2000, `${params.age}: the 3/4 head is a different drawing`);
+    const a = rig.draw(null, 0, 0, 1, 1, { params }), b = rig.draw(null, 0, 0, 1, 1, { params: { ...params, view: 'three-quarter' } });
+    assert.deepEqual(a.head, b.head, 'the head sits on the neck at the same place in either view');
+    for (const v of [a, b]) assert.ok(v.bounds.every(Number.isFinite) && v.mouth.every(Number.isFinite) && v.eye.every(Number.isFinite));
+  }
+});
+
+test('profile: one eye is drawn (the near one); the 3/4 view draws two; a look moves the pupil, never shows the far eye', () => {
+  for (const base of PRO_LOOKS) for (const f of [1, -1]) {
+    const params = { ...base, eyes: '#00ff00', glasses: false }, tag = `${base.age} ${base.hairStyle || ''} face ${f}`;
+    assert.equal(blobs(faceAt(params, {}, f).d, 480, GREEN_IRIS).length, 1, `${tag}: one iris in profile`);
+    for (const look of [-0.8, 0.8]) assert.equal(blobs(faceAt(params, { look }, f).d, 480, GREEN_IRIS).length, 1, `${tag} look ${look}: still one`);
+    assert.equal(blobs(faceAt({ ...params, view: 'three-quarter' }, {}, f).d, 480, GREEN_IRIS).length, 2, `${tag}: two irises in 3/4`);
+  }
+  // the pupil follows the look: forward (toward the face direction) and back
+  const irisX = st => { const { d } = faceAt({ age: 'adult', eyes: '#00ff00' }, st); let s = 0, n = 0; for (let i = 0; i < d.length; i += 4) if (GREEN_IRIS(d, i)) { s += (i / 4) % 480; n++; } return s / n; };
+  assert.ok(irisX({ look: 0.8 }) > irisX({ look: -0.8 }) + 3, 'the iris moves forward / back with st.look');
+});
+
+test('profile: the nose is on the front contour, between the eye line and the mouth, for every age and facing', () => {
+  for (const params of PRO_LOOKS) for (const f of [1, -1]) {
+    const { d, W, r, k } = faceAt(params, {}, f), tag = `${params.age} face ${f}`;
+    let best = -Infinity, row = -1;
+    for (let y = Math.round(r.eye[1] - 0.7 * k); y < Math.round(r.mouth[1] + 0.35 * k); y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4; if (d[i] + d[i + 1] + d[i + 2] > 700) continue;   // painted (not the white ground)
+      if (x * f > best) { best = x * f; row = y; }
+    }
+    assert.ok(row > r.eye[1] + 0.05 * k && row < r.mouth[1] - 0.05 * k, `${tag}: the frontmost point of the head (row ${row}) lies between the eye (${r.eye[1].toFixed(0)}) and the mouth (${r.mouth[1].toFixed(0)})`);
+    assert.ok(best - r.eye[0] * f > 0.25 * k, `${tag}: the nose stands well in front of the eye`);
+    assert.ok(Math.abs(best - r.mouth[0] * f) < 0.3 * k, `${tag}: the mouth anchor is on the front of the face`);
+  }
+});
+
+test('profile: every expression changes the face, talk drops the jaw, blink shuts the eye', () => {
+  for (const params of PRO_LOOKS) {
+    const n = faceAt(params, { expr: 'neutral' }), tag = params.age + (params.hairStyle ? ' ' + params.hairStyle : '');
+    const seen = [];
+    for (const e of rig.expressions.filter(e => e !== 'neutral')) {
+      const p = faceAt(params, { expr: e }).d, dn = pixDiff(n.d, p);
+      assert.ok(dn > 150, `${tag} ${e}: ${dn} px differ from neutral`);
+      for (const [e2, q] of seen) assert.ok(pixDiff(p, q) > 60, `${tag}: ${e} and ${e2} look alike`);
+      seen.push([e, p]);
+    }
+    // the jaw drops: the chin below the mouth moves, not just a dark dot at the lips
+    const t = faceAt(params, { talk: 0.6 }).d, y0 = Math.round(n.r.mouth[1] + 0.12 * n.k);
+    let chin = 0; for (let y = y0; y < Math.min(480, y0 + 0.5 * n.k); y++) for (let x = 0; x < 480; x++) { const i = (y * 480 + x) * 4; if (Math.abs(n.d[i] - t[i]) + Math.abs(n.d[i + 1] - t[i + 1]) + Math.abs(n.d[i + 2] - t[i + 2]) > 30) chin++; }
+    assert.ok(chin > 120, `${tag}: talk moves the chin (${chin} px below the mouth)`);
+    assert.ok(pixDiff(n.d, faceAt(params, { blink: 1 }).d) > 100, `${tag}: blink`);
+  }
+});
+
+test('profile: tear, glasses (one lens and its temple arm), beards and every hair style draw; deterministic', () => {
+  assert.ok(pixDiff(faceAt(NELL).d, faceAt({ ...NELL, tear: 1 }).d) > 25, 'a tear on the lower lid');
+  assert.ok(hasColour(faceAt(NELL).d, '#b08a3a', 40) > 80, 'brass frame pixels');
+  for (const beard of ['short', 'full']) assert.ok(pixDiff(faceAt({ age: 'adult' }).d, faceAt({ age: 'adult', beard }).d) > 300, `beard ${beard}`);
+  for (const hairStyle of ['short', 'long', 'ponytail', 'bun', 'braids', 'curly', 'bald', 'cap']) for (const age of AGES) {
+    const r = faceAt({ age, hairStyle, hat: hairStyle === 'cap' ? '#3f6fb0' : false }, { expr: 'happy', talk: 0.4 }, -1).r;
+    assert.ok(r.bounds.every(Number.isFinite), `${age} ${hairStyle}`);
+  }
+  const once = () => Buffer.from(faceAt({ ...NELL, tear: 0.6 }, { expr: 'laughing', talk: 0.5, look: 0.4, tilt: 0.3, blink: 0.2 }, -1).d);
+  assert.ok(once().equals(once()), 'the same frame renders identical pixels');
 });

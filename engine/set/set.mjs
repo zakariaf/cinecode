@@ -10,6 +10,19 @@ export { SKY_TIMES };
 export const MIN_ZOOM = 0.6;                       // at 1920×1080
 export const MAX_VIEW = { w: 1920 / MIN_ZOOM, h: 1080 / MIN_ZOOM };   // widest world rect a camera may show
 export const INK_FADE = 24;                        // a prop's silhouette ink fades out over this many units above its inkFloor
+export const CLOSE_PX = 24e6;                      // the most pixels one close sprite of a prop may hold (~96 MB)
+
+// The sprite resolution a prop drawn at screen scale `scale` (device px per world unit) uses: its base `res` until the
+// sprite would be enlarged more than 1.25×, then the smallest of res·2, res·4, … (and `max` itself) that is not, up to
+// `max`. It depends only on the scale drawn at, so a frame is the same whatever was drawn before it.
+export function resTier(res, max, scale) {
+  if (!(max > res) || !(scale > res * 1.25)) return res;
+  let t = res;
+  while (t * 1.25 < scale && t * 2 < max) t *= 2;
+  return t * 1.25 < scale ? max : t;
+}
+// Device pixels per world unit under a context's current transform.
+export const scaleOf = ctx => { const m = ctx.getTransform(); return Math.hypot(m.a, m.b); };
 
 // ───────────── geometry ─────────────
 export function pointInPoly(P, x, y) {
@@ -300,14 +313,38 @@ export function makeSet(def) {
       const tx0 = T ? Math.max(0, T.x0 - pad) : 0, ty0 = T ? Math.max(0, T.y0 - pad) : 0, tx1 = T ? Math.min(c.width, T.x1 + 1 + pad) : 1, ty1 = T ? Math.min(c.height, T.y1 + 1 + pad) : 1;
       const [t, tc] = canvas(tx1 - tx0, ty1 - ty0); tc.drawImage(c, -tx0, -ty0);
       p.sx = bx0 + tx0 / res; p.sy = by0 + ty0 / res; p.sw = t.width / res; p.sh = t.height / res;
-      // inkFloor (world y): the silhouette ink fades out over the INK_FADE units above it (grass at a trunk's foot)
-      const fade = p.inkFloor != null ? [(p.inkFloor - INK_FADE - p.sy) * res, (p.inkFloor - p.sy) * res] : null;
-      p.sprite = p.inkW === 0 ? t : inkSilhouette(t, (p.inkW ?? 2.2) * res, { light, fade });
+      p.sprite = inked(p, t, res);
       p.box = [p.sx, p.sy, p.sx + p.sw, p.sy + p.sh];
+      p.res = res;
     }
     S.built = true;
     return S;
   };
+  // A prop's painted canvas (its top-left at world p.sy) with its silhouette ink. inkFloor (world y): the ink fades out
+  // over the INK_FADE units above it (grass at a trunk's foot).
+  const inked = (p, c, res) => {
+    const fade = p.inkFloor != null ? [(p.inkFloor - INK_FADE - p.sy) * res, (p.inkFloor - p.sy) * res] : null;
+    return p.inkW === 0 ? c : inkSilhouette(c, (p.inkW ?? 2.2) * res, { light, fade });
+  };
+  // Props that may be framed close (closeRes: the sharpest sprite resolution they may need) get sharper sprites for
+  // close framings, painted the first time one is drawn at such a scale (resTier) into the base sprite's box only
+  // and kept, so only the props a film actually frames close pay for them. CLOSE_PX caps a big prop's resolution.
+  // S.propSprite(prop | id, scale) → { c, x, y, w, h }: the sprite to draw at that screen scale and its world rect.
+  S.propSprite = (p, scale = 1) => {
+    if (!S.built) S.build();
+    if (typeof p === 'string') p = propById[p];
+    const max = Math.min(p.closeRes ?? 0, Math.sqrt(CLOSE_PX / (p.sw * p.sh))), res = resTier(p.res, max, scale);
+    if (res === p.res) return { c: p.sprite, x: p.sx, y: p.sy, w: p.sw, h: p.sh };
+    const tiers = p.tiers ??= new Map();
+    if (!tiers.has(res)) {
+      const [c, x] = canvas(Math.ceil(p.sw * res), Math.ceil(p.sh * res));
+      x.setTransform(res, 0, 0, res, -p.sx * res, -p.sy * res);
+      p.paint(x, rng(seed + 5000 + props.indexOf(p) * 131), S);
+      tiers.set(res, { c: inked(p, c, res), x: p.sx, y: p.sy, w: c.width / res, h: c.height / res });
+    }
+    return tiers.get(res);
+  };
+  const drawProp = (ctx, p) => { const k = S.propSprite(p, scaleOf(ctx)); ctx.drawImage(k.c, k.x, k.y, k.w, k.h); };
 
   // ── drawing (world transform already set on ctx by the caller, except for the sky) ──
   const blurred = (ly, px) => {
@@ -353,7 +390,7 @@ export function makeSet(def) {
   S.drawFront = (ctx, cam, opts) => drawLayers(ctx, cam, true, opts);
   S.propsSorted = () => {
     if (!S.built) S.build();
-    return props.map(p => ({ y: p.y, id: p.id, kind: 'prop', solid: p.solid, bounds: p.bounds, draw: ctx => ctx.drawImage(p.sprite, p.sx, p.sy, p.sw, p.sh) })).sort((a, b) => a.y - b.y || (a.id < b.id ? -1 : 1));
+    return props.map(p => ({ y: p.y, id: p.id, kind: 'prop', solid: p.solid, bounds: p.bounds, draw: ctx => drawProp(ctx, p) })).sort((a, b) => a.y - b.y || (a.id < b.id ? -1 : 1));
   };
 
   // ── sky: screen space, slow drift; a list of [name, weight] crossfades ──

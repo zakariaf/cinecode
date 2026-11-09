@@ -405,3 +405,104 @@ test('valley: each copse\'s undergrowth peters out instead of sticking out into 
   assert.equal(painted(1000, 1800, 900, 1120), 0, 'nothing of the copses between them, where the valley opens');
   assert.ok(painted(600, 800, 950, 1080) > 1000 && painted(2100, 2300, 950, 1080) > 1000, 'the copses themselves are there');
 });
+
+// ───────────── close-ups: sharper prop sprites; skies: clouds without outlines ─────────────
+test('resTier: the base res until a sprite would be enlarged over 1.25×, then the next power-of-two step, up to the cap', async () => {
+  const { resTier } = await import('../engine/set/set.mjs');
+  for (const [res, max, scale, want] of [[1, 8, 1, 1], [1, 8, 1.25, 1], [1, 8, 1.3, 2], [1, 8, 2.4, 2], [1, 8, 3, 4], [1, 8, 5, 4], [1, 8, 5.1, 8], [1, 8, 8.44, 8], [1, 8, 30, 8], [1, 0, 9, 1], [1.5, 6, 9, 6], [1.5, 6, 1.8, 1.5], [1.5, 6, 2, 3]])
+    assert.equal(resTier(res, max, scale), want, `resTier(${res}, ${max}, ${scale})`);
+});
+
+test('a prop that may be framed close gets sharper sprites only when drawn close, painted once into the same world rect', async () => {
+  const { CLOSE_PX } = await import('../engine/set/set.mjs');
+  const S = getKit('hill')().build(), p = S.props.find(q => q.id === 'standing_stone'), rock = S.props.find(q => q.id === 'rock_low');
+  assert.ok(p.closeRes >= 8, 'the standing stone may be framed close');
+  for (const scale of [0.6, 1, 1.25]) assert.equal(S.propSprite(p, scale).c, p.sprite, `scale ${scale}: the base sprite (frames at normal zooms are unchanged)`);
+  assert.equal(p.tiers, undefined, 'nothing more is painted until the prop is drawn close');
+  const k = S.propSprite('standing_stone', 8.44);
+  assert.equal(k.c.width, Math.ceil(p.sw * 8), 'res 8 at zoom 8.44');
+  assert.ok(k.x === p.sx && k.y === p.sy && Math.abs(k.w - p.sw) < 1 / 8 && Math.abs(k.h - p.sh) < 1 / 8, 'the same world rect as the base sprite');
+  assert.equal(S.propSprite(p, 8.44), k, 'kept, not repainted');
+  assert.equal(S.propSprite(p, 6), k, 'one sprite per tier');
+  assert.equal([...p.tiers.keys()].join(), '8');
+  // a prop without closeRes keeps its one sprite at any zoom; a huge prop is capped to CLOSE_PX pixels
+  assert.equal(S.propSprite(rock, 9).c, rock.sprite); assert.equal(rock.tiers, undefined);
+  const T = makeSet({ id: 'big', W: 4000, H: 3000, refX: 2000, refY: 1500, horizon: 600, laneY: 1100, baseS: 1, layers: [], anchors: {},
+    props: [{ id: 'wall', x: 2000, y: 2900, closeRes: 16, bounds: [0, 0, 3000, 2900], paint: x => { x.fillStyle = '#888'; x.fillRect(0, 0, 3000, 2900); } }] }).build();
+  const b = T.propSprite('wall', 16), w = T.props[0];
+  assert.ok(b.c.width * b.c.height <= CLOSE_PX * 1.01 && b.c !== w.sprite, `a ${w.sw.toFixed(0)}×${w.sh.toFixed(0)} prop drawn close stays within CLOSE_PX (${b.c.width}×${b.c.height})`);
+});
+
+test('hill: the standing stone is crisp in a close-up on its tip (zoom 8.4), by day and by moonlight', () => {
+  const S = getKit('hill')().build(), p = S.props.find(q => q.id === 'standing_stone'), top = S.anchor('stone_top'), z = 8.44, W = 1920, H = 1080;
+  // the steepest one-pixel step into the ink (from the white page) and out of it (into the stone's paint), as a share of
+  // each edge's whole rise: about 1/8 when a res-1 sprite is enlarged 8.4×, near 1/2 when the edge is crisp
+  const steep = draw => {
+    const [c, x] = canvas(W, H); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+    x.setTransform(z, 0, 0, z, W / 2 - top.x * z, H / 2 - (top.y + 10) * z); draw(x);
+    const d = x.getImageData(0, 800, W, 1).data, L = Array.from({ length: W }, (_, i) => lum(d, i * 4));
+    let a = 0; while (L[a] > 250) a++;
+    let m = a; for (let j = a; j < a + 60; j++) if (L[j] < L[m]) m = j;
+    const hi = Math.max(...L.slice(m, m + 60)); let f = 0, r = 0;
+    for (let j = a - 4; j < m; j++) f = Math.max(f, L[j] - L[j + 1]);
+    for (let j = m; j < m + 60; j++) r = Math.max(r, L[j + 1] - L[j]);
+    return { fall: f / (255 - L[m]), rise: r / (hi - L[m]) };
+  };
+  const enlarged = steep(x => x.drawImage(p.sprite, p.sx, p.sy, p.sw, p.sh));
+  assert.ok(enlarged.fall < 0.2 && enlarged.rise < 0.2, `the base sprite enlarged is soft (${JSON.stringify(enlarged)})`);
+  const item = S.propsSorted().find(q => q.id === 'standing_stone');
+  for (const night of [0, 1]) {
+    S.night = night; const e = steep(x => item.draw(x));
+    assert.ok(e.fall > 0.3 && e.rise > 0.3, `${night ? 'moonlit' : 'by day'}: crisp ink and fill edges (${e.fall.toFixed(2)}, ${e.rise.toFixed(2)})`);
+  }
+  S.night = 0;
+});
+
+test('clouds: every tone band hugs the underside, none is thin and none runs along the top (lit from above or below)', async () => {
+  const { cumulus, SKY_STYLE } = await import('../engine/paint/sky.mjs');
+  const hex = s => [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16)), h = 200;
+  for (const [name, st] of Object.entries(SKY_STYLE)) for (const side of [-1, 1]) {
+    const C = st.clouds, light = [C.light[0] * (side < 0 ? 1 : -1), C.light[1]], pal = [...new Set(C.pal)], P = pal.map(hex), topTone = light[1] > 0 ? 0 : P.length - 1;
+    for (let seed = 1; seed <= 6; seed++) {
+      const [c, x] = canvas(1200, 600); cumulus(x, rng(seed), 600, 300, 700, h, C.pal, light);
+      const d = x.getImageData(0, 0, 1200, 600).data, op = (X, Y) => d[(Y * 1200 + X) * 4 + 3] === 255;
+      let X0 = 1200, X1 = 0; for (let X = 0; X < 1200; X++) for (let Y = 0; Y < 600; Y++) if (op(X, Y)) { X0 = Math.min(X0, X); X1 = Math.max(X1, X); break; }
+      // down each column of the cloud's middle half: the runs of each tone (nearest palette colour; edge pixels dropped)
+      for (let X = Math.round(X0 + (X1 - X0) * 0.25); X <= X0 + (X1 - X0) * 0.75; X += 4) {
+        let Y = 0; while (Y < 600 && !op(X, Y)) Y++;
+        const runs = [];
+        for (; Y < 600 && op(X, Y); Y++) {
+          const i = (Y * 1200 + X) * 4; let b = 0, bd = Infinity;
+          P.forEach((p, k) => { const e = (d[i] - p[0]) ** 2 + (d[i + 1] - p[1]) ** 2 + (d[i + 2] - p[2]) ** 2; if (e < bd) { bd = e; b = k; } });
+          if (runs.length && runs[runs.length - 1][0] === b) runs[runs.length - 1][1]++; else runs.push([b, 1]);
+        }
+        const R = []; for (const r of runs.filter(q => q[1] > 2)) { if (R.length && R[R.length - 1][0] === r[0]) R[R.length - 1][1] += r[1]; else R.push([...r]); }
+        if (R.reduce((s, r) => s + r[1], 0) < h * 0.5) continue;      // a low shoulder of the cloud
+        assert.equal(R[0][0], topTone, `${name} side ${side} seed ${seed} x ${X}: the top is the cloud's ${light[1] > 0 ? 'shade' : 'light'}, not a band`);
+        for (const [k, n] of R) assert.ok(n >= h * 0.08, `${name} side ${side} seed ${seed} x ${X}: tone ${k} is a ${n}px band (an outline)`);
+      }
+    }
+  }
+});
+
+test('dawn: the cumulus stay clear of the far hills (only the streaks lie low), so none rests on the horizon like an arch', async () => {
+  const { SKY_W, SKY_H } = await import('../engine/paint/sky.mjs');
+  // the hill's establishing view (shots 1.6/1.7): its far ranges' highest crests stand at about 0.44 of the sky's height
+  for (const kit of ['hill', 'meadow']) {
+    const d = getKit(kit)().skyCanvases('dawn').clouds.getContext('2d').getImageData(0, 0, SKY_W, SKY_H).data;
+    let low = 0; for (let y = 0; y < SKY_H; y++) for (let x = 0; x < SKY_W; x += 2) if (d[(y * SKY_W + x) * 4 + 3] > 0) { low = y; break; }
+    assert.ok(low < SKY_H * 0.42, `${kit}: the lowest dawn cloud ends at ${(low / SKY_H).toFixed(3)} of the sky`);
+  }
+});
+
+test('night clouds (hill, village): no part is darker than the sky behind them, so none has a dark rim apart from its fill', async () => {
+  const { SKY_W, SKY_H, SKY_STYLE, skyGradient } = await import('../engine/paint/sky.mjs');
+  const [, gx] = canvas(1, SKY_H); skyGradient(gx, 1, SKY_H, SKY_STYLE.night.grad); const G = gx.getImageData(0, 0, 1, SKY_H).data;
+  for (const kit of ['hill', 'village']) {
+    const d = getKit(kit)().skyCanvases('night').clouds.getContext('2d').getImageData(0, 0, SKY_W, SKY_H).data;
+    let n = 0, worst = Infinity;
+    for (let y = 0; y < SKY_H; y++) for (let x = 0; x < SKY_W; x++) { const i = (y * SKY_W + x) * 4; if (d[i + 3] === 255) { n++; worst = Math.min(worst, lum(d, i) - lum(G, y * 4)); } }
+    assert.ok(n > 20000, `${kit}: night has clouds`);
+    assert.ok(worst > -2, `${kit}: the darkest cloud pixel is ${worst.toFixed(1)} below the sky there`);
+  }
+});

@@ -13,8 +13,11 @@
 // laid across the ground away from the set's light. A memory plate ends with its torn page edge (grade.mjs deckle).
 // Titles sit where their beat's "place" says, else in the calmest band of the picture under them inside title-safe
 // (titleY), centred over the shot's subjects (titleX).
+// On sloped ground an actor's drawing turns about its contact point by its pitch (actor.mjs: quadrupeds follow the
+// slope, upright figures stay vertical, riders take their carrier's), and cast shadows lie on the slope.
 // frameInfo(plan, t): the same frame's geometry (screen boxes, head boxes, contacts, caption box) for lint/sheets;
-// boxes include the quick squash of a turn and a wading actor's sink (visibleBox: the part above the waterline).
+// boxes include the quick squash of a turn, the pitch on a slope and a wading actor's sink (visibleBox: the part above
+// the waterline).
 import { createCanvas } from '@napi-rs/canvas';
 import { grade, black, deckle, sunOf } from './grade.mjs';
 import { drawEvent, rain, zzz, airShadow, ripple, ONE_SHOT } from './fx.mjs';
@@ -44,27 +47,46 @@ function headHeight(a) {
   return m.get(key);
 }
 
-// An actor in screen space: position, scale, clip, wading sink (screen px drawn below the contact) and waterline.
+// An actor in screen space: position, scale, clip, wading sink (screen px drawn below the contact), waterline and
+// pitch on a slope (rot, rad: the drawing turns by it about the contact point).
 function onScreen(a, cam, W, H) {
   const z = cam.zoom, sx = (a.x - cam.cx) * z + W / 2, sy = (a.y - cam.cy) * z + H / 2;
   return {
     sx, sy, ss: a.s * z, clip: a.clip ? a.clip.map(([x, y]) => [(x - cam.cx) * z + W / 2, (y - cam.cy) * z + H / 2]) : null,
-    sink: (a.sink || 0) * z, wl: a.waterY != null ? (a.waterY - cam.cy) * z + H / 2 : null,
+    sink: (a.sink || 0) * z, wl: a.waterY != null ? (a.waterY - cam.cy) * z + H / 2 : null, rot: a.pitch || 0,
   };
 }
 // Head box (screen) from a screen-space draw result.
 const headBox = (a, r, z) => { const hh = headHeight(a) * a.s * z, [hx, hy] = r.head; return [hx - 0.6 * hh, hy - 0.62 * hh, hx + 0.6 * hh, hy + 0.55 * hh]; };
+// Turning by rot about (cx, cy): a point, a box (the box of its turned corners), and a draw result (its points and
+// bounds; the human's hands too).
+function turner(cx, cy, rot) {
+  const c = Math.cos(rot), s = Math.sin(rot), pt = ([x, y]) => [cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c];
+  const box = b => { const Q = [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]].map(pt), xs = Q.map(q => q[0]), ys = Q.map(q => q[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; };
+  const isPt = v => Array.isArray(v) && v.length === 2 && Number.isFinite(v[0]) && Number.isFinite(v[1]);
+  const result = r => {
+    if (!r) return r;
+    const o = {};
+    for (const [k, v] of Object.entries(r)) {
+      o[k] = k === 'bounds' ? box(v) : isPt(v) ? pt(v) : v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).map(([j, q]) => [j, isPt(q) ? pt(q) : q])) : v;
+    }
+    return o;
+  };
+  return { pt, box, result };
+}
 
-// silhouette: no shadows (the rim light paints from it)
+// silhouette: no shadows (the rim light paints from it). On a slope the drawing (and its own ground shadow) turns
+// about the contact point; the result's points and bounds turn with it.
 function paintActor(c, a, P, silhouette = false) {
   c.save();
   if (P.clip) { c.beginPath(); P.clip.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.clip(); }
   if (P.wl != null) { c.beginPath(); if (P.under) c.rect(-1e5, P.wl, 2e5, 2e5); else c.rect(-1e5, -1e5, 2e5, P.wl + 1e5); c.clip(); }
+  if (P.rot) { const cy = P.sy + P.sink; c.translate(P.sx, cy); c.rotate(P.rot); c.translate(-P.sx, -cy); }
   if (a.squash !== 1) { c.translate(P.sx, P.sy); c.scale(a.squash, 1); c.translate(-P.sx, -P.sy); }
   if (a.mode === 'air' && !silhouette) { const w = (a.R.shadowW ?? (a.R.width || 40) * 0.5) * P.ss * (a.st.params?.size || 1); airShadow(c, P.sx, P.sy, w, (a.st.lift || 0) * P.ss); }
   const r = a.R.draw(c, P.sx, P.sy + P.sink, P.ss, a.face, silhouette ? { ...a.st, shadow: false } : a.st);
   c.restore();
-  return r;
+  return P.rot ? turner(P.sx, P.sy + P.sink, P.rot).result(r) : r;
 }
 // The ripple ring where a wading actor (or a rider sunk with its carrier) meets the water: the back half before the
 // actor, the front half after it. Faint once the actor is entirely under.
@@ -136,8 +158,10 @@ function drawActor(ctx, a, t, cam, W, H, drawn, S, shade = 0) {
 // behind the scene: an upper-left light throws shadows to the lower right), softened more for taller casters, fading
 // toward its tip, and multiplied over whatever lies under it. Its length and strength follow the time of day (SUN in
 // grade.mjs: short at noon, long at dawn and golden hour, none at night). Perched, hollow-bound and wading actors
-// throw none; a rider's falls from its carrier's ground. A prop's is cached per set, prop and sun; a tall prop's (a
-// tree's canopy) is dappled with light, and a figure standing in a prop's shade is drawn that much darker (shadeAt).
+// throw none; a rider's falls from its carrier's ground. On a slope the shadow lies on the slope (the ground line
+// through the contact at the ground's angle there, a.slope), for upright figures too. A prop's is cached per set, prop
+// and sun; a tall prop's (a tree's canopy) is dappled with light, and a figure standing in a prop's shade is drawn that
+// much darker (shadeAt).
 const SHADOW_RGB = '74,68,112';
 export function sunFor(S, sky) {
   const s = sunOf(typeof sky === 'string' ? [[sky, 1]] : sky);
@@ -145,24 +169,31 @@ export function sunFor(S, sky) {
   const dir = (S?.light?.[0] ?? -0.6) < 0 ? 1 : -1;
   return { a: s.a, len: s.len, dx: dir * 0.87 * s.len, dy: Math.max(0.05, 0.18 * s.len) };
 }
-// the shear about a ground line gy: (x, y) → (x + dx·(gy − y), gy + dy·(gy − y))
-const shear = (c, sun, gy) => c.transform(1, 0, -sun.dx, -sun.dy, sun.dx * gy, gy * (1 + sun.dy));
+// the shear onto a ground line through (gx, gy) rising T (its slope, dy/dx) per px: a point at height h = gl(x) − y
+// above the line (gl(x) = gy + T·(x − gx)) lands at x' = x + dx·h, y' = gl(x') + dy·h. Flat (T = 0):
+// (x, y) → (x + dx·(gy − y), gy + dy·(gy − y)).
+const shear = (c, sun, gy, T = 0, gx = 0) => {
+  const g0 = gy - T * gx, k = 1 + T * sun.dx;
+  c.transform(k, T * (k + sun.dy), -sun.dx, -(T * sun.dx + sun.dy), sun.dx * g0, g0 * (k + sun.dy));
+};
 function castShadow(ctx, a, P, sun, cam, W, H) {
   if (!sun || a.alpha < 0.05 || a.mode === 'perch' || a.mode === 'hollow' || P.wl != null || (a.sink || 0) > 0) return;
-  const gy = a.ground != null ? (a.ground - cam.cy) * cam.zoom + H / 2 : P.sy;
+  const gy = a.ground != null ? (a.ground - cam.cy) * cam.zoom + H / 2 : P.sy, T = a.slope ? Math.tan(a.slope) : 0;
   // softened by painting it smaller and laying it in enlarged (a blur filter would cost a full-frame pass per figure):
   // 1/k resolution, more for taller casters
   const k = clamp(Math.round(a.s * cam.zoom * 0.9), 2, 4), [cv, x] = scratch(Math.ceil(W / k), Math.ceil(H / k), 'cast');
-  x.scale(1 / k, 1 / k); shear(x, sun, gy);
+  x.scale(1 / k, 1 / k); shear(x, sun, gy, T, P.sx);
   const r = paintActor(x, a, P, true), b = r?.bounds;
   if (!b) return;
   const hgt = Math.max(1, gy - Math.min(b[1], gy)), m = 2 * k;
-  const xs = [b[0], b[2]].flatMap(X => [b[1], b[3]].map(Y => X + sun.dx * (gy - Y))), ys = [b[1], b[3]].map(Y => gy + sun.dy * (gy - Y));
+  // where the corners of the drawing land (gl: the ground line under x)
+  const gl = X => gy + T * (X - P.sx), landX = (X, Y) => X + sun.dx * (gl(X) - Y);
+  const xs = [b[0], b[2]].flatMap(X => [b[1], b[3]].map(Y => landX(X, Y))), ys = [b[0], b[2]].flatMap(X => [b[1], b[3]].map(Y => gl(landX(X, Y)) + sun.dy * (gl(X) - Y)));
   const x0 = clamp(Math.floor((Math.min(...xs) - m) / k), 0, cv.width), x1 = clamp(Math.ceil((Math.max(...xs) + m) / k), 0, cv.width);
   const y0 = clamp(Math.floor((Math.min(...ys) - m) / k), 0, cv.height), y1 = clamp(Math.ceil((Math.max(...ys) + m) / k), 0, cv.height);
   if (x1 <= x0 || y1 <= y0) return;
   x.setTransform(1 / k, 0, 0, 1 / k, 0, 0); x.globalCompositeOperation = 'source-in';
-  const g = x.createLinearGradient(P.sx, gy, P.sx + sun.dx * hgt, gy + sun.dy * hgt);
+  const g = x.createLinearGradient(P.sx, gy, P.sx + sun.dx * hgt, gy + T * sun.dx * hgt + sun.dy * hgt);
   g.addColorStop(0, `rgba(${SHADOW_RGB},1)`); g.addColorStop(1, `rgba(${SHADOW_RGB},0.5)`);
   x.fillStyle = g; x.fillRect(x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k); x.globalCompositeOperation = 'source-over';
   ctx.save(); reset(ctx); ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = clamp(sun.a * a.alpha); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
@@ -281,7 +312,8 @@ function layerRunner(ctx, plan, shot, t, cam, actors) {
   const actor = id => {
     const a = actors.find(x => x.id === id); if (!a) return null;
     if (!geo.has(id)) {
-      const q = probe(a.R, a.x, a.y + (a.sink || 0), a.s, a.face, { ...a.st, shadow: false });
+      let q = probe(a.R, a.x, a.y + (a.sink || 0), a.s, a.face, { ...a.st, shadow: false });
+      if (a.pitch) q = turner(a.x, a.y + (a.sink || 0), a.pitch).result(q);
       geo.set(id, { ...a, head: q.head.slice(), mouth: (q.mouth || q.head).slice(), box: q.bounds.slice() });
     }
     return geo.get(id);
@@ -561,9 +593,10 @@ function drawCardFrame(ctx, plan, card, t) {
  * → { t, shot, scene, set, size, camera, view, actors: [{ id, rig, x, y, s, scale, face, screenBox, worldBox, headBox,
  *     visibleBox, head, contact: { x, y, kind ('ground' | 'surface' | 'perch' | 'hollow' | 'air' | 'mount'), screen,
  *     carrier? }, airborne, perch, speaking, mode, key, alpha, action, anchor, squash, sink, waterline, wade,
- *     carrier, tilt }], captionBox, captions, colliders }
- * screenBox / headBox / head already include the turn squash (squash) and the wading sink; visibleBox is the part
- * above the waterline (screen y `waterline`, null when not wading).
+ *     carrier, tilt, pitch, slope }], captionBox, captions, colliders }
+ * screenBox / headBox / head already include the turn squash (squash), the wading sink and the pitch on a slope (pitch,
+ * rad: the drawing turned about the contact point; slope: the ground's angle there); visibleBox is the part above the
+ * waterline (screen y `waterline`, null when not wading).
  */
 export function frameInfo(plan, t) {
   const W = plan.W, H = plan.H, shot = plan.shotAt(t);
@@ -574,7 +607,9 @@ export function frameInfo(plan, t) {
     const P = onScreen(a, cam, W, H), r = probe(a.R, P.sx, P.sy + P.sink, P.ss, a.face, { ...a.st, shadow: false });
     // the drawing squashes horizontally around the contact point during a turn
     const q = a.squash ?? 1, X = v => P.sx + (v - P.sx) * q, b0 = r.bounds;
-    const box = q === 1 ? b0.slice() : [Math.min(X(b0[0]), X(b0[2])), b0[1], Math.max(X(b0[0]), X(b0[2])), b0[3]], head = [X(r.head[0]), r.head[1]];
+    let box = q === 1 ? b0.slice() : [Math.min(X(b0[0]), X(b0[2])), b0[1], Math.max(X(b0[0]), X(b0[2])), b0[3]], head = [X(r.head[0]), r.head[1]];
+    // on a slope the (squashed) drawing turns about the contact point
+    if (P.rot) { const T = turner(P.sx, P.sy + P.sink, P.rot); box = T.box(box); head = T.pt(head); }
     const hb = headBox(a, { head }, z);
     heads.push({ id: a.id, box: hb, speaking: !!a.speaking });
     // wading (or riding a wading carrier): the drawing below the waterline is hidden
@@ -583,7 +618,7 @@ export function frameInfo(plan, t) {
       id: a.id, rig: a.rig, x: a.x, y: a.y, s: a.s, scale: a.scale, face: a.face, screenBox: box, worldBox: toWorld(box), headBox: hb,
       visibleBox: vis, head, contact: { x: a.x, y: a.y, kind: a.mode === 'air' ? 'air' : a.mode, screen: [P.sx, P.sy], ...(a.carrier ? { carrier: a.carrier } : {}) },
       airborne: a.airborne, perch: a.perch, speaking: a.speaking, mode: a.mode, key: a.key, alpha: a.alpha, action: a.action, anchor: a.anchor,
-      squash: q, sink: a.sink || 0, waterline: P.wl, wade: a.wade, carrier: a.carrier, tilt: a.st.tilt ?? 0,
+      squash: q, sink: a.sink || 0, waterline: P.wl, wade: a.wade, carrier: a.carrier, tilt: a.st.tilt ?? 0, pitch: a.pitch || 0, slope: a.slope || 0,
     };
   });
   const caps = plan.captionMode === 'none' ? [] : captionLayouts(plan, t, heads);

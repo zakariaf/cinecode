@@ -15,7 +15,7 @@ import * as land from '../films/seventy-six-summers/fx/land.mjs';
 import { loadFilm } from '../engine/film/load.mjs';
 import { compile } from '../engine/film/compile.mjs';
 import { drawFrame, frameInfo } from '../engine/film/frame.mjs';
-import { loadPlan } from '../engine/render/film-source.mjs';
+import { loadPlan, loadVoiceCache } from '../engine/render/film-source.mjs';
 import { getKit } from '../engine/set/kits/index.mjs';
 
 const DIR = fileURLToPath(new URL('../films/seventy-six-summers/', import.meta.url));
@@ -65,6 +65,7 @@ test('exports the overlays and custom beats on the layers they need', () => {
   assert.equal(L(land.custom.reflection), 'front');            // the bank and water are in front of everything
   assert.equal(L(land.custom['crest-figure']), 'sky');         // on the far hill
   for (const n of ['lantern-reveal', 'eye-glint', 'star-highlight', 'firefly-fill']) assert.equal(L(land.custom[n]), 'grade');
+  assert.equal(L(land.custom['near-figure']), 'front');         // in the world's light: before the grade
   for (const d of [...Object.values(land.overlays), ...Object.values(land.custom)]) assert.equal(typeof d.draw, 'function');
 });
 
@@ -189,6 +190,18 @@ test('fireflyPoints: staggered, rising from the bottom of the frame, mostly behi
   }
   const all = land.fireflyPoints(head, -1, 4.5, W, H);
   assert.ok(all.every(q => q.x > 0 && q.x < W && q.y < 1.1 * H && q.a > 0 && q.a <= 1));
+});
+
+test('nearFigure: the actor at a frame point, its rig height a share of the frame, facing its own way', () => {
+  const R = { height: 52 }, a = { R, face: -1 };
+  const g = land.nearFigure(a, 1920, 1080, { x: 0.2, y: 1.32, h: 0.9 });
+  assert.ok(Math.abs(g.x - 384) < 1e-9 && Math.abs(g.y - 1425.6) < 1e-9 && g.face === -1);
+  assert.ok(Math.abs(g.s * R.height - 0.9 * 1080) < 1e-9, 'its height is h of the frame');
+  // frame fractions: the same framing at half size
+  const h = land.nearFigure(a, 960, 540, { x: 0.2, y: 1.32, h: 0.9 });
+  assert.ok(Math.abs(h.x * 2 - g.x) < 1e-9 && Math.abs(h.y * 2 - g.y) < 1e-9 && Math.abs(h.s * 2 - g.s) < 1e-9);
+  assert.equal(land.nearFigure(null, 1920, 1080), null);
+  assert.equal(land.nearFigure({ face: 1 }, 1920, 1080), null, 'no rig, nothing to draw');
 });
 
 test('the shadow\'s edge bows down a little toward the hill\'s flanks; its glaze is a cool blue', () => {
@@ -429,14 +442,83 @@ test('4.5: Pebble turns and walks on; Fidget runs after him and falls in at his 
   assert.ok(f1.x < p1.x && p1.x - f1.x < 200, `at his heels, behind him (${(p1.x - f1.x).toFixed(0)} px)`);
 });
 
-test('the walk to the stone, then the crane from PROMISE WIDE into the sky', async () => {
+test('the walk to the stone, then the crane from PROMISE WIDE into the sky, with the title in the same shot', async () => {
   const p = await voiced();
   const a = actorsAt(p, '10.1', 0.01), b = actorsAt(p, '10.1', 0.99);
   for (const id of ['pebble', 'nell']) assert.ok(actor(a, id).face === 1 && actor(b, id).face === 1 && actor(b, id).x > actor(a, id).x + 5, `10.1: ${id} walks toward the stone`);
   const cam = (id, u) => { const s = p.shots.find(s => s.id === id); return s.cameraAt(s.t0 + (s.t1 - s.t0) * u); };
   const same = (c, d, what) => assert.ok(Math.abs(c.cx - d.cx) < 1 && Math.abs(c.cy - d.cy) < 1 && Math.abs(c.zoom - d.zoom) < 1e-3, `${what}: ${[c.cx, c.cy, c.zoom]} vs ${[d.cx, d.cy, d.zoom]}`);
   same(cam('10.4', 0), cam('1.6', 0.5), '10.4 opens on PROMISE WIDE');
-  same(cam('10.4', 1 - 1e-6), cam('10.5', 0), '10.5 picks the crane up where 10.4 leaves it');
-  assert.ok(cam('10.4', 1 - 1e-6).cy < cam('10.4', 0).cy - 200, 'and it rises');
-  assert.ok(cam('10.5', 1 - 1e-6).cy < cam('10.5', 0).cy, 'on into the sky');
+  same(cam('10.4', 0.15), cam('10.4', 0), 'and holds it for the line');
+  assert.ok(cam('10.4', 1 - 1e-6).cy < cam('10.4', 0).cy - 200, 'then it rises');
+  // one shot, not a cut onto the crane's last framing: 10.4 is the film's last shot, and it carries the title
+  const s104 = p.shots.find(s => s.id === '10.4'), line = p.lines.find(l => l.shot === '10.4' && l.narrator);
+  assert.equal(p.shots[p.shots.length - 1], s104);
+  assert.ok(Math.abs(s104.t1 - p.duration) < 1e-6);
+  const title = p.captions.find(c => c.style === 'title' && c.t0 >= s104.t0);
+  assert.ok(title && title.t0 >= line.t1 && title.t1 <= s104.t1 + 1e-6, 'the title after the line, inside the shot');
+  assert.ok(title.t0 > s104.t0 + 0.6 * (s104.t1 - s104.t0) - 1, 'as the crane settles');
+});
+
+test('the restaged meadow and summit: 2.2 a medium two-shot, 2.4 on the speaker, 9.1 she passes in front of him, 9.6 heads apart, 10.3 headroom', async () => {
+  const p = await voiced(), hgt = b => (b[3] - b[1]) / p.H;
+  // 2.2: Fidget waits just ahead of the plodding shell, so the two-shot plays as a medium, not a wide across the tree
+  for (const u of [0.05, 0.5, 0.95]) {
+    const A = actorsAt(p, '2.2', u), f = actor(A, 'fidget'), pb = actor(A, 'pebble');
+    assert.ok(hgt(f.screenBox) > 0.18 && hgt(pb.screenBox) > 0.25, `2.2@${u}: Fidget ${hgt(f.screenBox).toFixed(2)}, Pebble ${hgt(pb.screenBox).toFixed(2)} of the frame`);
+    for (const a of [f, pb]) assert.ok(inFrame(p, a.screenBox) > 0.95, `2.2@${u}: ${a.id} in frame`);
+  }
+  const end = actorsAt(p, '2.2', 0.95);
+  assert.ok(actor(end, 'fidget').screenBox[0] - actor(end, 'pebble').headBox[2] < 0.2 * p.W, '2.2: right in his path');
+  // 2.4: the speaker reads for his whole line (Fidget, on the grass far below, is the near figure)
+  const h = p.lines.find(l => l.shot === '2.4' && l.who === 'hollis');
+  for (const t of [h.t0 + 0.05, (h.t0 + h.t1) / 2, h.t1 - 0.05]) {
+    const o = actor(frameInfo(p, t).actors, 'hollis');
+    assert.ok(hgt(o.screenBox) > 0.35 && inFrame(p, o.screenBox) > 0.99, `2.4: Hollis ${hgt(o.screenBox).toFixed(2)} of the frame at ${t.toFixed(2)}`);
+  }
+  // 9.1: her feet never come down on his head; where she steps past him she is in front of him (he sat up the bank)
+  const s91 = p.shots.find(s => s.id === '9.1');
+  let passed = 0;
+  for (let t = s91.t0; t < s91.t1; t += 1 / 24) {
+    const A = frameInfo(p, t).actors, n = actor(A, 'nell'), f = actor(A, 'fidget');
+    if (!n || n.alpha < 0.05 || !f) continue;
+    const [cx, cy] = n.contact.screen, b = f.headBox, d = Math.hypot(Math.max(b[0] - cx, 0, cx - b[2]), Math.max(b[1] - cy, 0, cy - b[3]));
+    assert.ok(d > 0.025 * p.H, `9.1 at ${(t - s91.t0).toFixed(2)} s: her feet ${d.toFixed(0)} px from his head`);
+    if (cx < f.screenBox[0] || cx > f.screenBox[2]) continue;
+    passed++;
+    assert.ok(n.y > f.y + 10, `9.1 at ${(t - s91.t0).toFixed(2)} s: she passes in front of him (y ${n.y.toFixed(0)} / ${f.y.toFixed(0)})`);
+  }
+  assert.ok(passed > 0, '9.1: she does pass him');
+  // 9.6: Pebble's raised head (his eyes on her) never comes down over Fidget's, under his chin
+  const s96 = p.shots.find(s => s.id === '9.6');
+  for (let t = s96.t0; t < s96.t1; t += 1 / 24) {
+    const A = frameInfo(p, t).actors, a = actor(A, 'pebble').headBox, b = actor(A, 'fidget').headBox;
+    const gap = Math.max(b[0] - a[2], a[0] - b[2], b[1] - a[3], a[1] - b[3]);
+    assert.ok(gap > 0.015 * p.H, `9.6 at ${(t - s96.t0).toFixed(2)} s: heads ${gap.toFixed(0)} px apart`);
+  }
+  // 10.3: room above his ears (about a fifth of the head box over its top) when he sits up
+  for (const u of [0.1, 0.5, 0.8, 0.9, 0.99]) {
+    const b = actor(actorsAt(p, '10.3', u), 'fidget').headBox;
+    assert.ok(b[1] - 0.2 * (b[3] - b[1]) > 0.025 * p.H, `10.3@${u}: ears ${(b[1] - 0.2 * (b[3] - b[1])).toFixed(0)} px from the top`);
+  }
+});
+
+// The voiced plan at half size (the measured takes, so 2.4 is cut as it renders).
+let VHALF = null;
+async function voicedHalf() {
+  if (VHALF) return VHALF;
+  const json = JSON.parse(readFileSync(DIR + 'film.json', 'utf8'));
+  json.format = { ...json.format, width: W, height: H };
+  const film = await loadFilm(json, { custom: DIR + 'custom.mjs' }), { voices } = await loadVoiceCache(film, compile(film), DIR + 'voices');
+  VHALF = compile(film, { voices });
+  return VHALF;
+}
+test('2.4: Fidget is out of the frame flat on the grass, then sits up into its bottom corner on "seventy-five years early"', async () => {
+  const p = await voicedHalf(), c = p.custom.find(c => c.name === 'near-figure'), s = p.shots.find(s => s.id === '2.4');
+  assert.ok(c && Math.abs(c.t0 - s.t0) < 1e-6 && Math.abs(c.t1 - s.t1) < 1e-3, 'it runs the whole shot');
+  const at = t => diff(render(p, t), render(without(p, ['near-figure']), t));
+  const flat = at(s.t0 + 0.3), up = at(s.t1 - 0.1);
+  assert.ok(flat.n < 0.002 * W * H, `nothing of him shows before (${flat.n} px)`);
+  assert.ok(up.n > 0.08 * W * H, `then he does (${up.n} px)`);
+  assert.ok(up.box[3] >= H - 2 && (up.box[0] + up.box[2]) / 2 < 0.45 * W, `rising out of the bottom left (${up.box})`);
 });

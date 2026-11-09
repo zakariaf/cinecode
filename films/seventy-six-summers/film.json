@@ -111,7 +111,7 @@
       "overlays": [{ "name": "far-hill", "params": { "frac": 0.04, "dayT": 0.03 } }],
       "music": { "mood": "pastoral", "intensity": 0.35, "motif": 4, "motifVoice": "bassoon", "tempo": 46 },
       "actors": {
-        "hollis": { "at": "low_branch", "face": "right", "pose": "sleep" },
+        "hollis": { "at": "low_branch", "face": "left", "pose": "sleep" },
         "fidget": { "at": "branch_tip", "face": "left", "pose": "perch" },
         "pebble": { "at": "x:150,y:1082", "face": "right" }
       },
@@ -120,7 +120,7 @@
           "camera": { "size": "establishing", "zoom": 1.5, "on": ["hollis", "meadow_left"], "move": "pan", "moveAt": 0, "moveDur": 1.95 },
           "beats": [
             { "do": "walk", "who": "pebble", "to": "x:190,y:1082", "at": 0.1 },
-            { "do": "hop", "who": "fidget", "to": "x:760,y:1032", "pose": "sit", "at": 0.7, "note": "one drop from the branch tip into his path; he lands and sits before 2.2" },
+            { "do": "hop", "who": "fidget", "to": "x:560,y:1120", "pose": "sit", "gait": "run", "speed": 3, "at": 0.1, "note": "one drop from the branch tip into his path, just in front of it (the shell passes behind him later); he lands and sits before 2.2" },
             { "do": "walk", "who": "pebble", "to": "x:225,y:1082", "at": 1.3 }
           ], "dur": 2.0 },
         { "id": "2.2", "camera": { "size": "medium", "on": ["pebble", "fidget"] },
@@ -140,15 +140,16 @@
             { "say": "fidget", "text": "[laughs]", "tts": "Ha! Ha ha ha!", "tone": "cackling", "with": "prev" },
             { "music": { "mood": "playful", "intensity": 0.35 }, "with": "prev" }
           ], "hold": 0.2 },
-        { "id": "2.4", "note": "one static frame holding both: Hollis speaks from the branch without opening his eyes; Fidget, below, sits up startled and looks up at him",
-          "camera": { "size": "full", "on": ["hollis", "fidget"] },
+        { "id": "2.4", "note": "over Fidget's shoulder, up at the branch: Hollis speaks without opening his eyes; Fidget, flat on the grass below the frame's edge, sits up into it, startled, and looks up at him",
+          "camera": { "size": "medium", "on": ["hollis"], "zoom": 0.55, "offset": [0.14, -0.06], "note": "the owl high and right; the bottom left kept for the squirrel near the lens" },
           "beats": [
             { "do": "walk", "who": "pebble", "to": "x:490,y:1082", "speed": 0.75, "at": 0 },
             { "do": "wake", "who": "hollis", "pose": "sleep", "at": 0, "note": "eyes still shut, but no Zs while he talks" },
+            { "do": "custom", "name": "near-figure", "who": "fidget", "x": 0.2, "y": 1.32, "h": 0.9, "blur": 2.5, "shade": 0.3, "dur": 3.5, "at": 0, "note": "the near half of the over-the-shoulder: him as he is on the grass below, large by the lens; runs to the cut" },
             { "say": "hollis", "text": "Then he'll be seventy-five years early for the next comet.", "tone": "dry, matter-of-fact", "at": 0.2 },
             { "do": "pose", "who": "fidget", "pose": "alert", "dur": 0.3, "at": 2.45, "expr": "surprised", "note": "on \"seventy-five years early\"" },
             { "do": "look", "who": "fidget", "to": "hollis", "with": "prev" }
-          ], "hold": 0.45 },
+          ], "hold": 0 },
         { "id": "2.5", "camera": { "size": "close", "on": ["hollis"] },
           "beats": [
             { "do": "walk", "who": "pebble", "to": "x:570,y:1082", "speed": 0.75, "at": 0 },
@@ -492,13 +493,13 @@
             { "do": "enter", "who": "fidget", "from": "x:1990", "to": "x:1705,y:876", "run": true, "at": 0.2, "note": "bursts down out of the mist" },
             { "do": "pose", "who": "fidget", "pose": "alert", "dur": 0.25, "note": "stops dead" },
             { "do": "look", "who": "fidget", "to": "pebble", "with": "prev" },
-            { "do": "walk", "who": "fidget", "to": "x:1735,y:900", "speed": 1.6, "after": 0.25, "note": "steps aside, off the path, down into the grass in front of it: this last stretch isn't his" },
+            { "do": "run", "who": "fidget", "to": "x:1748,y:816", "speed": 0.6, "after": 0.15, "note": "steps aside, off the path, up into the grass behind it: this last stretch isn't his; she passes in front of him, not over his head" },
             { "do": "turn", "who": "fidget", "face": "left" },
             { "do": "pose", "who": "fidget", "pose": "sit", "dur": 0.3 },
-            { "do": "enter", "who": "nell", "from": "x:2010", "to": "x:1570", "speed": 1.0, "at": 0.7, "note": "down out of the mist, past the seated Fidget" },
-            { "do": "fade", "who": "nell", "to": 0, "dur": 0.004, "at": 0.7, "note": "she comes out of the mist from nothing (offstage until the enter, so the first frame has no flash of her)" },
-            { "do": "fade", "who": "nell", "to": 1, "dur": 0.9, "at": 0.705, "note": "only while she is deep in the mist band" },
-            { "do": "look", "who": "pebble", "to": "nell", "at": 2.6 }
+            { "do": "enter", "who": "nell", "from": "x:2010", "to": "x:1570", "speed": 1.0, "at": 1.0, "note": "down out of the mist, past the seated Fidget" },
+            { "do": "fade", "who": "nell", "to": 0, "dur": 0.004, "at": 1.0, "note": "she comes out of the mist from nothing (offstage until the enter, so the first frame has no flash of her)" },
+            { "do": "fade", "who": "nell", "to": 1, "dur": 0.9, "at": 1.005, "note": "only while she is deep in the mist band" },
+            { "do": "look", "who": "pebble", "to": "nell", "at": 2.9 }
           ], "hold": 1.5 },
         { "id": "9.2", "camera": { "size": "full", "on": ["pebble", "nell", "fidget"] },
           "beats": [
@@ -525,8 +526,8 @@
             { "mark": "bloom", "at": 0.583 },
             { "music": { "mood": "triumph", "intensity": 0.75, "downbeat": true }, "at": 0.583 },
             { "do": "set", "who": "nell", "pose": "sit-ground", "at": 0 },
-            { "do": "walk", "who": "fidget", "to": "x:1580,y:920", "speed": 3.0, "at": 1.3, "note": "creeps back out of the grass, passing in front of her" },
-            { "do": "walk", "who": "fidget", "to": "x:1348,y:988", "speed": 3.0, "note": "to Pebble's head: just past his chin (not behind his neck, which would hide him), clear of her feet" }
+            { "do": "walk", "who": "fidget", "to": "x:1580,y:920", "speed": 3.0, "at": 0.6, "note": "creeps back out of the grass, passing in front of her" },
+            { "do": "walk", "who": "fidget", "to": "x:1358,y:985", "speed": 3.0, "note": "to Pebble's head: just past his chin (not behind his neck, which would hide him; not under it, where his raised head would cover him), clear of her feet" }
           ], "dur": 5.25 },
         { "id": "9.6", "camera": { "size": "medium", "on": ["fidget", "pebble", "nell"] },
           "music": { "mood": "tender", "intensity": 0.3 },
@@ -537,8 +538,8 @@
             { "do": "look", "who": "fidget", "to": "left", "at": 1.18 },
             { "do": "look", "who": "fidget", "to": "pebble", "at": 1.42 },
             { "say": "fidget", "text": "PEBBLE?!", "tts": "Pebble?!", "tone": "squeaky, disbelieving", "expr": "surprised", "at": 1.72 },
-            { "do": "look", "who": "pebble", "to": "nell", "with": "prev" },
-            { "say": "pebble", "text": "She was six.", "tone": "deadpan", "after": 0.9 }
+            { "do": "look", "who": "pebble", "to": "nell", "at": 1.93, "note": "his eyes never leave her: an explicit look just after his idle glance at the speaker would start (1.91), so he never dips his head toward Fidget, right under his chin" },
+            { "say": "pebble", "text": "She was six.", "tone": "deadpan", "at": 3.48 }
           ], "hold": 0.4 },
         { "id": "9.7", "camera": { "size": "close", "on": ["nell"], "offset": [0.18, 0.1], "note": "her head clear of the comet's tail, with room ahead of her face" },
           "beats": [
@@ -618,24 +619,20 @@
             { "do": "gesture", "who": "nell", "name": "laugh", "after": 0.15 },
             { "say": "nell", "text": "[laughs]", "tts": "Hahaha!", "tone": "chuckling", "trimEnd": 0.93, "with": "prev", "note": "the first burst of the take; the shot cuts 0.4 s after it, mid-gesture" }
           ], "dur": 6.75 },
-        { "id": "10.3", "camera": { "size": "close", "on": ["fidget"] },
+        { "id": "10.3", "camera": { "size": "close", "on": ["fidget"], "zoom": 0.85, "note": "headroom for his ears when he sits up on the last line" },
           "beats": [
             { "say": "fidget", "text": "I'm not coming.", "tone": "flat, weary", "at": 0.25, "expr": "sleepy" },
             { "say": "fidget", "text": "…I'm coming.", "tts": "I'm coming.", "tone": "quiet, certain", "after": 1.15, "expr": "happy" },
             { "do": "pose", "who": "fidget", "pose": "sit", "dur": 0.5, "with": "prev", "after": 0.3, "note": "he sits up on it: three silhouettes in 10.4" }
           ], "hold": 0.4 },
-        { "id": "10.4", "note": "PROMISE WIDE in full colour, three figures at the stone; 1.5 s hold, then the crane up into the stars",
-          "camera": { "size": "establishing", "on": ["stone_front"], "move": "tilt-up", "moveAt": 1.5, "moveDur": 3.5, "offset": [0, -576], "note": "tilt-up rises 0.32 view heights (576 px at the widest zoom) onto its base: the base is the sky, so it starts exactly on PROMISE WIDE" },
+        { "id": "10.4", "note": "PROMISE WIDE in full colour, three figures at the stone; 1.5 s hold, then the crane up into the stars, and the title over them in the same shot (one move, no cut onto the same framing)",
+          "camera": { "size": "establishing", "on": ["stone_front"], "move": "tilt-up", "moveAt": 1.5, "moveDur": 4.7, "offset": [0, -576], "note": "tilt-up rises 0.32 view heights (576 px at the widest zoom) onto its base: the base is the sky, so it starts exactly on PROMISE WIDE" },
           "beats": [
             { "say": "narrator", "text": "And this time, nobody climbed the hill alone.", "tone": "gentle, smiling", "at": 0.3 },
             { "music": { "mood": "triumph", "intensity": 0.6, "motif": 5, "motifVoice": "tutti" }, "with": "prev" },
-            { "fx": "fireflies", "at": "pebble", "n": 3, "dur": 5.0, "with": "prev" }
-          ], "dur": 5.0 },
-        { "id": "10.5", "note": "TITLE over the stars: picks up exactly where 10.4's crane ends and drifts on up into the sky",
-          "camera": { "size": "establishing", "on": ["stone_front"], "offset": [0, -700], "move": "push-in", "zoomTo": 1.6 },
-          "beats": [
-            { "title": "SEVENTY-SIX SUMMERS", "sub": "Drawn, animated and scored entirely in code. Voices: Gemini TTS.", "at": 0.2, "dur": 3.0 }
-          ], "dur": 3.2, "fadeOut": 1.0 }
+            { "fx": "fireflies", "at": "pebble", "n": 3, "dur": 8.2, "with": "prev" },
+            { "title": "SEVENTY-SIX SUMMERS", "sub": "Drawn, animated and scored entirely in code. Voices: Gemini TTS.", "at": 4.6, "dur": 3.4, "note": "after the line, as the crane settles into the sky" }
+          ], "dur": 8.2, "fadeOut": 1.0 }
       ]
     }
   ]

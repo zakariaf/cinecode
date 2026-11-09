@@ -274,13 +274,19 @@ test('time-lapse: eight ghosts of Nell, child to elder, 5 frames each, the last 
   assert.deepEqual(order, [0, 1, 2, 3, 4, 5, 6, 7]);
   assert.equal(sky.SCARF, '#5e7b3f');
   // a shorter beat (the film's is 3.5 s = 84 frames) moves them with it: all eight are seen, and the old woman's 8
-  // frames end on the beat's last frame (she used to fall after its end, frames 87..94, and never played)
-  for (const dur of [3.5, 3.75]) {
-    const n = Math.round(dur * FPS), at = new Map();
-    for (let f = 0; f < n; f++) { const g = sky.timelapseAt(f / FPS, dur, FPS).ghost; if (g >= 0) at.set(g, [...(at.get(g) || []), f]); }
+  // frames end GHOST_END.clear s before the beat's end (she used to hang there, see-through, until the cut to the empty
+  // dawn of 1.7), fading out over her last frames; the others are drawn at full strength
+  for (const dur of [3.5, 3.75, 4]) {
+    const n = Math.round(dur * FPS), at = new Map(), clear = Math.round(sky.GHOST_END.clear * FPS);
+    for (let f = 0; f < n; f++) { const s = sky.timelapseAt(f / FPS, dur, FPS); if (s.ghost >= 0) at.set(s.ghost, [...(at.get(s.ghost) || []), [f, s.ghostA]]); else assert.equal(s.ghostA, 0); }
     assert.equal(at.size, 8, `${dur} s`);
-    for (let i = 0; i < 7; i++) assert.equal(at.get(i).length, 5);
-    assert.deepEqual(at.get(7), Array.from({ length: 8 }, (_, i) => n - 8 + i), `the last held 8 frames to the end of a ${dur} s beat`);
+    for (let i = 0; i < 7; i++) { assert.equal(at.get(i).length, 5); for (const [, a] of at.get(i)) assert.equal(a, 1); }
+    const last = at.get(7);
+    assert.deepEqual(last.map(q => q[0]), Array.from({ length: 8 }, (_, i) => n - clear - 8 + i), `the last held 8 frames, ending ${clear} frames before the end of a ${dur} s beat`);
+    assert.ok(clear / FPS >= 0.2, 'nothing of her in the last 0.2 s');
+    const A = last.map(q => q[1]);
+    assert.equal(A[0], 1); assert.ok(A[A.length - 1] > 0 && A[A.length - 1] < 0.3, 'she fades out');
+    for (let i = 1; i < A.length; i++) assert.ok(A[i] <= A[i - 1]);
   }
 });
 
@@ -341,7 +347,10 @@ test('the comet lights its patch of sky after the grade; the bloom is brighter t
 test('the stone keeps its gold until the mark, then it is gone; the mist veils the upper slope', async () => {
   const p = await plan(), tm = p.marks.bloom, shot = p.shotAt(tm), cam = shot.cameraAt(tm), z = cam.zoom, st = shot.set;
   const stone = st.props.find(q => q.id === 'standing_stone'), top = st.anchor('stone_top');
-  const sx = Math.round((top.x - cam.cx) * z + W / 2), sy = Math.round((top.y - cam.cy) * z + H / 2), box = [sx - 6, sy - 1, sx + 6, sy + 3];
+  const sx = Math.round((top.x - cam.cx) * z + W / 2);
+  // over the stone's top (its lit sliver lies above a terminator that curls up across its middle, so a box round the
+  // stone_top anchor alone can fall in its shadow)
+  const sb = stone.bounds, box = [Math.floor((sb[0] - cam.cx) * z + W / 2), Math.floor((sb[1] - cam.cy) * z + H / 2), Math.ceil((sb[2] - cam.cx) * z + W / 2), Math.ceil((sb[1] + 50 - cam.cy) * z + H / 2)];
   const gold = d => { let g = 0; for (let y = box[1]; y < box[3]; y++) for (let x = box[0]; x < box[2]; x++) { const i = (y * W + x) * 4; g += Math.max(0, d[i] - d[i + 2]); } return g; };
   const lit = gold(render(p, tm - 1.5)), out = gold(render(p, tm + 0.1)), base = gold(render(without(p, ['stone-light']), tm - 1.5));
   assert.ok(lit > base + 200, `gold before the mark (${lit} vs ${base})`);
@@ -609,4 +618,89 @@ test('a comet half hidden by out-of-focus land rises into clear sky; clear, deep
   const late = sky.cometLift({ ...api(mk('lift-pan-a', pan)), t: tm + 0.9 }), early = sky.cometLift({ ...api(mk('lift-pan-b', pan)), t: tm - 0.9 });
   assert.equal(late, early);
   assert.equal(sky.cometLift({ ...api(mk('lift-pan-a', pan)), t: tm - 0.5 }), late);
+});
+
+// ───────────── round 4: level strata, a lining that hugs the lit edge, the last thread of gold ─────────────
+test('the mist lies in level strata: a level bank over the crest, and its dense top never runs up the slope as a straight line', () => {
+  const p = { ...sky.MIST, to: 4000, partT: null }, g = x => S.groundAt(x), stone = S.props.find(q => q.id === 'standing_stone'), Yc = g(stone.x);
+  for (const t of [3, 17.5, 40]) {
+    const D = sky.mistDensity(S, p, t, 11), o = (x, y) => sky.glaze(D(x, y).bank);
+    // the level (height above the ground at the stone) of the dense mist's top at x, or null where there is none
+    const top = x => { for (let lv = 1.5 * p.top; lv > -300; lv -= 2) { const y = Yc - lv; if (y > g(x)) return null; if (o(x, y) > 0.5) return lv; } return null; };
+    const crest = []; for (let x = stone.x - 200; x <= stone.x + 600; x += 25) crest.push(top(x));
+    assert.ok(crest.every(v => v != null) && Math.max(...crest) - Math.min(...crest) < 0.08 * p.top, `level over the crest (${crest.join(' ')})`);
+    // from the foot of the slope up to the bank: the old bank's dense top climbed it as one straight line (within 0.11 ×
+    // top of a fitted line all the way: a pale wedge, a searchlight down the hill); level strata step instead
+    const P = []; for (let x = 1650; x <= 2250; x += 10) { const v = top(x); if (v != null) P.push([x, v]); }
+    const n = P.length, mx = P.reduce((s, q) => s + q[0], 0) / n, my = P.reduce((s, q) => s + q[1], 0) / n;
+    let sxy = 0, sxx = 0; for (const [x, y] of P) { sxy += (x - mx) * (y - my); sxx += (x - mx) ** 2; }
+    const k = sxy / sxx, off = Math.max(...P.map(([x, y]) => Math.abs(y - (my + k * (x - mx)))));
+    assert.ok(n > 40 && off > 0.16 * p.top, `not a ramp at ${t} (off a straight line by ${(off / p.top).toFixed(2)} × top)`);
+  }
+});
+
+test('the lining hugs the edge facing the comet: bright on it and falling off into the cloud with no gap, none on the far edges, none on clouds out of its light', async () => {
+  const p = await plan(), t = p.marks.bloom + 3, shot = p.shotAt(t), scene = p.scenes.find(s => s.id === shot.scene);
+  render(p, t);
+  const api = { t, W: 1920, H: 1080, cam: shot.cameraAt(t), shot, scene, set: shot.set, plan: p, marks: p.marks, params: { mode: 'bloom' } };
+  const st = sky.cometState(api), F = sky.skyFrame(api), P = { hx: F.x0 + st.pos[0] * F.s, hy: F.y0 + st.pos[1] * F.s, s: F.s, L: st.L, B: st.B };
+  const lit = a => { const c = createCanvas(960, 540), x = c.getContext('2d'); x.fillStyle = `rgba(255,255,255,${a})`; x.fillRect(0, 0, 960, 540); return c; };
+  const L = sky.cloudLight(api, st, P, lit(1), [255, 255, 255]), lw = L.c.width, lh = L.c.height, d = L.c.getContext('2d').getImageData(0, 0, lw, lh).data;
+  const a = (x, y) => { x = Math.round(x) - L.x; y = Math.round(y) - L.y; return x < 0 || y < 0 || x >= lw || y >= lh ? 0 : d[(y * lw + x) * 4 + 3] / 255; };
+  const dx = 960 - P.hx, dy = 540 - P.hy, dl = Math.hypot(dx, dy), body = sky.LINING.body;
+  let crossed = 0;
+  for (let ang = -0.6; ang <= 0.61; ang += 0.05) {
+    const c = Math.cos(ang), s = Math.sin(ang), nx = (dx * c - dy * s) / dl, ny = (dx * s + dy * c) / dl, q = [];
+    for (let r = 0; r < 1500; r++) q.push(a(P.hx + nx * r, P.hy + ny * r));
+    const i = q.findIndex(v => v > 0.3); if (i < 4) continue;
+    const pk = i + q.slice(i, i + 6).indexOf(Math.max(...q.slice(i, i + 6)));
+    // rays that cross a whole cloud body (not grazing a lobe or running along it near the land, where it fades)
+    const e = q.findIndex((v, k) => k > pk + 14 && v < 0.02);
+    if (e < 0 || e - pk < 40) continue;
+    crossed++;
+    // no gap: from the line on the edge it only falls toward the body's light, never dips below it and rises again
+    for (let k = pk; k < pk + 14; k++) assert.ok(q[k + 1] <= q[k] + 0.06 && q[k + 1] >= body * 0.6, `a gap behind the lit edge (ray ${ang.toFixed(2)})`);
+    // where the ray leaves this cloud (the far edge, turned away from the comet): nothing but the body's light
+    assert.ok(Math.max(...q.slice(e - 6, e)) < body + 0.08, `a rim on the far edge (ray ${ang.toFixed(2)}: ${Math.max(...q.slice(e - 6, e)).toFixed(2)})`);
+  }
+  assert.ok(crossed >= 3, `rays cross whole clouds (${crossed})`);
+  // a cloud out in the dark, beyond the comet's light (its falloff under LINING.within), gets no lining at all
+  const dim = sky.cloudLight(api, st, P, lit(sky.LINING.within[0] * 0.9), [255, 255, 255]), dd = dim.c.getContext('2d').getImageData(0, 0, dim.c.width, dim.c.height).data;
+  let most = 0; for (let k = 3; k < dd.length; k += 4) most = Math.max(most, dd[k]);
+  assert.equal(most, 0, 'no lone arcs');
+});
+
+// A close shot on the stone's tip at a mark that puts its light out, as 9.5 frames it (at half the film's size), with
+// s09's light: the mark 17.125 s into a 50 s scene.
+function threadFilm() {
+  return {
+    title: 'Thread test', format: { width: 960, height: 540, fps: FPS, captions: 'none' }, cast: {}, sets: { hill: { kit: 'hill' } },
+    scenes: [{ id: 't', set: 'hill', time: 'night', actors: {},
+      overlays: [{ name: 'hill-mist', params: { part: 'gone' } }, { name: 'stone-light', params: { dayT: [0.92, 1], out: 'gone' } }],
+      shots: [{ id: 't1', camera: { size: 'close', on: ['stone_top'] }, beats: [{ wait: 17.125 }, { mark: 'gone' }, { wait: 32.83 }] }] }],
+  };
+}
+test('the stone\'s last gold reads as a thin #FFD38A thread at its tip for the 14 frames before the mark, clipped to the stone, and is gone on it', async () => {
+  const p = compile(await loadFilm(threadFilm(), { custom: SKY })), tm = p.marks.gone, W2 = p.W, H2 = p.H, T = [255, 211, 138];
+  const draw = (plan, t) => { const c = createCanvas(W2, H2), x = c.getContext('2d'); drawFrame(x, plan, t); return x.getImageData(0, 0, W2, H2).data; };
+  const mark = Math.ceil(tm * FPS - 1e-9);
+  for (let f = mark - 14; f <= mark + 2; f++) {
+    const t = f / FPS, shot = p.shotAt(t), cam = shot.cameraAt(t), z = cam.zoom, stone = shot.set.props.find(q => q.id === 'standing_stone');
+    // the stone as the frame draws it, grown by 2 px
+    const m = createCanvas(W2, H2), mx = m.getContext('2d'); mx.setTransform(z, 0, 0, z, W2 / 2 - cam.cx * z, H2 / 2 - cam.cy * z);
+    for (const q of shot.set.propsSorted()) if (q.id === 'standing_stone') q.draw(mx);
+    const sd = mx.getImageData(0, 0, W2, H2).data, inStone = (x, y) => { for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) { const xx = x + i, yy = y + j; if (xx >= 0 && yy >= 0 && xx < W2 && yy < H2 && sd[(yy * W2 + xx) * 4 + 3] > 20) return true; } return false; };
+    const d = draw(p, t);
+    // the thread's colour laid at 0.8 or more over the night stone stays within 45 of it in every channel
+    let inside = 0, outside = 0, rows = new Set();
+    for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) { const i = (y * W2 + x) * 4; if (Math.abs(d[i] - T[0]) <= 45 && Math.abs(d[i + 1] - T[1]) <= 45 && Math.abs(d[i + 2] - T[2]) <= 45) { if (inStone(x, y)) { inside++; rows.add(y); } else outside++; } }
+    if (f < mark) {
+      assert.ok(inside >= 40 && rows.size >= 2, `a thread ${mark - f} frames before the mark (${inside} px over ${rows.size} rows)`);
+      assert.ok(outside <= inside * 0.02, `clipped to the stone (${outside} outside)`);
+      // thin: no taller than the lit part of the stone (≤ 1.5% of its height) and the edge's softness
+      assert.ok(rows.size <= (0.015 * (stone.base - stone.bounds[1]) + 2) * z, `a thread, not a cap (${rows.size} rows)`);
+    } else assert.equal(inside + outside, 0, `gone ${f - mark} frames after the mark`);
+  }
+  assert.equal(sky.STONE_THREAD.col.toUpperCase(), '#FFD38A');
+  assert.ok(sky.STONE_THREAD.a * 0.95 >= 0.8, 'drawn at 0.8 or more');
 });

@@ -11,6 +11,14 @@
 // horizontal part (st.look) and a vertical one (st.tilt, the pitch of that line as a share of PITCH); "up" / "sky" /
 // "down" only pitch the head and keep the horizontal target of the look before them.
 // A turn (a face flip) squashes the drawing through a narrow card over about six frames, so it reads as a turn.
+// Slopes: on a set whose ground has a profile (S.groundAt: ridge / path sets like the hill; or a set whose def says
+// laneSlope: true, its lane), a grounded actor's drawing is pitched about its contact point to the angle of the ground
+// under its body (the chord from the back to the front of its footprint, width × s), clamped to ±SLOPE_MAX and eased
+// over SLOPE_EASE s (a landing or a hop off a carrier settles instead of snapping; a place (a teleport) and an entrance
+// come in already pitched); perched, surface, hollow and airborne actors ease back to level. Upright rigs (UPRIGHT
+// kinds, or rig.upright === true) stay vertical; rig.upright === false makes any rig follow. A rider takes its
+// carrier's pitch, and the riding point turns with the carrier. Flat ground gives exactly 0. `slope` (the ground's own
+// angle under the actor, upright or not) lays shadows on the slope.
 import { noise1 } from '../core/lib.mjs';
 import { idle } from '../cast/index.mjs';
 import { clamp, lerp, ease, rigPose, mixFor, contactKeys, rigSizes, hash32, mountPoint, profile as rigProfile } from './util.mjs';
@@ -23,6 +31,25 @@ export const PITCH = 0.8, PITCH_MAX = 0.9;
 export const TURN_HALF = 0.14, TURN_DEPTH = 0.7;
 const VERTICAL = new Set(['up', 'sky', 'down']);
 const frac = x => x - Math.floor(x);
+
+// ───────────── slopes ─────────────
+// the steepest a body is pitched (rad), the time (s) a change of pitch takes, and the rigs that stand upright on a slope
+export const SLOPE_MAX = (28 * Math.PI) / 180, SLOPE_EASE = 0.2;
+export const UPRIGHT = new Set(['human', 'owl', 'songbird', 'butterfly']);
+export const followsSlope = rig => rig.upright === false || (rig.upright !== true && !UPRIGHT.has(rig.kind));
+// The ground profile of a set (x → ground y), or null for flat ground (a perspective plane, where y is depth).
+export function groundLine(S) {
+  if (typeof S?.groundAt === 'function' && S.groundAt(S.refX ?? 0) != null) return S.groundAt;
+  return S?.def?.laneSlope === true && typeof S.laneAt === 'function' ? S.laneAt : null;
+}
+// The angle (rad, screen: + = falling to the right) of the ground under a body of half-length hw (world px) at x: the
+// chord from its back to its front, clamped to ±SLOPE_MAX. Exactly 0 on flat ground.
+export function slopeAt(S, x, hw) {
+  const g = groundLine(S); if (!g || !(hw > 0)) return 0;
+  const a = g(x - hw), b = g(x + hw);
+  return a == null || b == null || a === b ? 0 : clamp(Math.atan2(b - a, 2 * hw), -SLOPE_MAX, SLOPE_MAX);
+}
+const PITCH_SAMPLES = 8;
 
 // ───────────── positions ─────────────
 // pos: { x, y, s, key, mode: 'ground'|'surface'|'perch'|'hollow'|'air'|'mount'|'off', anchor, clip, lift (units), surface,
@@ -160,7 +187,8 @@ export class JumpLeg {
     // onto / off a carrier: behind it on the way up from behind, in front of it on the way down
     const key = air && (this.Afn || this.Bfn) ? (w < 0.5 ? A.key : B.key) : landed ? B.key : A.key;
     const p = { x, y, s, key, mode: air ? 'air' : P.mode, anchor: P.anchor, clip: landed ? B.clip : null, lift: alt / s, face: this.face1, airborne: air, surface: P.surface, ground: y };
-    if (!air && P.mode === 'mount') Object.assign(p, { carrier: P.carrier, ground: P.ground, waterY: P.waterY });
+    if (air) p.jump = { A, B, w };                        // (an airborne body turns from its take-off pitch to its landing's)
+    if (!air && P.mode === 'mount') Object.assign(p, { carrier: P.carrier, ground: P.ground, waterY: P.waterY, slope: P.slope });
     return p;
   }
   pose(τ, rig) {
@@ -219,6 +247,7 @@ export class Actor {
     this.moves = []; this.poseEv = []; this.gest = []; this.exprEv = []; this.exprTmp = []; this.lookEv = [];
     this.glances = []; this.faceEv = []; this.talk = []; this.visEv = []; this.alphaEv = []; this.sleepEv = [];
     this.paramEv = []; this.blinks = []; this.place0 = null;
+    this.pitches = followsSlope(rig) && !!groundLine(S);       // the drawing follows the ground's slope here
   }
   // ── setup ──
   init(t, pos, face, poseName, { visible = true, expr = 'neutral', mount = null } = {}) {
@@ -256,7 +285,8 @@ export class Actor {
     return mv.mount && (!mv.legs.length || t >= this.end(mv)) ? mv.mount : null;
   }
   // As a carrier: the riding point at t (rig.mount mirrored by face, squashed with a turn, lifted with a hop, sunk
-  // with a wade) as a position for `rider`: its scale is the ground scale here times the rider's cast scale.
+  // with a wade, turned with the carrier's pitch on a slope) as a position for `rider`: its scale is the ground scale
+  // here times the rider's cast scale; its ground is the slope's under the riding point.
   mountAt(t, rider = null) {
     let m = this._mount;
     if (!m || m.t !== t) {
@@ -264,11 +294,51 @@ export class Actor {
       this._mounting = true;
       try {
         const pos = this.posAt(t), pose = this.poseAt(t), face = this.faceAt(t), q = this.squashAt(t), sink = pos.sink || 0;
-        const [ux, uy] = mountPoint(this.rig, pose, this.paramsAt(t));
-        m = this._mount = { t, x: pos.x + face * ux * q * pos.s, y: pos.y + sink + (uy - (pos.lift || 0)) * pos.s, gs: pos.s / this.k, key: pos.key + 0.01, ground: pos.ground ?? pos.y, waterY: sink > 0 ? pos.y : pos.waterY ?? null, face };
+        const [ux, uy] = mountPoint(this.rig, pose, this.paramsAt(t)), th = this.pitchAt(t), slope = this.slopeOf(pos);
+        let dx = face * ux * q * pos.s, dy = (uy - (pos.lift || 0)) * pos.s, ground = pos.ground ?? pos.y;
+        if (th) { const c = Math.cos(th), sn = Math.sin(th); [dx, dy] = [dx * c - dy * sn, dx * sn + dy * c]; }
+        if (slope) ground += Math.tan(slope) * dx;
+        m = this._mount = { t, x: pos.x + dx, y: pos.y + sink + dy, gs: pos.s / this.k, key: pos.key + 0.01, ground, slope, waterY: sink > 0 ? pos.y : pos.waterY ?? null, face };
       } finally { this._mounting = false; }
     }
-    return { x: m.x, y: m.y, s: m.gs * (rider?.k ?? 1), key: m.key, mode: 'mount', carrier: this.id, anchor: null, clip: null, lift: 0, ground: m.ground, waterY: m.waterY, surface: 'shell', carrierFace: m.face };
+    return { x: m.x, y: m.y, s: m.gs * (rider?.k ?? 1), key: m.key, mode: 'mount', carrier: this.id, anchor: null, clip: null, lift: 0, ground: m.ground, slope: m.slope, waterY: m.waterY, surface: 'shell', carrierFace: m.face };
+  }
+  // ── slope ──
+  // The ground's angle under this actor at a position: standing or airborne over sloped ground, the slope under its
+  // footprint; riding, its carrier's; else 0.
+  slopeOf(pos) {
+    if (pos.mode === 'mount') return pos.slope || 0;
+    return pos.mode === 'ground' || pos.mode === 'air' ? slopeAt(this.S, pos.x, (this.sz.width * pos.s) / 2) : 0;
+  }
+  // The pitch the drawing takes at a position, before easing: the slope when standing on the ground, the carrier's
+  // pitch when riding, in a jump the take-off's turning into the landing's, else 0. Always 0 for upright rigs and on
+  // flat ground.
+  pitchFor(pos, t) {
+    if (!this.pitches) return 0;
+    if (pos.mode === 'mount') return this.others?.get(pos.carrier)?.pitchAt(t) ?? 0;
+    if (pos.jump) { const { A, B, w } = pos.jump; return lerp(this.pitchFor(A, t), this.pitchFor(B, t), w); }
+    return pos.mode === 'ground' ? this.slopeOf(pos) : 0;
+  }
+  // The drawing's pitch at t (rad, screen; the drawing turns by it about the contact point): pitchFor eased over the
+  // last SLOPE_EASE s (weighted by the derivative of smoothstep, so a step in it eases in and out). The window never
+  // reaches back past a place (a teleport, an entrance's start off screen): a placed or entering body comes in already
+  // pitched, as if it had always stood there. A rider riding throughout takes its carrier's pitch as it is.
+  pitchAt(t) {
+    if (!this.pitches) return 0;
+    const t0 = this.placedAt(t), C = this.carrierAt(t);
+    if (C && C === this.carrierAt(Math.max(t - SLOPE_EASE, t0))) return C.pitchAt(t);
+    let sum = 0, wt = 0;
+    for (let i = 0; i < PITCH_SAMPLES; i++) {
+      const u = (i + 0.5) / PITCH_SAMPLES, k = u * (1 - u), τ = Math.max(t - u * SLOPE_EASE, t0);
+      sum += k * this.pitchFor(this.posAt(τ), τ); wt += k;
+    }
+    return sum / wt;
+  }
+  // The time of the latest place (a move that sets the position at once) at or before t, or -Infinity.
+  placedAt(t) {
+    let t0 = -Infinity;
+    for (const mv of this.moves) { if (mv.t0 > t) break; if (mv.kind === 'place') t0 = mv.t0; }
+    return t0;
   }
   addMove(mv) {
     // a new move interrupts any move still in progress; drop the interrupted move's end events
@@ -371,10 +441,14 @@ export class Actor {
     return 0;
   }
   speaking(t) { return this.talk.some(L => t >= L.t0 && t < L.t1); }
-  // The head's world position at t (base pose, facing, hop lift and wading sink): where eyelines start and end.
+  // The head's world position at t (base pose, facing, hop lift, wading sink and pitch on a slope): where eyelines
+  // start and end.
   headAt(t) {
-    const pos = this.posAt(t), h = rigProfile(this.rig, this.basePoseName(t), this.paramsAt(t)).head;
-    return [pos.x + this.faceAt(t) * h[0] * pos.s, pos.y + (pos.sink || 0) + (h[1] - (pos.lift || 0)) * pos.s];
+    const pos = this.posAt(t), h = rigProfile(this.rig, this.basePoseName(t), this.paramsAt(t)).head, th = this.pitchAt(t);
+    const dx = this.faceAt(t) * h[0] * pos.s, dy = (h[1] - (pos.lift || 0)) * pos.s;
+    if (!th) return [pos.x + dx, pos.y + (pos.sink || 0) + dy];
+    const c = Math.cos(th), sn = Math.sin(th);
+    return [pos.x + dx * c - dy * sn, pos.y + (pos.sink || 0) + dx * sn + dy * c];
   }
   // What a look target is at t: another actor's head, or a point ({ x, y }); null for keywords and unknown ids.
   lookPoint(target, t) {
@@ -496,6 +570,7 @@ export class Actor {
       perch: pos.mode === 'perch' || pos.mode === 'hollow' ? pos.anchor : null, mode: pos.mode, anchor: pos.anchor, clip: pos.clip,
       airborne, action: this.actionAt(t), asleep, alpha: this.alphaAt(t), squash: this.squashAt(t), ground: pos.ground ?? null,
       scale: this.k, speaking: this.speaking(t), sink, waterY: pos.waterY ?? null, wade: !!pos.wade, carrier: pos.carrier ?? null,
+      pitch: this.pitchAt(t), slope: this.slopeOf(pos),
     };
   }
 }

@@ -274,6 +274,27 @@ test('cli: new scaffolds a valid film.json and refuses to overwrite', () => {
   assert.equal(JSON.parse(readFileSync(join(cwd, 'films', 'lantern-moth', 'film.json'), 'utf8')).title, 'The Lantern Moth');
 });
 
+test('cli: new copies every template, fills in the title, and the starter film passes check', () => {
+  const cwd = join(OUT, 'cli-tpl'); rmSync(cwd, { recursive: true, force: true }); mkdirSync(cwd, { recursive: true });
+  const r = cli(['new', 'films/the-moth', '--title=The "Moth" & $& Co'], cwd);
+  assert.equal(r.status, 0, r.stderr);
+  const dir = join(cwd, 'films', 'the-moth');
+  for (const f of ['film.json', 'screenplay.md', 'custom.mjs']) {
+    assert.ok(existsSync(join(dir, f)), f);
+    assert.ok(!readFileSync(join(dir, f), 'utf8').includes('{{title}}'), `${f}: placeholder left`);
+  }
+  assert.match(r.stdout, /custom\.mjs, film\.json, screenplay\.md/);
+  const film = JSON.parse(readFileSync(join(dir, 'film.json'), 'utf8'));
+  assert.equal(film.title, 'The "Moth" & $& Co');
+  assert.equal(film.titles.open.title, 'The "Moth" & $& Co');
+  assert.match(readFileSync(join(dir, 'screenplay.md'), 'utf8'), /^# The "Moth" & \$& Co\n/);
+  // the template's own layout is kept (one beat per line), not re-serialized
+  assert.equal(readFileSync(join(dir, 'film.json'), 'utf8').split('\n').length, readFileSync(join(ROOT, 'templates', 'film.json'), 'utf8').split('\n').length);
+  const c = cli(['check', 'films/the-moth'], cwd);
+  assert.equal(c.status, 0, c.stderr);
+  assert.match(c.stdout, /valid/); assert.match(c.stdout, /custom\.mjs/);
+});
+
 test('cli: a missing film fails with exit 1; voice without a key fails clearly', async () => {
   const r = cli(['plan', 'films/does-not-exist']);
   assert.equal(r.status, 1); assert.match(r.stderr, /no film\.json/);

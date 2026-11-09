@@ -9,7 +9,9 @@
 // head, a remembered night's darks (ramp and a close-up on a pale ground), a pan that arrives before its subject leaves;
 // round 5: a static camera that never moves, eyelines with pitch (and speakers who talk to the one in front), a turn
 // that reads as a turn, titles in title-safe over their subject, dawn on the land, the memory plate's page edge, and
-// the sun's cast shadows.
+// the sun's cast shadows; slopes: bodies pitched to the ground under them (feet on the ground line), upright figures,
+// riders that take their carrier's pitch, an eased pitch (but a place or an entrance comes in already pitched),
+// exactly level on flat ground, shadows that lie on the slope.
 //   node --test test/film.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,8 +31,9 @@ import { getKit } from '../engine/set/kits/index.mjs';
 import { getRig } from '../engine/cast/index.mjs';
 import { mountPoint, shortHash, probe, profile, rigSizes, clamp } from '../engine/film/util.mjs';
 import { STORY } from '../engine/film/grade.mjs';
-import { rimStrength } from '../engine/film/frame.mjs';
+import { rimStrength, sunFor } from '../engine/film/frame.mjs';
 import { stingNames, sfxNames } from '../engine/film/validate.mjs';
+import { slopeAt, followsSlope, SLOPE_MAX } from '../engine/film/actor.mjs';
 
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg ?? ''} expected ${b} ± ${tol}, got ${a}`);
 
@@ -1355,4 +1358,175 @@ test('shadows: the sun casts each figure\'s shadow away from the set\'s light, l
   const n = await cast('noon'), dark = await cast('night');
   assert.ok(n.right < g.right / 2, `noon's shadow is short (${n.right.toFixed(1)} vs ${g.right.toFixed(1)})`);
   assert.ok(Math.abs(dark.right) < 0.5 && Math.abs(dark.left) < 0.5, `no shadow at night (${dark.right.toFixed(2)})`);
+});
+
+// ───────────── slopes ─────────────
+// World point of a rig-local point (units, face 1) of an actor state, as drawn: mirrored by face, scaled, turned by
+// the pitch about the contact point.
+const drawnAt = (a, [ux, uy]) => {
+  const dx = a.face * ux * a.s, dy = uy * a.s, c = Math.cos(a.pitch), s = Math.sin(a.pitch);
+  return [a.x + dx * c - dy * s, a.y + dx * s + dy * c];
+};
+const DEG = Math.PI / 180;
+
+test('slopes: a tortoise walking up the hill follows the slope, feet on the ground line; a human stays upright', async () => {
+  const film = tiny({
+    set: 'hill', cast: { pip: { rig: 'human' } },
+    actors: { tortoise: { at: 'x:800', face: 'right' }, pip: { at: 'x:1500', face: 'left' } },
+    shots: [{ id: 'a', camera: { size: 'wide', on: ['tortoise'] }, beats: [{ do: 'walk', who: 'tortoise', to: 'x:1250', at: 0 }], dur: 9 }],
+  });
+  const f = await loadFilm(film), plan = compile(f), S = f.resolved.sets.m, g = x => S.groundAt(x), T = getRig('tortoise');
+  const A = scene(plan, 's1').actors.get('tortoise'), mv = A.moves[0];
+  let n = 0, worst = 0, level = 0, prev = null, jump = 0;
+  for (let t = mv.t0 + 0.3; t < Math.min(mv.t1, plan.duration) - 0.3; t += 1 / 24) {
+    const a = stateAt(plan, 'tortoise', t), off = a.y - g(a.x);
+    assert.ok(a.pitch < -10 * DEG && a.pitch >= -28 * DEG - 1e-12, `pitched up the slope (${(a.pitch / DEG).toFixed(1)}°)`);
+    near(a.pitch, a.slope, 0.6 * DEG, 'the pitch is the slope under it (eased)');
+    if (prev != null) jump = Math.max(jump, Math.abs(a.pitch - prev)); prev = a.pitch;
+    // the front-most and back-most planted feet sit on the ground line (the band's offset kept)
+    const feet = T.feet(a.st.pose).filter(q => q[2]);
+    if (feet.length < 2) continue;
+    for (const q of [feet.reduce((m, p) => (p[0] > m[0] ? p : m)), feet.reduce((m, p) => (p[0] < m[0] ? p : m))]) {
+      const [x, y] = drawnAt(a, q);
+      worst = Math.max(worst, Math.abs(y - (g(x) + off)));
+      level = Math.max(level, Math.abs(a.y + q[1] * a.s - (g(a.x + a.face * q[0] * a.s) + off)));
+    }
+    n++;
+  }
+  assert.ok(n > 24, 'feet checked through the walk');
+  assert.ok(worst < 3, `the end feet are within ${worst.toFixed(2)} px of the ground line`);
+  assert.ok(level > 15, `(drawn level they would be ${level.toFixed(1)} px off)`);
+  assert.ok(jump < 0.5 * DEG, `the pitch changes smoothly (${(jump / DEG).toFixed(2)}° per frame at most)`);
+  // the human stands upright on the same slope, though the ground under it is sloped
+  const p = stateAt(plan, 'pip', 1);
+  assert.equal(p.pitch, 0); assert.ok(p.slope < -10 * DEG, 'the slope under the human is measured (for its shadow)');
+  // frameInfo turns the box and head with the drawing
+  const t = mv.t0 + 2, info = frameInfo(plan, t), fi = info.actors.find(x => x.id === 'tortoise'), a = stateAt(plan, 'tortoise', t);
+  near(fi.pitch, a.pitch, 1e-12); assert.equal(info.actors.find(x => x.id === 'pip').pitch, 0);
+  const [sx, sy] = fi.contact.screen, z = info.camera.zoom, r = probe(T, sx, sy, a.s * z, a.face, { ...a.st, shadow: false });
+  const turn = ([x, y]) => [sx + (x - sx) * Math.cos(a.pitch) - (y - sy) * Math.sin(a.pitch), sy + (x - sx) * Math.sin(a.pitch) + (y - sy) * Math.cos(a.pitch)];
+  const b = r.bounds, Q = [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]].map(turn);
+  const want = [Math.min(...Q.map(q => q[0])), Math.min(...Q.map(q => q[1])), Math.max(...Q.map(q => q[0])), Math.max(...Q.map(q => q[1]))];
+  fi.screenBox.forEach((v, i) => near(v, want[i], 1e-6, `screenBox[${i}]`));
+  turn(r.head).forEach((v, i) => near(fi.head[i], v, 1e-6, `head[${i}]`));
+  assert.ok(fi.screenBox[3] - fi.screenBox[1] > b[3] - b[1] + 5, 'the turned box is taller than the level drawing');
+});
+
+test('slopes: the ground under a body is its chord on ridge sets (or a lane declared a slope), clamped; perspective ground is flat', () => {
+  const hill = getKit('hill')(), g = x => hill.groundAt(x), hw = 60;
+  near(slopeAt(hill, 1200, hw), Math.atan2(g(1200 + hw) - g(1200 - hw), 2 * hw), 1e-12, 'the chord from back to front');
+  assert.ok(slopeAt(hill, 1200, hw) < -10 * DEG, 'the hill rises to the right');
+  for (const kit of ['meadow', 'stream', 'village', 'wayside', 'valley']) for (const x of [500, 1300, 2100]) assert.equal(slopeAt(getKit(kit)(), x, hw), 0, `${kit} is flat`);
+  // a set whose def declares its lane a slope (laneSlope) uses it; a lane alone is a path in depth, not a slope
+  const lane = k => ({ groundAt: () => null, laneAt: x => 1000 - k * x, def: { laneSlope: true } });
+  near(slopeAt(lane(0.5), 800, hw), -Math.atan(0.5), 1e-12);
+  near(slopeAt(lane(2), 800, hw), -SLOPE_MAX, 1e-12, 'clamped');
+  assert.equal(slopeAt({ ...lane(0.5), def: {} }, 800, hw), 0);
+  // who follows: quadrupeds and long bodies; humans, owls and songbirds stand upright; rig.upright overrides
+  for (const k of ['tortoise', 'hare', 'fox', 'squirrel', 'mouse', 'deer', 'badger', 'beetle']) assert.ok(followsSlope(getRig(k)), k);
+  for (const k of ['human', 'owl', 'songbird']) assert.ok(!followsSlope(getRig(k)), k);
+  assert.ok(!followsSlope({ kind: 'fox', upright: true }) && followsSlope({ kind: 'human', upright: false }));
+});
+
+test('slopes: flat ground gives exactly 0 pitch and slope (the test film, riders included)', async () => {
+  const plan = compile(await loadFilm('films/_test'));
+  let n = 0;
+  for (let t = 0; t < plan.duration; t += 0.25) for (const a of plan.actorsAt(t)) { assert.equal(a.pitch, 0, `${a.id} t=${t}`); assert.equal(a.slope, 0, `${a.id} t=${t}`); n++; }
+  assert.ok(n > 100);
+  const { plan: small } = await smallPlan();
+  for (const s of small.shots) for (const a of frameInfo(small, (s.t0 + s.t1) / 2).actors) { assert.equal(a.pitch, 0); assert.equal(a.slope, 0); }
+});
+
+test('slopes: a rider takes its carrier\'s pitch at the mount; a place comes in already pitched', async () => {
+  const film = tiny({
+    set: 'hill', cast: { nut: { rig: 'squirrel' }, pip: { rig: 'human' } },
+    actors: { tortoise: { at: 'x:900', face: 'right' }, nut: { on: 'tortoise', face: 'right' }, hare: { at: 'x:2400', face: 'left' } },
+    shots: [{ id: 'a', camera: { size: 'wide', on: ['tortoise'] }, beats: [
+      { do: 'walk', who: 'tortoise', to: 'x:1200', at: 0 },
+      { do: 'place', who: 'hare', to: 'x:1300', at: 1 },
+    ], dur: 6 }],
+  });
+  const f = await loadFilm(film), plan = compile(f), T = getRig('tortoise');
+  let mounted = 0;
+  for (let t = 0.2; t < 5.5; t += 1 / 12) {
+    const r = stateAt(plan, 'nut', t), c = stateAt(plan, 'tortoise', t);
+    assert.equal(r.mode, 'mount');
+    near(r.pitch, c.pitch, 1e-12, `t=${t.toFixed(2)} the rider's pitch is its carrier's`);
+    // the riding point turns with the shell
+    const m = mountPoint(T, c.st.pose, c.st.params), [x, y] = drawnAt({ ...c, face: c.face * c.squash }, [m[0], m[1] - (c.st.lift || 0)]);
+    near(r.x, x, 1e-6, 'rider x'); near(r.y, y, 1e-6, 'rider y');
+    mounted++;
+  }
+  assert.ok(mounted > 50 && stateAt(plan, 'tortoise', 2).pitch < -10 * DEG);
+  // the hare is placed from the flat crest onto the slope: a place is a teleport, so the body takes the slope there at
+  // once (a slow turn after it would have no motion to justify it, and the feet would hang off the path)
+  const H = scene(plan, 's1').actors.get('hare'), t0 = H.moves.find(m => m.place).t0, P = u => stateAt(plan, 'hare', t0 + u).pitch;
+  const before = P(-0.01), slope = stateAt(plan, 'hare', t0).slope;
+  assert.ok(Math.abs(before) < 3 * DEG && slope < -10 * DEG, `crest ${(before / DEG).toFixed(1)}°, slope ${(slope / DEG).toFixed(1)}°`);
+  for (let u = 0; u <= 0.25; u += 1 / 48) near(P(u), slope, 1e-9, `pitched at once (+${u.toFixed(3)} s)`);
+});
+
+test('slopes: an entrance or a place after a cut comes in already pitched; a hop off a carrier still eases', async () => {
+  // the tortoise starts on the flat crest; shot b cuts to it placed on the steep part of the path, a fox stepping out
+  // there, a badger entering from the side, then a squirrel placed on the shell
+  const film = tiny({
+    set: 'hill', cast: { fox: { rig: 'fox' }, nut: { rig: 'squirrel' }, brock: { rig: 'badger' } },
+    actors: { tortoise: { at: 'x:2500', face: 'left' }, nut: { at: 'x:2650', face: 'left' }, fox: { offstage: 'left' }, brock: { offstage: 'right' } },
+    shots: [
+      { id: 'a', camera: { size: 'full', on: ['tortoise'] }, dur: 2 },
+      { id: 'b', camera: { size: 'full', on: ['tortoise', 'fox'] }, dur: 3, beats: [
+        { do: 'place', who: 'tortoise', to: 'x:1250', at: 0 },
+        { do: 'enter', who: 'fox', from: 'x:1150', to: 'x:1230', at: 0 },
+        { do: 'enter', who: 'brock', from: 'right', to: 'x:1700', at: 0 },
+        { do: 'place', who: 'nut', to: 'on:tortoise', at: 1 },
+      ] },
+    ],
+  });
+  const plan = compile(await loadFilm(film)), tb = plan.shots[1].t0, A = scene(plan, 's1').actors, at = (id, t) => stateAt(plan, id, t);
+  // the first frame of the new shot: the placed tortoise and the fox stepping out lie on the path already
+  assert.ok(at('tortoise', tb - 1 / 24).slope > -3 * DEG, 'on the crest before the cut');
+  for (const id of ['tortoise', 'fox']) {
+    const a = at(id, tb);
+    assert.ok(a.slope < -10 * DEG, `${id} on the steep part (${(a.slope / DEG).toFixed(1)}°)`);
+    near(a.pitch, a.slope, 1e-9, `${id} pitched on the cut`);
+    for (let t = tb; t < tb + 0.5; t += 1 / 24) near(at(id, t).pitch, at(id, t).slope, 0.6 * DEG, `${id} t=${t.toFixed(3)}`);
+  }
+  // the side entrance starts pitched to the ground at its start (not level, as it was while offstage)
+  const e = A.get('brock').moves.find(m => m.kind === 'enter').t0;
+  near(at('brock', e).pitch, at('brock', e).slope, 1e-9, 'the entrance starts pitched');
+  // placed on the shell: the carrier's pitch at once
+  const tp = A.get('nut').moves.find(m => m.kind === 'place').t0;
+  near(at('nut', tp).pitch, at('tortoise', tp).pitch, 1e-12, 'a rider placed on a carrier takes its pitch at once');
+
+  // a hop off the shell up onto the flat crest: a continuous change, from the shell's pitch to the ground's, a little
+  // at a time
+  const hop = tiny({
+    set: 'hill', cast: { nut: { rig: 'squirrel' } },
+    actors: { tortoise: { at: 'x:1900', face: 'right' }, nut: { on: 'tortoise', face: 'right' } },
+    shots: [{ id: 'a', camera: { size: 'wide', on: ['tortoise'] }, dur: 5, beats: [{ do: 'hop', who: 'nut', to: 'x:2150', at: 1 }] }],
+  });
+  const hp = compile(await loadFilm(hop)), h = scene(hp, 's1').actors.get('nut').moves.find(m => m.kind === 'hop');
+  const P = t => stateAt(hp, 'nut', t).pitch, p0 = P(h.t0);
+  let last = p0, step = 0;
+  for (let t = h.t0; t <= h.t1 + 0.3; t += 1 / 24) { const v = P(t); step = Math.max(step, Math.abs(v - last)); last = v; }
+  assert.ok(Math.abs(last - p0) > 5 * DEG, `the pitch changes on the way (${(p0 / DEG).toFixed(1)}° to ${(last / DEG).toFixed(1)}°)`);
+  assert.ok(step < 1.5 * DEG, `no snap (${(step / DEG).toFixed(2)}° per frame at most)`);
+});
+
+test('slopes: a cast shadow lies on the slope, for an upright figure too', async () => {
+  // the hill's light is upper right: golden-hour shadows fall to the left, down the slope (with and without the figure,
+  // the camera on an anchor)
+  const mk = (pip = true) => tiny({ set: 'hill', W: 640, H: 360, cast: { pip: { rig: 'human' } }, scene: { time: 'golden' }, actors: { pip: pip ? { at: 'x:1400', face: 'right' } : { offstage: 'right' } }, shots: [{ id: 'a', camera: { size: 'wide', on: ['slope_mid'] }, dur: 2 }] });
+  const img = plan => { const c = createCanvas(plan.W, plan.H), x = c.getContext('2d'); drawFrame(x, plan, 1); return x.getImageData(0, 0, plan.W, plan.H).data; };
+  const withP = compile(await loadFilm(mk())), without = compile(await loadFilm(mk(false)));
+  const a = frameInfo(withP, 1).actors[0], A = img(withP), B = img(without), W = withP.W;
+  assert.equal(a.pitch, 0); assert.ok(a.slope < -10 * DEG);
+  const [cx, cy] = a.contact.screen, h = a.screenBox[3] - a.screenBox[1], T = Math.tan(a.slope);
+  // mean darkening (green) along the line from the feet out to the left that the shadow takes: down the slope (and a
+  // little toward the lens), not where it would fall on level ground
+  const sun = sunFor(withP.shots[0].set, withP.shots[0].skyAt(1)), toLens = sun.dy / Math.abs(sun.dx);
+  assert.ok(sun.dx < 0, 'the shadow falls to the left');
+  const along = k => { let s = 0, n = 0; for (let d = 0.25 * h; d < 0.7 * h; d++) { const x = Math.round(cx - d), y = Math.round(cy - k * d); if (x < 0 || y < 1 || y >= withP.H - 1) continue; for (let j = -1; j <= 1; j++) { const i = ((y + j) * W + x) * 4; s += B[i + 1] - A[i + 1]; n++; } } return s / n; };
+  const onSlope = along(T - toLens), level = along(-toLens);
+  assert.ok(onSlope > 3 && onSlope > 2 * level, `the shadow follows the slope (on it ${onSlope.toFixed(1)}, where level ground would put it ${level.toFixed(1)})`);
 });

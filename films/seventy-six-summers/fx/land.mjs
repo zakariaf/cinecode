@@ -50,6 +50,14 @@
 //                         default nell; params.n) and rise through the close-up, hidden where her silhouette is in
 //                         front of them; their light falls on her as a soft yellow-green fill (params.fill). Placed in
 //                         frame fractions (fireflyPoints), so they stay in a close-up's frame at any zoom.
+//   custom near-figure    layer 'front' (2.4). An actor drawn large at the bottom of the frame, as if near the lens: the
+//                         over-the-shoulder half of a shot on someone far above them (the owl on his branch, the
+//                         squirrel on the grass below). params.who (default fidget), params.x / params.y (its contact
+//                         point, frame fractions; y > 1 is below the frame's edge, so only what rises above it shows),
+//                         params.h (the rig's height as a share of the frame height), params.blur (px at 1080 p: out
+//                         of focus, in front of the subject), params.shade (0..1, a cool multiply: nearer the lens,
+//                         in the subject's shadow). Drawn from the actor's own state (pose, gesture, expression, look,
+//                         tilt, blinks), so the beats that move the actor move it; no shadow, no lift (nearFigure).
 import { rng, noise1, clamp, lerp, smooth, canvas, blob, ink, path, quad } from '../../../engine/core/lib.mjs';
 import { skyHaze, SKY_W, SKY_H } from '../../../engine/paint/sky.mjs';
 import { glow, lanternBody, lampLevel, WARM } from '../../../engine/paint/structures.mjs';
@@ -680,6 +688,26 @@ function drawFireflyFill(ctx, u, api) {
   ctx.restore();
 }
 
+// ───────────── a figure near the lens (2.4) ─────────────
+// → the screen placement { x, y (the contact point), s (screen px per rig unit), face }, or null; for tests.
+export function nearFigure(a, W, H, p = {}) {
+  if (!a?.R) return null;
+  return { x: (p.x ?? 0.2) * W, y: (p.y ?? 1.25) * H, s: ((p.h ?? 0.9) * H) / (a.R.height || 50), face: a.face || 1 };
+}
+function drawNearFigure(ctx, u, api) {
+  const a = api.actor(api.params.who ?? 'fidget'), g = nearFigure(a, api.W, api.H, api.params);
+  if (!g) return;
+  const { W, H } = api, k = H / 1080, blur = (api.params.blur ?? 0) * k, shade = clamp(api.params.shade ?? 0);
+  const [cv, x] = scratch('near', W, H);
+  x.clearRect(0, 0, W, H);
+  a.R.draw(x, g.x, g.y, g.s, g.face, { ...a.st, shadow: false, lift: 0 });
+  if (shade > 0.01) { x.globalCompositeOperation = 'source-atop'; x.fillStyle = `rgba(70,72,104,${0.5 * shade})`; x.fillRect(0, 0, W, H); }
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (blur > 0.3) ctx.filter = `blur(${blur.toFixed(1)}px)`;
+  ctx.drawImage(cv, 0, 0);
+  ctx.restore();
+}
+
 /** The far hill and its stone for the api's frame (screen space), lit by the scene's clock. */
 function drawFarHill(ctx, api, p) {
   const G = hillGeom(api, p), d = crestDayT(api) ?? dayTAt(p, api.su);
@@ -771,4 +799,5 @@ export const custom = {
   'eye-glint': { layer: 'grade', draw: drawEyeGlint },
   'star-highlight': { layer: 'grade', draw: drawStarHighlight },
   'firefly-fill': { layer: 'grade', draw: drawFireflyFill },
+  'near-figure': { layer: 'front', draw: drawNearFigure },
 };
