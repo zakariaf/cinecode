@@ -114,7 +114,14 @@ export function cottageGeom(C) {
   const D = C.door ? { ...C.door, x0: C.door.cx - C.door.w / 2, x1: C.door.cx + C.door.w / 2, top: yb - C.door.h, base: yb } : null;
   const windows = (C.windows || []).map(w => ({ ...w, x0: w.cx - w.w / 2, x1: w.cx + w.w / 2, y0: w.top, y1: w.top + w.h }));
   const slopeAt = (px, u) => lerp(ye + drop, ridgeY, u) + 0 * px;             // y on the front slope at height fraction u
-  const dormer = C.dormer ? (() => { const d = C.dormer, cy = slopeAt(0, d.up ?? 0.45); return { ...d, x0: d.cx - d.w / 2, x1: d.cx + d.w / 2, y0: cy - d.h / 2, y1: cy + d.h / 2 }; })() : null;
+  // a gabled dormer: a little timber-framed wall (face) standing on the slope, its casement window (win),
+  // under a thatched hood whose two thick arms meet over the apex
+  const dormer = C.dormer ? (() => {
+    const d = C.dormer, cy = slopeAt(0, d.up ?? 0.45), y0 = cy - d.h / 2, y1 = cy + d.h / 2, fw = d.w * 0.62, fe = y0 + 6, apex = fe - fw * 0.46;
+    const face = [[d.cx - fw / 2, y1 + 2], [d.cx - fw / 2, fe], [d.cx, apex], [d.cx + fw / 2, fe], [d.cx + fw / 2, y1 + 2]];
+    const ww = fw - 20, win = { cx: d.cx, x0: d.cx - ww / 2, x1: d.cx + ww / 2, y0: fe + 5, y1: y1 - 2, w: ww, h: y1 - 2 - fe - 5, bars: [2, 2] };
+    return { ...d, x0: d.cx - d.w / 2, x1: d.cx + d.w / 2, y0, y1, fw, eave: fe, apex, face, win };
+  })() : null;
   const ch = C.chimney ? (() => { const c = C.chimney, cx = lerp(ridgeL[0], ridgeR[0], c.u ?? 0.12); return { x: cx, w: c.w ?? 56, top: ridgeY - (c.h ?? 90), pierce: ridgeY + (c.pierce ?? 52) }; })() : null;
   const gw = C.gableWindow ? { cx: x1 + ox / 2, cy: ye + oy / 2 - gH * 0.42, r: C.gableWindow.r ?? 22 } : null;
   return {
@@ -348,17 +355,43 @@ export function cottage(x, r, C, { light = L0, plasterCol = '#f0e2c2', door = '#
   // soft light gradient: the top catches the sun, the lower roof is a touch deeper
   x.save(); path(x, RP); x.clip(); const gR = x.createLinearGradient(0, G.ridgeY, 0, eaveL[1]); gR.addColorStop(0, 'rgba(255,236,180,.28)'); gR.addColorStop(1, 'rgba(120,80,40,.12)'); x.fillStyle = gR; x.fillRect(eaveL[0] - 50, G.ridgeY - 10, eaveR[0] - eaveL[0] + 200, eaveL[1] - G.ridgeY + 20); x.restore();
   celShade(x, RP, { light: [light[0], 0.15], amount: 0.3, bias: -0.42, seed: 92, wob: 0.03 });
-  // eyebrow dormer
+  // the gabled dormer: its wall and window, a thatch apron where it meets the slope, then the hood
   if (G.dormer) {
-    const d = G.dormer, w = { cx: d.cx, x0: d.x0 + 6, x1: d.x1 - 6, y0: d.y0 + 12, y1: d.y1, w: d.w - 12, h: d.h - 12 };
-    const rec = rpoly([[d.x0 - 6, d.y1 + 4], [d.x0 - 2, d.y0 + 8], [d.x1 + 2, d.y0 + 8], [d.x1 + 6, d.y1 + 4]], 10, { seed: 95, jit: 0.8 });
-    x.fillStyle = '#e9dbbb'; path(x, rec); x.fill(); shadeIn(x, rec, 0.5); ink(x, rec, 1.4, { seed: 96 });
-    panes.push(windowGlass(x, r, w, 0)); windowFrame(x, r, w, { bars: [3, 1] });
-    const brow = quad([d.x0 - d.w * 0.45, d.y1 + 10], [d.cx, d.y0 - d.h * 1.25], [d.x1 + d.w * 0.45, d.y1 + 10], 26);
-    const BW = [...brow, ...brow.slice().reverse().map(([px, py], i, A) => [px, py + 16 + 14 * Math.sin(Math.PI * i / (A.length - 1))])];
-    const Bp = rpoly(BW, 6, { seed: 97, jit: 1.2 });
-    thatchFill(x, r, Bp, [0, 1]); x.save(); path(x, Bp); x.clip(); x.globalCompositeOperation = 'multiply'; x.globalAlpha = 0.45; x.fillStyle = SHADE; path(x, brow.map(([px, py]) => [px, py + 18]).concat(brow.slice().reverse().map(([px, py]) => [px, py + 60]))); x.fill(); x.restore();
-    ink(x, Bp, 1.8, { seed: 98 });
+    const d = G.dormer, W = d.win, hw = d.fw / 2, cx = d.cx, fe = d.eave, ap = d.apex, ls = lit(light);
+    // the dormer's shadow falls on the slope beside it, away from the light
+    shadePoly(x, RP, [[cx, ap - 6], [cx - ls * (hw + 30), fe + 16], [cx - ls * (hw + 34), d.y1 - 4], [cx - ls * (hw + 6), d.y1 + 6], [cx - ls * hw * 0.6, d.y1 + 4], [cx - ls * hw * 0.6, ap + 20]], 0.36);
+    const F = rpoly(d.face, [2, 2, 6, 2, 2], { seed: 95, jit: 0.6 });
+    plaster(x, r, F, { cracks: 0 });
+    x.save(); path(x, F); x.clip();
+    beam(x, r, [cx - hw + 4, d.y1 + 4], [cx - hw + 4, fe], 8, { light }); beam(x, r, [cx + hw - 4, d.y1 + 4], [cx + hw - 4, fe], 8, { light });
+    beam(x, r, [cx - hw, fe + 2], [cx + hw, fe + 2], 7, { light });
+    x.restore();
+    panes.push(windowGlass(x, r, W, 0)); windowFrame(x, r, W, { bars: W.bars });
+    // the hood shades the top of the wall
+    shadePoly(x, F, [[cx - hw - 4, ap - 20], [cx + hw + 4, ap - 20], [cx + hw + 4, fe + 12], [cx - hw - 4, fe + 6]], 0.5);
+    shadeIn(x, F, 0.12);
+    ink(x, F, 1.5, { seed: 96 });
+    // the roof's thatch is tucked up against the sill: a dark tuck line, then a fringe of straw ends over it
+    const lap = []; for (let i = 0; i <= 16; i++) { const u = i / 16; lap.push([lerp(cx - hw - 6, cx + hw + 6, u), d.y1 + 2 + Math.sin(u * 19) * 1.2]); }
+    ink(x, lap, 2.2, { closed: false, seed: 97, color: 'rgba(92,62,30,.8)' });
+    x.lineCap = 'round';
+    for (let px = cx - hw - 8; px < cx + hw + 8; px += 1.6 + r() * 2.2) { const py = d.y1 + 3 + (r() - 0.5) * 2, L = 3 + r() * 6; x.strokeStyle = pick(r, ['#e6c27a', '#d9ae62', '#f2d494', '#c99a50']); x.lineWidth = 1 + r() * 1.2; x.beginPath(); x.moveTo(px, py - L * 0.4); x.lineTo(px + (r() - 0.5) * 2, py + L); x.stroke(); }
+    x.lineCap = 'butt';
+    // the hood: two thick thatch arms from beyond each eave of the little gable up to a rounded crown
+    const t = 24, ov = 24, L0p = [cx - hw - ov, fe + ov * 0.55], R0p = [cx + hw + ov, fe + ov * 0.55], top = [cx, ap - 9];
+    const outer = [L0p, ...quad([cx - hw * 0.55, ap + (fe - ap) * 0.4 - 6], [cx - hw * 0.12, ap - 13], top, 6).slice(0, -1), ...quad(top, [cx + hw * 0.12, ap - 13], [cx + hw * 0.55, ap + (fe - ap) * 0.4 - 6], 6), R0p];
+    const inner = [[R0p[0] - 4, R0p[1] + t * 0.75], [cx + 2, ap + t * 0.62], [cx - 2, ap + t * 0.62], [L0p[0] + 4, L0p[1] + t * 0.75]];
+    const HP = rpoly([...outer, ...inner], 5, { seed: 98, jit: 1.2, step: 5 });
+    thatchFill(x, r, HP, [0, 1], { courses: 18, straw: 1.2 });
+    x.save(); path(x, HP); x.clip();
+    // the arm turned from the light in shade, and the underside of both arms
+    x.globalCompositeOperation = 'multiply'; x.globalAlpha = 0.42; x.fillStyle = SHADE; x.fillRect(ls < 0 ? cx : cx - hw - ov - 10, ap - 30, hw + ov + 12, fe - ap + 60);
+    x.globalAlpha = 0.5; path(x, [[L0p[0] - 6, L0p[1] + t * 0.42], [cx, ap + t * 0.3], [R0p[0] + 6, R0p[1] + t * 0.42], [R0p[0] + 6, R0p[1] + 40], [L0p[0] - 6, L0p[1] + 40]]); x.fill();
+    x.restore();
+    // cut straw ends along the lower edge
+    x.strokeStyle = 'rgba(255,232,170,.55)'; x.lineWidth = 1.4;
+    for (const [a, b] of [[inner[3], inner[2]], [inner[1], inner[0]]]) for (let i = 0; i <= 12; i++) { const [px, py] = along(a, b, i / 12); x.beginPath(); x.moveTo(px, py - 5); x.lineTo(px + (r() - 0.5) * 2, py - 1); x.stroke(); }
+    ink(x, HP, 1.9, { seed: 99 });
   }
   ink(x, RP, 2.2, { seed: seedOf(x0, 93) });
   // ridge cap with a scalloped edge and criss-cross liggers
@@ -402,7 +435,7 @@ export function cottage(x, r, C, { light = L0, plasterCol = '#f0e2c2', door = '#
 // in with the lamp level and adds it again (screen) after the grade.
 export function cottageLights(x, r, G) {
   const all = [...G.windows];
-  if (G.dormer) { const d = G.dormer; all.push({ cx: d.cx, x0: d.x0 + 6, x1: d.x1 - 6, y0: d.y0 + 12, y1: d.y1, w: d.w - 12, h: d.h - 12, bars: [3, 1] }); }
+  if (G.dormer) all.push(G.dormer.win);
   for (const w of all) {
     x.save(); x.globalCompositeOperation = 'screen'; glow(x, w.cx, w.y1 + 6, 4, w.w * 0.95, WARM.rgb, 0.32); x.restore();
     windowGlass(x, r, w, 1); windowFrame(x, r, w, { bars: w.bars || [2, 2], col: '#7a5636' });

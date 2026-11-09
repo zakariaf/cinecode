@@ -84,13 +84,15 @@ export function probe(rig, x, y, s, face, st) {
 }
 
 // Profile of a rig in a pose at scale 1, facing right: box [x0, y0, x1, y1], head [x, y], mouth (units).
+// head: { tilt, look } (optional) poses the head too (quantized to eighths / quarters, so profiles stay few).
 const PROFILES = new WeakMap();
-export function profile(rig, poseName, params = {}) {
+export function profile(rig, poseName, params = {}, head = null) {
   let m = PROFILES.get(rig); if (!m) PROFILES.set(rig, (m = new Map()));
-  const key = `${poseName}|${JSON.stringify(params)}`;
+  const tilt = Math.round((head?.tilt || 0) * 8) / 8, look = Math.round((head?.look || 0) * 4) / 4;
+  const key = `${poseName}|${JSON.stringify(params)}${tilt || look ? `|${tilt}|${look}` : ''}`;
   if (m.has(key)) return m.get(key);
   const rp = rigPose(rig, poseName) || rigPose(rig, 'stand') || { pose: Object.values(rig.poses || {})[0] };
-  const r = probe(rig, 0, 0, 1, 1, { pose: rp.pose, params, shadow: false, t: 0 });
+  const r = probe(rig, 0, 0, 1, 1, { pose: rp.pose, params, shadow: false, t: 0, ...(tilt ? { tilt } : {}), ...(look ? { look } : {}) });
   const p = { box: r.bounds.slice(), head: r.head.slice(), mouth: (r.mouth || r.head).slice() };
   m.set(key, p);
   return p;

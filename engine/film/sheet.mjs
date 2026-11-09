@@ -1,6 +1,8 @@
 // Debug stills and contact sheets for a film, with an optional geometry overlay (actor boxes, head boxes,
-// contact points, colliders, caption box) from frameInfo().
-//   node engine/film/sheet.mjs films/<slug> [out.jpg] [--t=1.5,4,9] [--debug] [--cols=4] [--tile=480] [--frame]
+// contact points, colliders, caption box) from frameInfo(). The plan uses the film's cached voices (the same timing
+// as `cinecode plan` and the render).
+//   node engine/film/sheet.mjs films/<slug> [out.jpg] [--t=1.5,4,9] [--shots=1.4,2.2@0.9] [--u=0.5] [--debug]
+//                              [--cols=4] [--tile=480] [--frame]
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -56,11 +58,26 @@ export async function filmSheet(plan, outPath, { times = null, debug = false, co
   return contactSheet({ plan, drawFrame: draw, outPath, times, cols, tileW, title: title ?? `${plan.title}${debug ? ' (debug)' : ''}` });
 }
 
+// Times for a sheet: "--t=12.5,40" (seconds) and/or "--shots=1.4,2.2" (shot ids, each at u = 0..1 of the shot,
+// "--u=0.5" by default; "2.2@0.8" picks another point of that shot).
+export function sheetTimes(plan, { t = null, shots = null, u = 0.5 } = {}) {
+  const out = t ? String(t).split(',').map(Number) : [];
+  for (const spec of shots ? String(shots).split(',') : []) {
+    const [id, at] = spec.split('@'), s = plan.shots.find(x => x.id === id);
+    if (!s) throw new Error(`no shot "${id}"`);
+    out.push(s.t0 + (s.t1 - s.t0) * (at !== undefined ? +at : +u));
+  }
+  return out.length ? out : null;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const args = process.argv.slice(2), opt = Object.fromEntries(args.filter(a => a.startsWith('--')).map(a => { const [k, v] = a.slice(2).split('='); return [k, v ?? true]; }));
   const pos = args.filter(a => !a.startsWith('--'));
-  const film = await loadFilm(pos[0] || 'films/_test'), plan = compile(film);
-  const times = opt.t ? String(opt.t).split(',').map(Number) : null;
+  // the plan with the cached voices (the same timing as `cinecode plan` and the render); estimates without them
+  const dir = pos[0] || 'films/_test';
+  const plan = await import('../render/film-source.mjs').then(m => m.loadPlan(dir)).then(r => r.plan).catch(async () => compile(await loadFilm(dir)));
+  const film = plan.film;
+  const times = sheetTimes(plan, { t: opt.t, shots: opt.shots, u: opt.u ?? 0.5 });
   const out = pos[1] || join(film.dir, 'out', opt.frame ? 'frame.jpg' : 'sheet.jpg');
   const t0 = performance.now();
   if (opt.frame) for (const [i, t] of (times || [plan.duration / 2]).entries()) console.log(await renderStill(plan, t, times?.length > 1 ? out.replace(/(\.\w+)$/, `-${i}$1`) : out, { debug: !!opt.debug, scale: opt.scale ? +opt.scale : 1 }));

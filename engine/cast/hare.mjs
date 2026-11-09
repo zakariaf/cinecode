@@ -1,9 +1,9 @@
 // The Hare. Ported from the legacy film (same shapes and poses), upgraded with IK gaits whose planted feet
 // never slide, a jaw that talks, brows, blinks, expressions, breathing, look and ear sway.
 // Round 2 (DESIGN §9.2): st.tilt pitches the head; the pupils follow (+1 up, -1 down).
-import { clamp, lerp, ell, limb, rpoly } from '../core/lib.mjs';
-import { cel, darken, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
-import { makeRig, footAt, mixPose, plus, jumpAt, keyed, ease, frac, bone, pitchPose, gaze } from './rig.mjs';
+import { clamp, lerp, ell, limb, rpoly, poly, shift } from '../core/lib.mjs';
+import { cel, darken, line, fillP, dot, eye, brow, rgba, SHADE } from '../core/style.mjs';
+import { makeRig, footAt, mixPose, plus, jumpAt, keyed, ease, frac, pitchPose, gaze } from './rig.mjs';
 
 const rot = (v, a) => [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a)];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
@@ -180,7 +180,7 @@ function head(T, p, F, P, o) {
   T.save(); T.translate(p.hx, p.hy - F.breath * 0.7); T.rotate(p.hr - F.look * 0.07);
   const op = clamp(F.open), sm = F.smile, ja = op * 0.55 + F.round * op * 0.1;
   cel(T, ell(0, 0, 15, 12.5, 84, 0.3), P.fur, SH, 1.15, 84);
-  cel(T, [[-12, 4], [-17, 10], [-9, 9]], P.fur, SH, 0.9, 99);                       // cheek tuft
+  for (const [k, q] of [[0, [-11.5, 5.5]], [1, [-8.5, 8.2]], [2, [-13, 1.5]]]) line(T, [q, [q[0] - 2.2, q[1] + 1.4 - k * 0.3], [q[0] - 3.4, q[1] + 1.6 - k * 0.6]], 0.55, { seed: 99 + k, color: rgba(darken(P.fur, 0.55), 0.55) });   // cheek fur
   // mouth interior + hinged lower jaw, behind the upper muzzle
   const hinge = [6.2, 7.4], jr = q => { const d = rot([q[0] - hinge[0], q[1] - hinge[1]], ja); return [hinge[0] + d[0], hinge[1] + d[1]]; };
   if (op > 0.03) {
@@ -202,24 +202,122 @@ function head(T, p, F, P, o) {
     if (F.round > 0.5) dot(T, 15.2, 10.2, 1.4, '#5e1f2b');
   }
   if (sm > 0.5) fillP(T, ell(3.5, 5, 3.6, 2.2, 97, 0.1), rgba('#e88a80', 0.35 * (sm - 0.4)));
-  eye(T, 3.4, -4.6, 2.5, 3.5, F.eye, P.eye, gaze(F, 0.9, 3.5), F.lid, F.tilt);
-  brow(T, 3.4, -9.9, 6.2, F.browY * 0.7, F.browT * 0.7, darken(P.fur, 0.42), 1.2, 96);
+  eye(T, 3.4, -4.6, 2.5, 3.5, F.eye, P.eye, gaze(F, 0.9, 3.5), F.lid, F.tilt, { cheek: F.cheek });
+  brow(T, 3.6, -9.3, 6.2, F.browY * 0.75, F.browT * 0.7, darken(P.fur, 0.38), 1.35, 96);
   for (const [ty, s] of [[2, 93], [5.5, 94], [8.5, 95]]) line(T, [[16, 4.2], [29, ty]], 0.5, { seed: s, color: 'rgba(42,33,48,.55)' });
   o.out.head = T.map(2, -1); o.out.mouth = T.map(14.5, 7.5 + op * 2);
   T.restore();
 }
-// Foreleg from shoulder to paw; fw curls the wrist back (swing / tuck).
-function foreleg(T, S, paw, fw, w, col, seed) {
-  if (fw > 0.02) {
-    const k = 0.62, W = [S[0] + (paw[0] - S[0]) * k, S[1] + (paw[1] - S[1]) * k], l = Math.hypot(paw[0] - W[0], paw[1] - W[1]);
-    const a = Math.atan2(paw[1] - W[1], paw[0] - W[0]) + fw * 1.5, P2 = [W[0] + Math.cos(a) * l, W[1] + Math.sin(a) * l];
-    cel(T, limb(...S, ...W, w, w * 0.8, 2, seed), col, SH, 1.1, seed);
-    cel(T, bone(...W, ...P2, w * 0.78, w * 0.72, 2, seed + 1), col, SH, 1.05, seed + 1);
-    cel(T, ell(P2[0], P2[1], w * 0.88, w * 0.72, seed + 2, 0.2, a - Math.PI / 2), col, SH, 1, seed + 2);
-  } else {
-    cel(T, bone(...S, ...paw, w, w * 0.76, 2, seed), col, SH, 1.1, seed);
-    cel(T, ell(paw[0] + 0.8, paw[1], w * 0.95, w * 0.75, seed + 2, 0.2), col, SH, 1, seed + 2);
+// ── limbs: one continuous outline per limb ──
+// A limb outline along a smoothed centreline, with separate half-widths on each side (+ side: the back of the leg,
+// the sole of the foot), and a rounded end cap (and a rounded start, `cap0`, for a joint that shows: a shoulder).
+function limbPoly(C, wp, wn, seed, cap0 = false) {
+  const n = C.length, L = [], R = [];
+  for (let i = 0; i < n; i++) {
+    const a = C[Math.max(0, i - 1)], b = C[Math.min(n - 1, i + 1)], d = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1]) / d, ny = (b[0] - a[0]) / d;
+    R.push([C[i][0] + nx * wp[i], C[i][1] + ny * wp[i]]); L.push([C[i][0] - nx * wn[i], C[i][1] - ny * wn[i]]);
   }
+  const e = C[n - 1], q = C[n - 2], d = Math.hypot(e[0] - q[0], e[1] - q[1]) || 1, tx = (e[0] - q[0]) / d, ty = (e[1] - q[1]) / d, r = (wp[n - 1] + wn[n - 1]) / 2;
+  const cap = [-0.6, 0, 0.6].map(k => [e[0] + (tx * Math.cos(k) - ty * Math.sin(k)) * r * 0.95 + (wp[n - 1] - wn[n - 1]) * 0.5 * -ty, e[1] + (ty * Math.cos(k) + tx * Math.sin(k)) * r * 0.95 + (wp[n - 1] - wn[n - 1]) * 0.5 * tx]);
+  const s0 = C[0], s1 = C[1], d0 = Math.hypot(s1[0] - s0[0], s1[1] - s0[1]) || 1, ax = (s0[0] - s1[0]) / d0, ay = (s0[1] - s1[1]) / d0, r0 = (wp[0] + wn[0]) / 2;
+  const start = cap0 ? [-0.75, -0.25, 0.25, 0.75].map(k => [s0[0] + (ax * Math.cos(k) - ay * Math.sin(k)) * r0 * 0.8, s0[1] + (ay * Math.cos(k) + ax * Math.sin(k)) * r0 * 0.8]) : [];
+  return rpoly([...start, ...L, ...cap, ...R.reverse()], 2.2, { seed, jit: 0.25, step: 1.5 });
+}
+// Centreline through key points, sampled along quadratic arcs (corners become joints, not kinks).
+function smoothPath(K, n = 5) {
+  const out = [K[0]];
+  for (let i = 1; i < K.length - 1; i++) {
+    const a = [(K[i - 1][0] + K[i][0]) / 2, (K[i - 1][1] + K[i][1]) / 2], b = [(K[i][0] + K[i + 1][0]) / 2, (K[i][1] + K[i + 1][1]) / 2];
+    for (let k = i === 1 ? 0 : 1; k <= n; k++) { const t = k / n, u = 1 - t; out.push([u * u * a[0] + 2 * u * t * K[i][0] + t * t * b[0], u * u * a[1] + 2 * u * t * K[i][1] + t * t * b[1]]); }
+  }
+  out.push(K[K.length - 1]);
+  return out;
+}
+const lerpW = (ws, n) => Array.from({ length: n }, (_, i) => { const f = (i / (n - 1)) * (ws.length - 1), j = Math.min(ws.length - 2, Math.floor(f)); return lerp(ws[j], ws[j + 1], f - j); });
+// Paint shapes as one form: ink every outline (doubled, behind), then fill and shade them, so only the outer silhouette
+// keeps its ink and the parts melt together. `hide` = [x, y, r]: no ink near that point (where a limb enters the body).
+function merged(T, shapes, col, seed, hide = null, wt = 1.1) {
+  T.save();
+  if (hide) { T.beginPath(); T.rect(hide[0] - 200, hide[1] - 200, 400, 400); T.moveTo(hide[0] + hide[2], hide[1]); T.arc(hide[0], hide[1], hide[2], 0, Math.PI * 2, true); T.mask('evenodd'); }
+  shapes.forEach((P, i) => line(T, [...P, P[0]], wt * 1.6, { seed: seed + i, taper: false }));
+  T.restore();
+  shapes.forEach((P, i) => cel(T, P, col, SH, 0, seed + i));
+}
+// The shoulder end of a foreleg: its axis u (shoulder → paw), b (toward the back of a downward leg), the top of the
+// upper arm (hidden in the chest) and the radius r round it where the leg melts into the body.
+function shoulder(S, paw, w) {
+  const d = [paw[0] - S[0], paw[1] - S[1]], L = Math.hypot(...d) || 1, ux = d[0] / L, uy = d[1] / L, bx = -uy, by = ux;
+  return { L, ux, uy, bx, by, top: [S[0] - ux * 6 + bx * 1.5, S[1] - uy * 6 + by * 1.5], r: w * 2.2 };
+}
+const ring = (T, c, r) => { T.moveTo(c[0] + r, c[1]); T.arc(c[0], c[1], r, 0, Math.PI * 2, true); };
+// The body's chest just in front of the near foreleg's shoulder (inside the body clip): plain fur with the body's own
+// cel shadow, so no belly cream is left as a sliver between the leg's front edge and the chest outline. A thin strip
+// along the leg's front edge in every pose; for a hanging leg the whole chest in front of the shoulder, receding
+// (smoothly) as the leg swings up, out of the way of a cream chest behind a raised arm.
+function chestFront(T, body, sd, col, w) {
+  const { top, ux, uy, bx, by, r } = sd, R = r * 2, k = clamp((uy - 0.45) / 0.3), [dx, dy] = T.lightShift(SH);
+  const band = (o0, o1, r1, back) => {                 // between offsets o0..o1 in front of the leg's axis, from `back` behind its top
+    const a = [top[0] - bx * o0, top[1] - by * o0], b = [top[0] - bx * o1, top[1] - by * o1];
+    T.save();
+    T.beginPath(); ring(T, top, r1); T.mask();
+    T.beginPath(); poly(T, [[a[0] - ux * back, a[1] - uy * back], [a[0] + ux * R * 1.6, a[1] + uy * R * 1.6], [b[0] + ux * R * 1.6, b[1] + uy * R * 1.6], [b[0] - ux * back, b[1] - uy * back]]); T.mask();
+    fillP(T, body, col);
+    T.globalCompositeOperation = 'multiply'; T.fillStyle = SHADE; T.beginPath(); T.rect(top[0] - 2 * R, top[1] - 2 * R, 4 * R, 4 * R); poly(T, shift(body, dx, dy)); T.fill('evenodd');
+    T.restore();
+  };
+  band(0, w * 1.45 + 2.4, r * 1.6, 0);
+  if (k > 0) band((1 - k) * R, 3 * R, r, R);
+}
+// Foreleg from the shoulder (hidden in the chest) to the paw: upper arm, a soft elbow behind, slim forearm, small
+// paw; fw curls the wrist back (swing / tuck). The near leg (`body` given) is painted over the body and grows out of
+// it: its outline is inked wherever it is outside the body (so the chest outline runs on into the leg's, unbroken) and
+// inside the body below the shoulder (its back edge over the belly); at the shoulder it has no ink, and its cel
+// shadow fades in down the upper arm instead of starting in a hard edge in the middle of the shoulder.
+function foreleg(T, S, paw, fw, w, col, seed, body = null) {
+  const { L, ux, uy, bx, by, top, r } = shoulder(S, paw, w), elbow = [S[0] + ux * L * 0.3 + bx * 1.6, S[1] + uy * L * 0.3 + by * 1.6];
+  const wr = [S[0] + ux * L * 0.66, S[1] + uy * L * 0.66], l = L * 0.34, a = Math.atan2(uy, ux) + fw * 1.5, P2 = [wr[0] + Math.cos(a) * l, wr[1] + Math.sin(a) * l];
+  const C = smoothPath([top, elbow, wr, P2], 4), ws = lerpW([w * 1.45, w * 1.05, w * 0.74, w * 0.7], C.length);
+  const leg = limbPoly(C, ws, ws, seed, !!body), pa = fw > 0.02 ? a - Math.PI / 2 : 0;
+  const pw = ell(P2[0] + Math.cos(pa) * 0.8, P2[1] + Math.sin(pa) * 0.8, w * 0.95, w * 0.75, seed + 2, 0.2, pa);
+  if (!body) merged(T, [leg, pw], col, seed, [top[0], top[1], r]);
+  else {
+    const shapes = [leg, pw], inkAll = () => shapes.forEach((P, i) => line(T, [...P, P[0]], 1.1 * 1.6, { seed: seed + i, taper: false })), far = [top[0] - 300, top[1] - 300, 600, 600];
+    T.save(); T.beginPath(); T.rect(...far); poly(T, body); T.mask('evenodd'); inkAll(); T.restore();                                  // outside the body
+    T.save(); T.beginPath(); poly(T, body); T.mask(); T.beginPath(); T.rect(...far); ring(T, top, r); T.mask('evenodd'); inkAll(); T.restore();   // inside, below the shoulder
+    const [dx, dy] = T.lightShift(SH), g = T.createLinearGradient(top[0] + ux * r * 0.3, top[1] + uy * r * 0.3, top[0] + ux * r * 1.05, top[1] + uy * r * 1.05);
+    g.addColorStop(0, rgba(SHADE, 0)); g.addColorStop(1, SHADE);
+    for (const P of shapes) {
+      T.save(); T.beginPath(); poly(T, P); T.clip(); fillP(T, P, col);
+      T.globalCompositeOperation = 'multiply'; T.fillStyle = g; T.beginPath(); T.rect(top[0] - 200, top[1] - 200, 400, 400); poly(T, shift(P, dx, dy)); T.fill('evenodd');
+      T.restore();
+    }
+  }
+  line(T, [[P2[0] + w * 0.55, P2[1] + w * 0.15], [P2[0] + w * 0.75, P2[1] + w * 0.6]], 0.5, { seed: seed + 5, color: rgba(darken(col, 0.5), 0.6) });   // toe split
+}
+// Hind leg from inside the haunch to the toe: the hock, a round heel, and the long foot, as one shape (its sole flat
+// on the ground when the foot is planted).
+function hindleg(T, H, heel, toe, w, col, seed) {
+  const fx = toe[0] - heel[0], fy = toe[1] - heel[1], fl = Math.hypot(fx, fy) || 1;
+  const ball = [heel[0] + fx * 0.6, heel[1] + fy * 0.6], end = [toe[0] - (fx / fl) * 2.4, toe[1] - (fy / fl) * 2.4], C = [...smoothPath([H, heel, ball], 4), end];   // the rounded toe ends at the toe point
+  const k = w / 7, wp = lerpW([7 * k, 4.6 * k, 4.2 * k, 4.0 * k], C.length), wn = lerpW([7 * k, 4.6 * k, 3.4 * k, 2.8 * k], C.length);
+  const leg = limbPoly(C, wp, wn, seed);
+  const hb = ell(heel[0] - (fx / fl) * 0.9 * k, heel[1] - (fy / fl) * 0.9 * k - 0.2, 4.1 * k, 3.8 * k, seed + 3, 0.15);   // the heel
+  merged(T, [leg, hb], col, seed);
+  const tq = [toe[0] - (fx / fl) * 4, toe[1] - (fy / fl) * 4];
+  line(T, [[tq[0] - (fy / fl) * 0.5, tq[1] + (fx / fl) * 0.5 - 1.6 * k], [tq[0] + (fx / fl) * 1.2, tq[1] + (fy / fl) * 1.2 + 0.4]], 0.5, { seed: seed + 6, color: rgba(darken(col, 0.5), 0.55) });
+}
+// The neck: from the shoulders and chest (under the body, drawn first) up to the back of the head and the throat;
+// only its back and throat contours are inked; a pale throat runs down into the belly.
+function neck(T, p, B, P) {
+  const nt = add(B, rot([12 * p.bs, -12], p.br)), nf = add(B, rot([23 * p.bs, 3], p.br));
+  const hb = add([p.hx, p.hy], rot([-12.5, -1], p.hr)), hf = add([p.hx, p.hy], rot([0, 11.5], p.hr));
+  const top = [nt, [(nt[0] + hb[0]) / 2 - 1, (nt[1] + hb[1]) / 2 - 0.5], hb], bot = [hf, [(hf[0] + nf[0]) / 2 + 2, (hf[1] + nf[1]) / 2 + 0.5], nf];
+  const N = [...top, add([p.hx, p.hy], rot([-4, 4], p.hr)), ...bot];
+  cel(T, N, P.fur, SH, 0, 79);
+  T.save(); T.beginPath(); N.forEach((q, i) => (i ? T.lineTo(q[0], q[1]) : T.moveTo(q[0], q[1]))); T.closePath(); T.clip();
+  fillP(T, ell((hf[0] + nf[0]) / 2 - 1, (hf[1] + nf[1]) / 2 - 1.5, 6, 10, 80, 0.4, Math.atan2(hf[0] - nf[0], nf[1] - hf[1])), P.belly);
+  T.restore();
+  line(T, top, 1.15, { seed: 81 }); line(T, bot, 1.1, { seed: 82 });
 }
 function paint(T, p0, F, o) {
   const { P, t } = o;
@@ -231,21 +329,21 @@ function paint(T, p0, F, o) {
   const fur2 = darken(P.fur, 0.85);
   ear(T, p, p.eB, true, P, t);
   foreleg(T, J.S2, J.paw2, p.fw2, 4.2, fur2, 70);
-  cel(T, bone(...J.H2, ...J.heel2, 6, 4.2, 3, 69), fur2, sh, 1.05, 69);
-  cel(T, bone(...J.heel2, ...J.toe2, 3.6, 3.4, 2, 71), fur2, sh, 1.05, 71);
+  hindleg(T, J.H2, J.heel2, J.toe2, 6, fur2, 69);
+  neck(T, p, J.B, P);
   const B = J.B, body = ell(B[0], B[1] - F.breath * 0.4, 26 * p.bs, (17 / Math.sqrt(p.bs)) * (1 + F.breath * 0.025), 72, 0.5, p.br);
   cel(T, body, P.fur, sh, 0, 72);
   T.save(); T.beginPath(); body.forEach((q, i) => (i ? T.lineTo(q[0], q[1]) : T.moveTo(q[0], q[1]))); T.closePath(); T.clip();
   const bp = add(B, rot([8, 12], p.br)); fillP(T, ell(bp[0], bp[1], 20, 9, 73, 0.3, p.br), P.belly);
+  chestFront(T, body, shoulder(J.S, J.paw1, 4.5), P.fur, 4.5);
   for (let i = 0; i < 6; i++) { const q = add(B, rot([-16 + i * 6, -10], p.br)); line(T, [q, add(q, rot([3, 4], p.br))], 0.6, { seed: 400 + i, color: 'rgba(90,60,40,.5)' }); }
   T.restore(); line(T, [...body, body[0]], 1.2, { seed: 72, taper: false });
   const tl = add(B, rot([-27 * p.bs, -5 - 1.5 * Math.sin(t * 2.3) * 0.5], p.br)); cel(T, ell(tl[0], tl[1], 6.5, 6, 74, 0.6), P.tail, sh, 1, 74);
-  cel(T, bone(...J.H, ...J.heel, 7, 4.6, 3, 75), P.fur, sh, 1.1, 75);
-  cel(T, bone(...J.heel, ...J.toe, 4.2, 4, 2, 76), P.fur, sh, 1.1, 76);
+  hindleg(T, J.H, J.heel, J.toe, 7, P.fur, 75);
   cel(T, ell(J.H[0], J.H[1], 15, 12.5, 77, 0.4, p.br), P.fur, sh, 1.15, 77);
   head(T, p, F, P, o);
   ear(T, p, p.eF, false, P, t);
-  foreleg(T, J.S, J.paw1, p.fw1, 4.5, P.fur, 78);
+  foreleg(T, J.S, J.paw1, p.fw1, 4.5, P.fur, 78, body);
 }
 
 const base = POSES.stand;
@@ -272,4 +370,4 @@ export default makeRig({
   feet,
   paint,
 });
-export { POSES as HP };
+export { POSES as HP, joints as HJ, shoulder as HS };

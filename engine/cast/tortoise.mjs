@@ -44,8 +44,9 @@ function form(T, P, col, { sh = SH, w = 1.1, seed = 1, inner = null } = {}) {
 }
 
 // Pose: shell offset by (down +), tilt br; neck angle na (0 forward, + up), neck length nl (0 withdrawn .. 1.4),
+// neck bend nb (0 straight .. 1 the raised S: out of the shell, curving up, easing forward under the skull),
 // head tilt hr; feet f1/f2 (near/far fore), h1/h2 (near/far hind) in ground units; lt leg tuck 0..1; tail ta.
-const D = { by: 0, br: 0, na: 0.1, nl: 1, hr: 0, lt: 0, ta: 0, lift: 0, mo: 0, sm: 0, eh: 0, lid: 0, f1u: 0, f2u: 0, h1u: 0, h2u: 0 };
+const D = { by: 0, br: 0, na: 0.1, nl: 1, nb: 0, hr: 0, lt: 0, ta: 0, lift: 0, mo: 0, sm: 0, eh: 0, lid: 0, f1u: 0, f2u: 0, h1u: 0, h2u: 0 };
 const P0 = o => ({ ...D, ...o });
 const FEET = (f1, f2, h1, h2, y = 0) => ({ f1x: f1, f1y: y, f2x: f2, f2y: y, h1x: h1, h1y: y, h2x: h2, h2y: y });
 // shell frame → ground frame
@@ -53,7 +54,7 @@ const shellM = p => q => { const r = rot([q[0], q[1] + 14], p.br); return [r[0],
 const roots = p => { const M = shellM(p); return { f1: M([22, -13]), f2: M([28, -14]), h1: M([-20, -12]), h2: M([-14, -13]), neck: M([29, -17]), tail: M([-37, -13]) }; };
 export const POSES = {
   stand: P0({ ...FEET(25, 31, -21, -15) }),
-  alert: P0({ by: -1, br: -0.06, na: 0.75, nl: 1.3, hr: -0.35, ...FEET(25, 31, -21, -15), lid: 0 }),
+  alert: P0({ by: -1, br: -0.06, na: 0.2, nl: 1.12, nb: 0.72, hr: -0.12, ...FEET(25, 31, -21, -15), lid: 0 }),
   stretch: P0({ na: 0.05, nl: 1.45, hr: 0.05, ...FEET(25, 31, -21, -15) }),
   sit: P0({ by: 6.5, na: 0.05, nl: 0.8, hr: 0.15, ...FEET(34, 38, -30, -24), lt: 0.2 }),
   sleep: P0({ by: 8, na: -0.1, nl: 0.15, hr: 0.25, lt: 1, ...FEET(24, 28, -19, -13), lid: 1 }),
@@ -84,28 +85,43 @@ function run(ph) {
   return quadFeet(runBody(ph), ph, { h1: { off: 0, duty: 0.6, x0: -21, lift: 6 }, f1: { off: 0.5, duty: 0.6, x0: 26, lift: 6.5 }, h2: { off: 0.5, duty: 0.6, x0: -15, lift: 6 }, f2: { off: 0.0, duty: 0.6, x0: 32, lift: 6.5 } }, G.run.stride, rootsAt(runBody));
 }
 
-// Head pitch (st.tilt). Up: the neck stretches and climbs, the head tips back, and near full lift it trembles with
-// the effort. Down: the neck lowers and the head bows. A withdrawn head can't pitch.
+// Head pitch (st.tilt). Up: the way a real tortoise looks up — the neck keeps its length but curves up out of the
+// shell in an S (forward, up, then easing forward under the skull), the head tips back ~45°, and near full lift it
+// trembles with the effort. Down: the neck lowers and the head bows. A withdrawn head can't pitch.
 function tilted(p, u, t) {
   const k = clamp((p.nl - 0.15) / 0.5);
   if (!u || k <= 0) return p;
   if (u > 0) {
     const q = { ...p }, a = u * k, e = a * a * a;
-    q.na = lerp(p.na, Math.max(p.na, 0.66), a); q.nl = lerp(p.nl, Math.max(p.nl, 1.24), a);
-    q.hr = lerp(p.hr, -0.62, a) + 0.03 * e * (0.6 * Math.sin(t * 19.1) + 0.4 * Math.sin(t * 29.3 + 1));
-    q.na += 0.015 * e * Math.sin(t * 13.7 + 0.4);
+    q.na = lerp(p.na, clamp(p.na, 0.15, 0.3), a); q.nl = lerp(p.nl, Math.max(p.nl, 1.15), a); q.nb = lerp(p.nb || 0, Math.max(p.nb || 0, 1), a);
+    q.hr = lerp(p.hr, -0.72, a) + 0.03 * e * (0.6 * Math.sin(t * 19.1) + 0.4 * Math.sin(t * 29.3 + 1));
+    q.nb += 0.025 * e * Math.sin(t * 13.7 + 0.4);
     q.mo = Math.max(p.mo || 0, 0.12 * e);                                        // the effort parts the beak a little
     return q;
   }
   // down: as far as the ground allows (a sitting tortoise's chin is already low)
-  const down = a => ({ ...p, na: lerp(p.na, Math.min(p.na, -0.3), a), hr: lerp(p.hr, 0.45, a), nl: lerp(p.nl, Math.max(p.nl, 0.95), a) });
+  const down = a => ({ ...p, na: lerp(p.na, Math.min(p.na, -0.3), a), hr: lerp(p.hr, 0.45, a), nl: lerp(p.nl, Math.max(p.nl, 0.95), a), nb: lerp(p.nb || 0, 0, a) });
   let a = -u * k;
   while (a > 0.02 && headLow(down(a)) > -0.9) a -= 0.05;
   return a > 0.02 ? down(a) : p;
 }
+// The neck's spine (ground units) from the shell opening: 22·nl long, heading na, bent up by nb along an S profile.
+// Returns the spine points (the last one at the back of the skull), half-widths, and the head's centre and rotation.
+const NB = u => 0.95 * ease(clamp(u / 0.58)) - 0.5 * ease(clamp((u - 0.58) / 0.42));
+const NECK_N = 12;
+function neckOf(p, R, hr = p.hr) {
+  const base = R.neck, L = 22 * p.nl, nb = p.nb || 0, b = clamp(nb), pts = [base];
+  let x = base[0], y = base[1];
+  for (let i = 0; i < NECK_N; i++) { const a = p.na + nb * NB((i + 0.5) / NECK_N); x += (Math.cos(a) * L) / NECK_N; y -= (Math.sin(a) * L) / NECK_N; pts.push([x, y]); }
+  const back = rot([-6.5, 2], hr), off = [lerp(5, -back[0], b), lerp(-4, -back[1], b)], hx = x + off[0], hy = y + off[1];
+  const nape = rot([-5.6, 1.3], hr), d = [hx + nape[0] - x, hy + nape[1] - y];   // bend the spine's end into the back of the skull
+  for (let i = 1; i <= NECK_N; i++) { const u = i / NECK_N; pts[i] = [pts[i][0] + d[0] * u, pts[i][1] + d[1] * u + 1.5 * (1 - b) * Math.sin(Math.PI * u)]; }   // a relaxed neck sags
+  const ws = pts.map((_, i) => { const u = i / NECK_N; return lerp(9.4, 6.3, Math.pow(u, 0.8)) * (i === NECK_N ? 0.9 : 1) - b * 0.5 * Math.sin(Math.PI * Math.min(1, u * 1.1)); });   // a stretched neck thins a little
+  return { pts, ws, hx, hy };
+}
 // lowest point of the head (ground units), for keeping a lowered chin off the ground
 function headLow(p) {
-  const n = roots(p).neck, L = 22 * p.nl, hx = n[0] + Math.cos(p.na) * L + 5, hy = n[1] - Math.sin(p.na) * L - 4;
+  const { hx, hy } = neckOf(p, roots(p));
   return Math.max(...[[3, 7.7], [-5, 8.2], [10.3, 5.3], [12.7, 3.9]].map(([x, y]) => hy + x * Math.sin(p.hr) + y * Math.cos(p.hr))) + 0.6;
 }
 // ── shell geometry (shell frame, before by/br; built once) ──
@@ -305,7 +321,8 @@ function tortoiseEye(T, x, y, F, P, C, lid) {
     line(T, arcPts(x - 0.1, y - 0.4, rx * 0.95, 1.6, Math.PI * 1.15, Math.PI * 1.85, 0.4), 0.5, { seed: 145, color: fold });
     return;
   }
-  const E = oval(x, y, rx, ry, 142, 0.05, 0, 28), iris = P.iris || P.eye, look = [F.look * 0.55, -F.pitch * 0.75];
+  const E = oval(x, y, rx, ry, 142, 0.05, 0, 28), iris = P.iris || P.eye, look = [F.look * 0.55, -F.pitch * 0.4];
+  const top = y - ry - 0.2, span = 2 * ry + 0.4, yl = top + span * lid;
   T.save(); clipTo(T, E);
   fillP(T, E, P.iris ? darken(iris, 0.62) : iris);
   if (P.iris) {
@@ -313,9 +330,11 @@ function tortoiseEye(T, x, y, F, P, C, lid) {
     fillP(T, oval(x + look[0] * 0.6 + 0.1, y + look[1] * 0.6 + ry * 0.45, rx * 0.62, ry * 0.42, 147, 0.04), rgba(lighten(iris, 0.35), 0.55));
     dot(T, x + look[0], y + look[1], 1.0 * (F.pupil || 1), P.eye);
   }
-  dot(T, x + look[0] + 0.75, y + look[1] - 0.75, 0.55, '#ffffff'); dot(T, x + look[0] - 0.6, y + look[1] + 0.8, 0.22, 'rgba(255,255,255,.7)');
+  const gy = Math.max(y + look[1] - 0.75, yl + 0.68);                 // the catch-light stays under a heavy lid
+  if (gy < y + ry * 0.4) dot(T, x + look[0] + 0.75, gy, 0.55, '#ffffff');
+  dot(T, x + look[0] - 0.6, y + look[1] + 0.8, 0.22, 'rgba(255,255,255,.7)');
   // upper lid down to `lid`, slanted by the expression (tilt +1 angry: front corner lower); its edge sags in the middle
-  const top = y - ry - 0.2, span = 2 * ry + 0.4, yl = top + span * lid, sl = F.tilt * span * 0.22 * Math.min(1, lid * 3), yA = yl - sl, yB = yl + sl, ym = yl + 0.35 * (1 - lid);
+  const sl = F.tilt * span * 0.22 * Math.min(1, lid * 3), yA = yl - sl, yB = yl + sl, ym = yl + 0.35 * (1 - lid);
   fillP(T, [[x - rx - 1, top - 1], [x + rx + 1, top - 1], [x + rx + 1, yB], [x, ym], [x - rx - 1, yA]], lidCol);
   fillP(T, [[x - rx - 1, yA], [x, ym], [x + rx + 1, yB], [x + rx + 1, yB + 0.6], [x, ym + 0.6], [x - rx - 1, yA + 0.6]], 'rgba(20,10,10,.28)');
   T.restore();
@@ -331,23 +350,64 @@ const UPPER = rpoly([[-10, -1], [-8.2, -6.2], [-1.5, -8.7], [5.5, -7.7], [10.4, 
 const JAW = rpoly([[-9, 3.6], [1.5, 3.9], [8, 3.8], [11.2, 3.7], [10.3, 5.3], [3, 7.7], [-5, 8.2], [-9.5, 5.6]], [1, 1, 1, 0.8, 2, 4, 4, 2], { seed: 118, jit: 0.18, step: 1.2 });
 const THROAT = rpoly([[1.2, 4.1], [12, 3.7], [12, 10], [-11, 10], [-11, 7.2], [-5, 5.6]], [1, 1, 1, 1, 3, 4], { seed: 119, jit: 0.2, step: 1.2 });
 const PLATES = [[[-6.4, -7], [-4.6, -4.6], [-0.8, -5.2], [0.2, -8.5]], [[-0.8, -5.2], [2.4, -5.9], [5.2, -7.6]], [[6.4, -7.2], [7.4, -5.4], [10.2, -4.8]], [[-9.3, -3], [-6.8, -2.6], [-4.6, -4.6]]];
-function head(T, p, F, P, C, o, R) {
-  const L = 22 * p.nl, a = p.na, base = R.neck, hpos = add(base, [Math.cos(a) * L, -Math.sin(a) * L]);
-  const hx = hpos[0] + 5, hy = hpos[1] - 4, hr = p.hr + (p.nl < 0.5 ? 0 : -F.look * 0.1), skin = C.skin;
-  if (p.nl > 0.12) {
-    const end = add([hx, hy], rot([-6.5, 2], hr)), mid = add(base, [Math.cos(a) * L * 0.55, -Math.sin(a) * L * 0.55 + 1.5]);
-    const N = tube([base, mid, end], [7.4, 6.4, 5.9], 106, 0.3);
-    form(T, N, skin, { seed: 106, inner: () => {
-      const d = [end[0] - base[0], end[1] - base[1]], dl = Math.hypot(...d) || 1, ux = d[0] / dl, uy = d[1] / dl, fc = rgba(darken(skin, 0.5), 0.5);
-      for (let k = 0; k < 6; k++) {                          // skin folds across the neck, bunched when it is short
-        const u = 0.1 + k * 0.145 * Math.min(1.1, 0.75 + p.nl * 0.25), q = [base[0] + d[0] * u, base[1] + d[1] * u], w = 6.9 - u * 1.4, bow = 1 + 0.4 * (k % 2);
-        line(T, [[q[0] - uy * w, q[1] + ux * w], [q[0] - uy * w * 0.3 + ux * bow, q[1] + ux * w * 0.3 + uy * bow], [q[0] + uy * w * 0.5 + ux * 0.6, q[1] - ux * w * 0.5 + uy * 0.6]], 0.5, { seed: 300 + k, color: fc });
-      }
-      line(T, [[base[0] - uy * 3.6, base[1] + ux * 3.6], [end[0] - uy * 3, end[1] + ux * 3]], 0.45, { seed: 308, color: rgba(darken(skin, 0.5), 0.35) });
-      fillP(T, [[base[0] - uy * 8, base[1] + ux * 8], [end[0] - uy * 7, end[1] + ux * 7], [end[0] - uy * 3.5, end[1] + ux * 3.5], [base[0] - uy * 4.2, base[1] + ux * 4.2]], rgba(lighten(skin, 0.3), 0.35));
-      if (C.w) line(T, [[base[0] + uy * 5, base[1] - ux * 5], [end[0] + uy * 4, end[1] - ux * 4]], 0.7, { seed: 309, color: rgba('#ffffff', 0.5 * C.w) });
-    } });
+// Along the neck spine at u (0 shell .. 1 skull): point, unit tangent, unit normal toward the throat, half-width.
+function along(pts, ws, u) {
+  const f = clamp(u) * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(f)), w = f - i, a = pts[i], b = pts[i + 1];
+  const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1, tx = dx / d, ty = dy / d;
+  return { q: [lerp(a[0], b[0], w), lerp(a[1], b[1], w)], t: [tx, ty], n: [-ty, tx], w: lerp(ws[i], ws[i + 1], w) };
+}
+// u (0..1) where the neck spine leaves the shell's silhouette (the carapace and rim band hide the part before it)
+function emergeU(p, pts) {
+  const out = q => { const r = rot([q[0], q[1] - p.by + 14], -p.br), x = r[0], y = r[1] - 14; return Math.abs(x) > 38.5 || y < shellTop(x) || y > -8.4; };
+  for (let i = 1; i < pts.length; i++) if (out(pts[i])) {
+    let a = (i - 1) / (pts.length - 1), b = i / (pts.length - 1);
+    for (let k = 0; k < 6; k++) { const m = (a + b) / 2, f = m * (pts.length - 1), j = Math.floor(f), w = f - j, q = [lerp(pts[j][0], pts[j + 1][0], w), lerp(pts[j][1], pts[j + 1][1], w)]; if (out(q)) b = m; else a = m; }
+    return b;
   }
+  return 1;
+}
+function neckDraw(T, p, C, nk) {
+  const { pts, ws } = nk, b = clamp(p.nb || 0), skin = C.skin, N = tube(pts, ws, 106, 0.3), ue = Math.min(emergeU(p, pts), 0.6), vis = u => lerp(ue, 1, u);
+  const at = (u, k) => { const A = along(pts, ws, u); return [A.q[0] + A.n[0] * A.w * k, A.q[1] + A.n[1] * A.w * k]; };
+  const rail = (k, u0, u1, n = 8) => Array.from({ length: n + 1 }, (_, i) => at(lerp(u0, u1, i / n), k));
+  // a fold across the neck at u: from side k0 to side k1 (−1 nape .. +1 throat), cupped toward the head
+  const fold = (u, k0, k1, cup, wt, seed, col, lip, depth = 0) => {
+    const A = along(pts, ws, u), [tx, ty] = A.t, [nx, ny] = A.n, w = A.w, km = (k0 + k1) / 2;
+    const P = [[A.q[0] + nx * w * k0, A.q[1] + ny * w * k0], [A.q[0] + nx * w * km + tx * cup, A.q[1] + ny * w * km + ty * cup], [A.q[0] + nx * w * k1 + tx * cup * 0.4, A.q[1] + ny * w * k1 + ty * cup * 0.4]];
+    if (depth) {                                            // a painted crease: a dark sliver, deepest at the nape edge, and its lit lip
+      const Q = Array.from({ length: 9 }, (_, i) => { const v = i / 8, a = v < 0.5 ? P[0] : P[1], c = v < 0.5 ? P[1] : P[2], m = v < 0.5 ? v * 2 : v * 2 - 1; return [lerp(a[0], c[0], m), lerp(a[1], c[1], m), v]; });
+      const th = v => depth * Math.pow(1 - v, 0.9);
+      fillP(T, [...Q.map(([x, y]) => [x, y]), ...Q.slice().reverse().map(([x, y, v]) => [x + tx * th(v), y + ty * th(v)])], rgba(darken(C.skin, 0.5), 0.55));
+      fillP(T, [...Q.map(([x, y, v]) => [x + tx * th(v), y + ty * th(v)]), ...Q.slice().reverse().map(([x, y, v]) => [x + tx * th(v) * 2.1, y + ty * th(v) * 2.1])], rgba(lighten(C.skin, 0.32), 0.45));
+    }
+    line(T, P, wt, { seed, color: col });
+    if (lip && !depth) line(T, P.slice(0, 2).map(([x, y]) => [x + tx * 0.6, y + ty * 0.6]), wt * 0.65, { seed: seed + 50, color: lip });
+  };
+  form(T, N, skin, { seed: 106, inner: () => {
+    const fc = rgba(darken(skin, 0.5), 0.5), deep = rgba(darken(skin, 0.42), 0.72), lit = rgba(lighten(skin, 0.35), 0.5 * C.fine + 0.15);
+    fillP(T, [...rail(1.2, 0, 1), ...rail(0.42, 0, 1).reverse()], rgba(lighten(skin, 0.3), 0.35 + 0.1 * b));    // the paler throat
+    // relaxed: rings of loose skin across the neck, bunched when it is short
+    if (b < 0.98) for (let k = 0; k < 6; k++) fold(vis(0.04 + k * 0.15 * Math.min(1.1, 0.75 + p.nl * 0.25)), 1, -0.5, 1 + 0.4 * (k % 2), 0.5, 300 + k, rgba(darken(skin, 0.5), 0.5 * (1 - b)));
+    // raised: the nape (the inside of the bend) bunches into deep creases where it leaves the shell; the throat
+    // stretches smooth, with a cord or two showing the strain
+    if (b > 0.02) {
+      T.save(); T.globalAlpha = b;
+      for (let k = 0; k < 7; k++) { const v = Math.pow(k / 6, 1.5); fold(vis(0.03 + 0.62 * v), -1.05, -0.55 + (0.95 - 0.6 * v) * (k % 2 ? 0.75 : 1), 1.2 + 0.3 * (k % 2), 0.62 - 0.12 * v, 320 + k, deep, lit, 0.75 - 0.35 * v); }
+      line(T, rail(0.6, vis(0.05), 0.93), 0.45, { seed: 340, color: fc });
+      line(T, rail(0.25, vis(0.2), 0.86), 0.35, { seed: 341, color: rgba(darken(skin, 0.5), 0.3) });
+      T.restore();
+    }
+    line(T, rail(-0.48, vis(0), 0.8), 0.45, { seed: 308, color: rgba(darken(skin, 0.5), 0.35 * (1 - b)) });
+    if (C.w) line(T, rail(-0.7, vis(0), 0.85), 0.7, { seed: 309, color: rgba('#ffffff', 0.5 * C.w) });
+    // where the neck leaves the shell: a loose collar of skin, in the carapace's shadow
+    if (ue < 0.6) { const A = along(pts, ws, ue), [tx, ty] = A.t; T.save(); T.globalAlpha = 0.3; fillP(T, [...rail(-1.3, Math.max(0, ue - 0.1), ue + 0.04, 4), ...rail(1.3, Math.max(0, ue - 0.1), ue + 0.04, 4).reverse()], rgba(darken(skin, 0.45), 1)); T.restore();
+      fold(ue + 0.035, -1.05, 1.05, 1.5, 0.55, 345, rgba(darken(skin, 0.45), 0.6)); fold(ue + 0.075, -1.05, 0.4, 1.2, 0.45, 346, rgba(darken(skin, 0.45), 0.45)); void tx; void ty; }
+  } });
+}
+const headRot = (p, F) => p.hr + (p.nl < 0.5 ? 0 : -F.look * 0.1);
+function head(T, p, F, P, C, o, R, neck = true) {
+  const hr = headRot(p, F), skin = C.skin, nk = neckOf(p, R, hr), { hx, hy } = nk;
+  if (neck && p.nl > 0.12) neckDraw(T, p, C, nk);
   T.save(); T.translate(hx, hy - F.breath * 0.4); T.rotate(hr);
   const op = clamp(F.open), sm = F.smile, beak = mixHex(skin, '#c9b47c', 0.42), bk = darken(beak, 0.62);
   const hinge = [-2, 3.9], ja = op * 0.42, jr = q => { const d = rot([q[0] - hinge[0], q[1] - hinge[1]], ja); return [hinge[0] + d[0], hinge[1] + d[1]]; };
@@ -379,7 +439,12 @@ function head(T, p, F, P, C, o, R) {
   line(T, [[-8, 5.8], [-4, 6.8], [0, 6.5]], 0.42, { seed: 125, color: pl });
   fillP(T, oval(11.9, -2.3, 0.5, 0.36, 126, 0.02, -0.4, 10), rgba(darken(skin, 0.28), 0.85));          // nostril
   if (sm > 0.5) fillP(T, oval(1.6, 1.6, 2.2, 1.3, 127, 0.1, 0, 16), rgba('#e08a70', 0.16 * (sm - 0.4)));
-  const lids = clamp(P.lids || 0), lb = F.eye === 'wide' ? lids * 0.4 : lids;
+  // params.lids: an old animal's heavy upper lids. Up to 0.6 the eye stays clearly awake (the lid hangs over the top third
+  // of it; iris, pupil and catch-light show); above that it turns sleepy. Speaking lifts the lids (st.speaking when the
+  // film passes it, else the jaw), surprise lifts them right up, looking up lifts them, a blink still shuts them.
+  const lids = clamp(P.lids || 0), rest = lids <= 0.6 ? lids * 0.55 : 0.33 + ((lids - 0.6) / 0.4) * 0.5;
+  const speak = clamp(o.st && o.st.speaking !== undefined ? +o.st.speaking : Math.min(1, F.talk * 3) * 0.5);
+  const lb = rest * (1 - 0.45 * speak) * (F.eye === 'wide' ? 0.25 : 1);
   const lid = clamp(lb + (1 - lb) * Math.max(F.lid, 0.06) - lb * 0.4 * Math.max(0, F.pitch) + 0.12 * Math.max(0, -F.pitch));
   tortoiseEye(T, 4.6, -2.4, F, P, C, lid);
   line(T, [[1.4, 1.1], [4.6, 1.7], [7.4, 0.7]], 0.45, { seed: 128, color: rgba(darken(skin, 0.4), 0.5) });
@@ -402,11 +467,14 @@ function paint(T, p0, F, o) {
   legDraw(T, R.h2, [p.h2x, p.h2y], far, 101, tuck, C, false);
   legDraw(T, R.f2, [p.f2x, p.f2y], far, 103, tuck, C, false);
   const tl = R.tail; cel(T, [[tl[0] + 2, tl[1] - 2], [tl[0] - 9, tl[1] + 2 + p.ta * 4], [tl[0] + 2, tl[1] + 5]], C.skin, SH, 1, 105);
+  // a withdrawn head sits behind the shell; an extended neck comes out from under the front of the carapace and the
+  // head is drawn over everything
   if (p.nl < 0.45) head(T, p, F, P, C, o, R);
+  else neckDraw(T, p, C, neckOf(p, R, headRot(p, F)));
   shellDraw(T, p, C, t);
   legDraw(T, R.h1, [p.h1x, p.h1y], C.skin, 109, tuck, C, true);
   legDraw(T, R.f1, [p.f1x, p.f1y], C.skin, 111, tuck, C, true);
-  if (p.nl >= 0.45) head(T, p, F, P, C, o, R);
+  if (p.nl >= 0.45) head(T, p, F, P, C, o, R, false);
   if (C.w > 0.01) drips(T, p, C, t);
 }
 
@@ -428,7 +496,7 @@ export default makeRig({
     nod: g(1.0, (u, b = base) => plus(b, { hr: 0.25 * Math.sin(Math.PI * clamp(u / 0.45)) + 0.18 * Math.sin(Math.PI * clamp((u - 0.45) / 0.45)), na: -0.08 * Math.sin(Math.PI * u) }), [0.22, 0.5, 0.7]),
     laugh: g(1.5, (u, b = base) => { const e = env(u, 0.15, 0.2), k = Math.abs(Math.sin(u * Math.PI * 6)); return plus(b, { na: 0.35 * e + 0.08 * k * e, hr: -0.35 * e, mo: 0.75 * e, eh: e, sm: e, by: -0.8 * k * e }); }, [0.2, 0.35, 0.5, 0.7]),
     jump: g(0.9, (u, b = base) => jumpAt(u, b, { h: 9, crouch: { by: 3, na: -0.1 }, air: { lt: 0.25, na: 0.3, hr: -0.2 } }), [0.2, 0.45, 0.6, 0.85]),
-    wave: g(1.8, (u, b = base) => { const e = env(u, 0.2, 0.2), R = roots(b); return mixPose(b, { ...b, f1x: R.f1[0] + 12, f1y: R.f1[1] - 3 - 4 * Math.sin(u * Math.PI * 7), br: 0.05, na: 0.95, nl: 1.25, hr: -0.45, sm: 0.6 }, e); }, [0.25, 0.4, 0.55, 0.7]),
+    wave: g(1.8, (u, b = base) => { const e = env(u, 0.2, 0.2), R = roots(b); return mixPose(b, { ...b, f1x: R.f1[0] + 12, f1y: R.f1[1] - 3 - 4 * Math.sin(u * Math.PI * 7), br: 0.05, na: 0.2, nl: 1.12, nb: 0.85, hr: -0.42, sm: 0.6 }, e); }, [0.25, 0.4, 0.55, 0.7]),
     hide: g(2.4, (u, b = base) => mixPose(b, POSES.hide, env(u, 0.12, 0.4)), [0.15, 0.4, 0.75, 0.9]),
     stretch: g(1.6, (u, b = base) => mixPose(b, { ...POSES.stretch, ...FEET(b.f1x, b.f2x, b.h1x, b.h2x), mo: 0.9, lid: 0.8 }, env(u, 0.3, 0.3)), [0.3, 0.5, 0.7]),
   },

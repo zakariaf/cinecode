@@ -1,7 +1,15 @@
 // Film core: loading and validation, beat timing, state carried across shots, routes, feet that don't slide,
 // camera framing math and clamping, drawFrame determinism, plan contents and frameInfo; round 2 (DESIGN §9.1):
 // tts / trimEnd / non-verbal lines, marks, riding, wading, head tilt, camera to / zoomTo / moveAt, shot time and
-// grade, overlays and their api, rim light, sound / music validation, the owed fixes.
+// grade, overlays and their api, rim light, sound / music validation, the owed fixes; round 3: framing by size for
+// one to three subjects (animals, humans, perched), heads that look up kept in frame, close-ups of small rigs, actors
+// in front of a close-up's subject, zoomTo about its target, sound captions, title placement, the night grade's
+// darks, exits that walk out of the real frame; round 4: pacing after a push-in to a close-up, the creep-in of a
+// converging two-shot (round 5: withdrawn) and the staging warning, heads above the caption band at every angle, captions that avoid every
+// head, a remembered night's darks (ramp and a close-up on a pale ground), a pan that arrives before its subject leaves;
+// round 5: a static camera that never moves, eyelines with pitch (and speakers who talk to the one in front), a turn
+// that reads as a turn, titles in title-safe over their subject, dawn on the land, the memory plate's page edge, and
+// the sun's cast shadows.
 //   node --test test/film.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,10 +21,13 @@ import { createCanvas } from '@napi-rs/canvas';
 import { loadFilm, ValidationError } from '../engine/film/load.mjs';
 import { compile, estimateLine, DEFAULT_HOLD } from '../engine/film/compile.mjs';
 import { drawFrame, frameInfo } from '../engine/film/frame.mjs';
-import { frameSubjects, regionOf, clampFrame, SIZE_SPEC, ZMAX, viewRect } from '../engine/film/camera.mjs';
+import { frameSubjects, regionOf, clampFrame, clearView, SIZE_SPEC, ZMAX, CAPTION_BAND, viewRect } from '../engine/film/camera.mjs';
+import { captionStyle, layoutCaption, TITLE_PLACES, titleBlock } from '../engine/film/text.mjs';
+import { titleY, titleX, TITLE_SAFE } from '../engine/film/frame.mjs';
+import { GR, grade, mixGrade, mixStory, deckle, SUN, sunOf } from '../engine/film/grade.mjs';
 import { getKit } from '../engine/set/kits/index.mjs';
 import { getRig } from '../engine/cast/index.mjs';
-import { mountPoint, shortHash, probe } from '../engine/film/util.mjs';
+import { mountPoint, shortHash, probe, profile, rigSizes, clamp } from '../engine/film/util.mjs';
 import { STORY } from '../engine/film/grade.mjs';
 import { rimStrength } from '../engine/film/frame.mjs';
 import { stingNames, sfxNames } from '../engine/film/validate.mjs';
@@ -613,7 +624,9 @@ test('look to up / sky / down tilts the head over rig.lookTime; "to" is the targ
   });
   const plan = compile(await loadFilm(film)), tilt = (id, t) => stateAt(plan, id, t).st.tilt, LT = getRig('hare').lookTime ?? 0.3;
   near(tilt('hare', 0.5), 1, 1e-9); near(tilt('hare', LT / 2), 0.5, 1e-6, 'eased halfway');
-  near(tilt('hare', 1 + LT + 0.01), -1, 1e-9); near(tilt('hare', 2.9), 0, 1e-9);
+  near(tilt('hare', 1 + LT + 0.01), -1, 1e-9);
+  // a look at someone pitches toward their head: the tortoise's head is lower than the hare's
+  assert.ok(tilt('hare', 2.9) < -0.05 && tilt('hare', 2.9) > -1, `the hare looks down at the tortoise (${tilt('hare', 2.9)})`);
   assert.ok(tilt('hare', 1 + LT / 2) > -1 && tilt('hare', 1 + LT / 2) < 1, 'blends from up to down');
   const T = getRig('tortoise');
   assert.ok((T.lookTime ?? 0.3) >= 0.3);
@@ -651,8 +664,11 @@ test('camera: push-in / pull-out to another size and subjects, zoomTo, a move wi
   assert.ok(cw(1.5).zoom > cw(0.9).zoom * 1.05 && cw(2.1).zoom > cw(1.5).zoom, 'moves inside the window');
   // offsets: frame fractions (small) or a world-pixel shift of the framing (large)
   const sub = { box: [1000, 600, 1120, 1000], head: [1090, 700], hh: 80, face: 1 }, W = 1920, H = 1080;
-  const F0 = frameSubjects([sub], 'full', { W, H }), F1 = frameSubjects([sub], 'full', { W, H, offset: [200, -120] });
-  near(F1.cx - F0.cx, 200, 1e-6); near(F1.cy - F0.cy, -120, 1e-6); near(F1.zoom, F0.zoom, 1e-9);
+  const F0 = frameSubjects([sub], 'full', { W, H }), F1 = frameSubjects([sub], 'full', { W, H, offset: [200, -60] });
+  near(F1.cx - F0.cx, 200, 1e-6); near(F1.cy - F0.cy, -60, 1e-6); near(F1.zoom, F0.zoom, 1e-9);
+  // ... but never so far that the framed region (here the whole body) leaves the frame
+  const F3 = frameSubjects([sub], 'full', { W, H, offset: [0, -400] }), bottom = (1000 - F3.cy) * F3.zoom + H / 2;
+  assert.ok(bottom <= 0.98 * H + 1e-6 && F3.cy < F0.cy, `a big offset is limited (feet at ${bottom.toFixed(0)})`);
   const F2 = frameSubjects([sub], 'full', { W, H, offset: [0.1, 0] });
   near((F0.cx - F2.cx) * F0.zoom, 0.1 * W, 1e-6, 'fractions move the subject on screen');
 });
@@ -964,4 +980,379 @@ test('fix: a track ignores motion across the cut (a teleport in the next shot); 
     assert.ok(p[1] >= 0 && p[0] >= 0 && p[2] <= ridden.W, `t=${t}: the rider is inside the frame (${p.map(Math.round)})`);
   }
   assert.ok(ridden.shots[0].cameraAt(1.5).zoom < plain.shots[0].cameraAt(1.5).zoom, 'the pair is framed a little wider than the carrier alone');
+});
+
+// ───────────── round 3: framing, captions, titles, night, exits ─────────────
+// A subject as the compiler makes one, from a rig's real profile: contact point (x, y), scale s.
+function rigSub(id, kind, x, y, s, face = 1, params = {}, pose = 'stand') {
+  const R = getRig(kind), p = profile(R, pose, params), b = p.box;
+  const box = face > 0 ? [x + b[0] * s, y + b[1] * s, x + b[2] * s, y + b[3] * s] : [x - b[2] * s, y + b[1] * s, x - b[0] * s, y + b[3] * s];
+  const head = [x + face * p.head[0] * s, y + p.head[1] * s];
+  return { id, box, head, rest: head, heads: [...head, ...head], hh: rigSizes(R, params).headHeight * s, face, key: y };
+}
+
+test('framing: every size fills the frame as far as the subjects allow, never hangs them in the top third, keeps heads in', () => {
+  const W = 1920, H = 1080, ELDER = { age: 'elder', hairStyle: 'bun' };
+  const groups = {
+    tortoise: [rigSub('t', 'tortoise', 1000, 1100, 1.75)],
+    squirrel: [rigSub('q', 'squirrel', 1000, 1100, 1.3)],
+    elder: [rigSub('n', 'human', 1000, 1100, 1.0, -1, ELDER)],
+    'perched owl': [rigSub('o', 'owl', 1000, 640, 1.2)],
+    'tortoise + squirrel apart': [rigSub('t', 'tortoise', 700, 1100, 1.75), rigSub('q', 'squirrel', 1300, 1080, 1.3, -1)],
+    'tortoise + squirrel close': [rigSub('t', 'tortoise', 1000, 1100, 1.75), rigSub('q', 'squirrel', 1180, 1095, 1.3, -1)],
+    'elder + tortoise': [rigSub('t', 'tortoise', 900, 1100, 1.75), rigSub('n', 'human', 1150, 1080, 1.0, -1, ELDER)],
+    'owl on a branch + squirrel below': [rigSub('o', 'owl', 1100, 672, 1.2), rigSub('q', 'squirrel', 1000, 1140, 1.3)],
+    'three': [rigSub('t', 'tortoise', 800, 1100, 1.75), rigSub('q', 'squirrel', 1050, 1095, 1.3, -1), rigSub('n', 'human', 1250, 1080, 1.0, -1, ELDER)],
+  };
+  for (const [name, subs] of Object.entries(groups)) for (const size of ['wide', 'full', 'medium', 'close']) {
+    const F = frameSubjects(subs, size, { W, H }), z = F.zoom, X = x => (x - F.cx) * z + W / 2, Y = y => (y - F.cy) * z + H / 2, spec = SIZE_SPEC[size];
+    const msg = `${name}, ${size}`;
+    let R = null, B = null, hmax = 0;
+    for (const s of subs) { const g = regionOf(s, size); R = R ? [Math.min(R[0], g[0]), Math.min(R[1], g[1]), Math.max(R[2], g[2]), Math.max(R[3], g[3])] : g; B = B ? [Math.min(B[0], s.box[0]), Math.min(B[1], s.box[1]), Math.max(B[2], s.box[2]), Math.max(B[3], s.box[3])] : s.box.slice(); hmax = Math.max(hmax, g[3] - g[1]); }
+    // filled: the size's fraction is met, or the subjects fill the width or the height, or the heads reach the caption
+    // band, or the zoom is at its closest
+    const HB = Math.max(...subs.map(s => s.heads[3] + 0.55 * s.hh));
+    const band = size === 'close' ? 0 : ((HB - R[1]) * z) / ((CAPTION_BAND - 0.05) * H);
+    const fill = Math.max((hmax * z) / (spec.f * H), ((R[2] - R[0]) * z) / (spec.wmax * W), ((R[3] - R[1]) * z) / (0.86 * H), band, z / ZMAX);
+    assert.ok(fill > 0.97, `${msg}: the frame is loose (${fill.toFixed(2)} of what the subjects allow)`);
+    // the framed region is in frame, with headroom
+    assert.ok(X(R[0]) >= -1 && X(R[2]) <= W + 1, `${msg}: region inside the frame sideways`);
+    if (size === 'close') for (const s of subs) {
+      assert.ok(Y(s.head[1] - 0.62 * s.hh) >= 0.07 * H - 1 && Y(s.head[1] + 0.62 * s.hh) <= 0.98 * H + 1, `${msg}: ${s.id}'s head is in frame with air above it`);
+    } else {
+      assert.ok(Y(R[1]) >= 0.05 * H - 1 && Y(R[3]) <= (spec.region === 'body' ? 0.94 : 1) * H + 1, `${msg}: the region is in frame, with headroom (and ground under whole bodies) (${Y(R[1]).toFixed(0)}..${Y(R[3]).toFixed(0)})`);
+      // every head stays above the caption band (feet may go into it)
+      for (const s of subs) assert.ok(Y(s.head[1] + 0.55 * s.hh) <= CAPTION_BAND * H + 1, `${msg}: ${s.id}'s head is above the captions (${(Y(s.head[1] + 0.55 * s.hh) / H).toFixed(2)} H)`);
+      // whole bodies with room to spare sit low, like a full or wide shot, not up in the top third
+      const bh = (B[3] - B[1]) * z;
+      if (Y(B[3]) <= H && bh < 0.5 * H) assert.ok(Y(B[3]) >= 0.55 * H && Y((B[1] + B[3]) / 2) >= 0.45 * H, `${msg}: the subjects float in the top of the frame (feet at ${(Y(B[3]) / H).toFixed(2)} H)`);
+    }
+  }
+});
+
+test('framing: a close shot keeps a head that looks up in frame; small rigs get a real close-up', async () => {
+  const film = tiny({
+    cast: { pip: { rig: 'squirrel' } },
+    actors: { tortoise: { at: 'x:1100,y:1060', face: 'right' }, pip: { at: 'x:1500,y:1060', face: 'left' } },
+    shots: [
+      { id: 'up', camera: { size: 'close', on: ['tortoise'] }, beats: [{ do: 'look', who: 'tortoise', to: 'up', at: 0.3 }], dur: 3 },
+      { id: 'sq', camera: { size: 'close', on: ['pip'] }, dur: 2 },
+    ],
+    W: 1920, H: 1080,
+  });
+  const plan = compile(await loadFilm(film)), up = plan.shots[0], sq = plan.shots[1], H = plan.H;
+  const head = t => frameInfo(plan, t).actors.find(a => a.id === 'tortoise').headBox;
+  for (let t = up.t0; t < up.t1; t += 0.1) { const h = head(t); assert.ok(h[1] >= 0 && h[3] <= H, `t=${t.toFixed(1)}: the head (${h.map(Math.round)}) is in frame`); }
+  assert.ok(head(up.t0)[1] - head(up.t1 - 0.05)[1] > 0.1 * H, 'the head really rises in the shot');
+  const hb = frameInfo(plan, (sq.t0 + sq.t1) / 2).actors.find(a => a.id === 'pip').headBox;
+  assert.ok((hb[3] - hb[1]) / H > 0.4, `the squirrel's head fills ${((hb[3] - hb[1]) / H).toFixed(2)} of the frame`);
+  assert.ok(sq.cameraAt(sq.t0).zoom > 12, 'beyond the old closest zoom');
+});
+
+test('framing: actors in front of a close-up\'s subject are kept out of its frame when a small reframe can', () => {
+  const W = 1920, H = 1080, sub = rigSub('h', 'hare', 1000, 1000, 1.3), cam = frameSubjects([sub], 'close', { W, H });
+  const X = (c, x) => (x - c.cx) * c.zoom + W / 2, Y = (c, y) => (y - c.cy) * c.zoom + H / 2;
+  // something nearer the lens, just inside the right edge (the lead room side)
+  const edge = (W / 2 - 60) / cam.zoom + cam.cx, front = { id: 'f', box: [edge, 900, edge + 200, 1100], key: 1060 };
+  const c1 = clearView(cam, [sub], [front], 'close', W, H);
+  assert.ok(X(c1, front.box[0]) >= W - 1e-6, 'the actor in front is out of frame');
+  const R = regionOf(sub, 'close');
+  assert.ok(X(c1, R[0]) >= 0 && X(c1, R[2]) <= W && Y(c1, sub.head[1]) <= 0.56 * H, 'the subject is still framed');
+  // behind the subject: left alone; covering the subject's face: no small move helps, so the frame stays
+  assert.deepEqual(clearView(cam, [sub], [{ ...front, key: 900 }], 'close', W, H), cam);
+  assert.deepEqual(clearView(cam, [sub], [{ ...front, box: [R[0], R[1], R[2], R[3] + 400] }], 'close', W, H), cam);
+});
+
+test('camera: zoomTo zooms about its target (the subjects plus the offset), even from a clamped wide view', async () => {
+  const film = tiny({ actors: { hare: { at: 'x:1200' } }, shots: [{ id: 'z', camera: { size: 'establishing', on: ['stump_top'], offset: [0, -300], move: 'push-in', zoomTo: 2 }, dur: 3 }], W: 1920, H: 1080 });
+  const plan = compile(await loadFilm(film)), s = plan.shots[0], c0 = s.cameraAt(s.t0), c1 = s.cameraAt(s.t1 - 1e-4), cm = s.cameraAt((s.t0 + s.t1) / 2);
+  near(c1.zoom / c0.zoom, 2, 0.01);
+  // the zoom's fixed point is the stump top moved up by 300 px
+  const a = getKit('meadow')({}).anchor('stump_top'), P = [a.x, a.y - 5 * a.s - 300];
+  const scr = c => [(P[0] - c.cx) * c.zoom + 960, (P[1] - c.cy) * c.zoom + 540];
+  for (const c of [c1, cm]) { near(scr(c)[0], scr(c0)[0], 1, 'x stays'); near(scr(c)[1], scr(c0)[1], 1, 'y stays'); }
+});
+
+test('camera: a push / pull confined to a window frames its start for what happens before it', async () => {
+  const mk = look => tiny({ actors: { tortoise: { at: 'x:1200,y:1060', face: 'right' } }, shots: [{ id: 'p', camera: { size: 'close', on: ['tortoise'], move: 'pull-out', to: 'full', moveAt: 1, moveDur: 1 }, beats: look ? [{ do: 'look', who: 'tortoise', to: 'up', at: 2.5 }] : [], dur: 4 }] });
+  const a = compile(await loadFilm(mk(false))).shots[0], b = compile(await loadFilm(mk(true))).shots[0];
+  const c0 = a.cameraAt(a.t0 + 0.2), c1 = b.cameraAt(b.t0 + 0.2);
+  near(c1.zoom, c0.zoom, 1e-6, 'the look up after the move does not loosen the close-up before it'); near(c1.cy, c0.cy, 1e-6);
+});
+
+test('captions: sound captions and non-verbal lines are dialogue-sized, full colour, italic', () => {
+  const d = captionStyle('dialogue', 1920, 1080), snd = captionStyle('sound', 1920, 1080), nv = captionStyle('dialogue', 1920, 1080, '[laughs]');
+  assert.equal(snd.size, d.size); assert.equal(snd.color, d.color); assert.match(snd.font, /^italic /);
+  assert.match(nv.font, /^italic /); assert.doesNotMatch(d.font, /italic/);
+});
+
+const BAND_SRC = `
+export const overlays = { band: { layer: 'screen', draw(ctx, api) {
+  for (let x = 0; x < api.W; x += 8) { ctx.fillStyle = (x / 8) % 2 ? '#fff' : '#000'; ctx.fillRect(x, api.H * 0.22, 8, api.H * 0.36); }
+} } };
+`;
+test('titles: a title goes where its beat places it, else into the calmest band of the picture', async () => {
+  await withCustom(BAND_SRC, async custom => {
+    const film = tiny({
+      actors: { hare: { at: 'x:1200' } }, scene: { overlays: ['band'] },
+      shots: [{ id: 'a', camera: { size: 'establishing' }, beats: [{ title: 'THE MORNING RACE', sub: 'a test', dur: 2 }, { title: 'LOW', place: 'bottom', dur: 1 }, { title: 'AT', place: 0.2, dur: 1 }] }],
+    });
+    const plan = compile(await loadFilm(film, { custom })), [auto, low, at] = plan.captions.filter(c => c.style === 'title'), H = plan.H;
+    const y = titleY(plan, auto);
+    assert.ok(y < 0.22 * H - 8 || y > 0.58 * H + 8, `the title (${(y / H).toFixed(2)} H) avoids the striped band`);
+    near(titleY(plan, low), TITLE_PLACES.bottom * H, 1e-9); near(titleY(plan, at), 0.2 * H, 1e-9);
+    assert.equal(titleY(plan, auto), y, 'once per title');
+  });
+  const bad = tiny({ actors: { hare: { at: 'x:1200' } }, shots: [{ id: 'a', beats: [{ title: 'X', place: 'sideways' }] }] });
+  assert.ok((await problemsOf(bad)).some(p => p.path.endsWith('.place')));
+});
+
+test('grade: night keeps real darks and moonlit lights without lifting the mid-tones; a remembered night too', () => {
+  const ramp = story => {
+    const W = 256, H = 1200, c = createCanvas(W, H), x = c.getContext('2d');
+    for (let i = 0; i < W; i++) { x.fillStyle = `rgb(${i},${i},${i})`; x.fillRect(i, 0, 1, H); }
+    grade(x, mixGrade([['night', 1]]), 0, W, H, story);
+    // the middle rows (inside the vignette's clear centre), averaged over the grain
+    const d = x.getImageData(0, H / 2 - 20, W, 40).data;
+    return i => { let v = 0; for (let r = 0; r < 40; r++) { const k = (r * W + i) * 4; v += 0.2126 * d[k] + 0.7152 * d[k + 1] + 0.0722 * d[k + 2]; } return v / 40; };
+  };
+  const L = ramp(null), M = ramp(STORY.memory);
+  assert.ok(L(128) > 0, 'the grade drew');
+  assert.ok(L(20) < 6 && L(40) < 8, `ink and shadow stay dark (${L(20).toFixed(0)}, ${L(40).toFixed(0)})`);
+  // the night tint's mid-tones (a plain multiply puts 128 at ≈ 50) stay where they were: no lift into a milky fog
+  assert.ok(L(128) > 38 && L(128) < 58, `mid-tones stay put (${L(128).toFixed(0)})`);
+  assert.ok(L(240) > 110, `moonlit lights stay bright (${L(240).toFixed(0)})`);
+  // a remembered night (the memory grade's bloom and fading) keeps the same darks
+  assert.ok(M(40) < L(40) + 4 && M(80) < L(80) + 10, `memory doesn't lift the night's blacks (${M(40).toFixed(0)} vs ${L(40).toFixed(0)}, ${M(80).toFixed(0)} vs ${L(80).toFixed(0)})`);
+  near(mixGrade([['night', 0.5], ['morning', 0.5]]).con, (GR.night.con + 1) / 2, 1e-9, 'the stretch blends with the time of day');
+});
+
+test('grade: a close-up at night (and a remembered night) on a pale background keeps real darks', async () => {
+  const W = 480, H = 270;
+  const film = (time, grade) => ({
+    title: 'T', format: { width: W, height: H, fps: 24, captions: 'none' },
+    voices: { tortoise: { voice: 'Algenib' } }, cast: { tortoise: { rig: 'tortoise', voice: 'tortoise', scale: 0.55 } },
+    sets: { m: { kit: 'hill' } },
+    scenes: [{ id: 's1', set: 'm', time, ...(grade ? { grade } : {}), actors: { tortoise: { at: 'x:2060', face: 'right' } }, shots: [{ id: 'c', camera: { size: 'close', on: ['tortoise'] }, dur: 4 }] }],
+  });
+  const stats = async (time, grade) => {
+    const plan = compile(await loadFilm(film(time, grade))), c = createCanvas(W, H), x = c.getContext('2d');
+    drawFrame(x, plan, 2);
+    const d = x.getImageData(0, 0, W, H).data, L = [];
+    for (let i = 0; i < d.length; i += 4) L.push(0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]);
+    L.sort((a, b) => a - b);
+    return { p5: L[Math.floor(0.05 * L.length)], p50: L[L.length >> 1] };
+  };
+  const day = await stats('morning', null), night = await stats('night', null), mem = await stats('night', 'memory');
+  assert.ok(day.p50 > 120, `the background is pale by day (${day.p50.toFixed(0)})`);
+  for (const [name, s] of [['night', night], ['night + memory', mem]]) {
+    assert.ok(s.p5 < 26, `${name}: real darks (p5 ${s.p5.toFixed(0)})`);
+    assert.ok(s.p50 < 50, `${name}: the frame is night, not a mid-tone fog (p50 ${s.p50.toFixed(0)})`);
+  }
+  assert.ok(mem.p50 < night.p50 + 10 && mem.p5 < night.p5 + 8, 'memory doesn\'t fog the night');
+});
+
+test('exits: an actor leaving at a side walks out of the frame the camera really shows, then is gone', async () => {
+  const plan = compile(await loadFilm('films/_test')), W = plan.W, f = 1 / plan.fps;
+  let exits = 0;
+  for (const s of plan._scenes) for (const [id, A] of s.actors) for (const mv of A.moves) {
+    if (mv.kind !== 'exit' || !mv.side) continue;
+    exits++;
+    const box = t => frameInfo(plan, t).actors.find(q => q.id === id)?.screenBox ?? null, inView = b => b && b[2] > 0 && b[0] < W;
+    let seen = false, full = false, last = null;
+    for (let t = mv.t0; t < Math.min(A.end(mv) + 2 * f, s.t1); t += f) {
+      const b = box(t), next = box(t + f), cut = plan.shotAt(t + f) !== plan.shotAt(t);
+      if (inView(b)) seen = true;
+      if (b && b[0] >= 0 && b[2] <= W) full = true;
+      if (b && !next && !cut) assert.ok(!inView(b), `${id} vanishes in view at ${t.toFixed(2)} (${b.map(Math.round)})`);
+      if (b) last = b;
+    }
+    assert.ok(seen, `${id} is seen leaving`);
+    assert.ok(full, `${id} is seen whole in the frame before it leaves (a pan to it arrives in time)`);
+    assert.ok(!inView(last), `${id} is out of frame by the end of its exit or the cut (${last?.map(Math.round)})`);
+  }
+  assert.ok(exits >= 1, 'the test film has an exit');
+});
+
+test('camera: after a push-in to a close-up, a subject that paces about is held: tight while it stays, then eased back', async () => {
+  const x0 = 1300, film = tiny({
+    cast: { pip: { rig: 'squirrel' } },
+    actors: { pip: { at: `x:${x0},y:1100`, face: 'right' } },
+    shots: [{ id: 'p', camera: { size: 'medium', on: ['pip'], move: 'push-in', to: 'close', moveAt: 0, moveDur: 1 }, beats: [
+      { wait: 2.5 },
+      { do: 'run', who: 'pip', to: `x:${x0 + 70},y:1104` }, { do: 'run', who: 'pip', to: `x:${x0 - 50},y:1096` },
+      { do: 'run', who: 'pip', to: `x:${x0 + 70},y:1104` }, { do: 'run', who: 'pip', to: `x:${x0 + 10},y:1100` },
+    ], hold: 0.3 }],
+    W: 1920, H: 1080,
+  });
+  const plan = compile(await loadFilm(film)), s = plan.shots[0], W = plan.W, H = plan.H;
+  const part = b => (Math.max(0, Math.min(W, b[2]) - Math.max(0, b[0])) * Math.max(0, Math.min(H, b[3]) - Math.max(0, b[1]))) / ((b[2] - b[0]) * (b[3] - b[1]));
+  for (let t = s.t0; t < s.t1; t += 1 / 24) {
+    const a = frameInfo(plan, t).actors.find(q => q.id === 'pip');
+    assert.ok(a && part(a.headBox) >= 0.5, `t=${(t - s.t0).toFixed(2)}: the squirrel's head is in frame (${a ? part(a.headBox).toFixed(2) : 'gone'})`);
+  }
+  const z0 = s.cameraAt(s.t0).zoom, zHold = s.cameraAt(s.t0 + 1.6).zoom, zEnd = s.cameraAt(s.t1 - 1e-3).zoom;
+  assert.ok(zHold > z0 * 1.05, `the push-in pushes in (${z0.toFixed(1)} → ${zHold.toFixed(1)})`);
+  assert.ok(zHold > zEnd * 1.2, `the close-up eases back for the pacing (${zHold.toFixed(1)} → ${zEnd.toFixed(1)})`);
+});
+
+test('camera: a static two-shot never moves, even when its subjects come together, and never cuts them; staging too far apart is flagged', async () => {
+  const mk = (hareTo, extra = {}) => tiny({
+    actors: { tortoise: { at: 'x:600,y:1100', face: 'right' }, hare: { at: 'x:1750,y:1100', face: 'left' } },
+    shots: [{ id: 'm', camera: { size: 'medium', on: ['tortoise', 'hare'] }, beats: hareTo ? [{ do: 'walk', who: 'hare', to: `x:${hareTo},y:1100` }] : [{ wait: 3 }], hold: 1.5, ...extra }],
+    W: 1920, H: 1080,
+  });
+  const plan = compile(await loadFilm(mk(1250))), s = plan.shots[0], W = plan.W, c0 = s.cameraAt(s.t0);
+  for (let t = s.t0; t < s.t1; t += 1 / 24) {
+    const fi = frameInfo(plan, t);
+    assert.deepEqual(fi.camera, c0, `t=${(t - s.t0).toFixed(2)}: a static camera holds its one framing`);
+    for (const a of fi.actors) assert.ok(a.screenBox[0] >= -2 && a.screenBox[2] <= W + 2, `t=${(t - s.t0).toFixed(2)}: ${a.id} is in frame (${a.screenBox.map(Math.round)})`);
+  }
+  // standing still: a static frame; standing far apart for the whole shot: a warning about the staging
+  const still = compile(await loadFilm(mk(null))), c = still.shots[0];
+  assert.deepEqual(c.cameraAt(c.t0), c.cameraAt(c.t1 - 1e-3));
+  assert.ok(still.warnings.some(w => w.startsWith('m: the medium shot of tortoise, hare')), still.warnings.join('; '));
+  // a static frame that already comes near the size stays static (a figure that sits down doesn't pull it in)
+  const near = compile(await loadFilm(tiny({
+    actors: { tortoise: { at: 'x:1000,y:1100', face: 'right' }, hare: { at: 'x:1400,y:1100', face: 'left' } },
+    shots: [{ id: 'n', camera: { size: 'full', on: ['tortoise', 'hare'] }, beats: [{ do: 'walk', who: 'hare', to: 'x:1300,y:1100' }, { do: 'pose', who: 'hare', pose: 'sit' }], hold: 1 }],
+    W: 1920, H: 1080,
+  }))).shots[0];
+  assert.deepEqual(near.cameraAt(near.t0), near.cameraAt(near.t1 - 1e-3));
+});
+
+test('framing: heads stay above the caption band at every body size and angle; captions avoid every head, a speaker\'s most', () => {
+  const W = 1920, H = 1080, ELDER = { age: 'elder', hairStyle: 'bun' };
+  const groups = [
+    [rigSub('t', 'tortoise', 900, 1100, 1.75), rigSub('n', 'human', 1150, 1080, 1.0, -1, ELDER)],
+    [rigSub('o', 'owl', 1100, 672, 1.2), rigSub('q', 'squirrel', 1000, 1140, 1.3)],
+    [rigSub('t', 'tortoise', 1000, 1100, 1.75), rigSub('h', 'hare', 1250, 1100, 1.3, -1)],
+  ];
+  for (const subs of groups) for (const size of ['wide', 'full', 'medium']) for (const angle of ['eye', 'low', 'high']) for (const zoomK of [1, 1.15]) {
+    const F = frameSubjects(subs, size, { W, H, angle, zoomK }), Y = y => (y - F.cy) * F.zoom + H / 2;
+    let R = null; for (const s of subs) { const g = regionOf(s, size); R = R ? [Math.min(R[0], g[0]), Math.min(R[1], g[1]), Math.max(R[2], g[2]), Math.max(R[3], g[3])] : g; }
+    const msg = `${subs.map(s => s.id).join('+')}, ${size}, ${angle}, ×${zoomK}`;
+    for (const s of subs) assert.ok(Y(s.head[1] + 0.55 * s.hh) <= CAPTION_BAND * H + 1, `${msg}: ${s.id}'s head clears the captions (${(Y(s.head[1] + 0.55 * s.hh) / H).toFixed(2)} H)`);
+    assert.ok(Y(R[1]) >= 0.05 * H - 1, `${msg}: headroom (${(Y(R[1]) / H).toFixed(2)} H)`);
+  }
+  // a listener's head in the bottom band sends the caption to the top; a speaker's head at the top outweighs it
+  const cap = { text: 'Slow and steady, friend.', style: 'dialogue' }, low = [W / 2 - 80, H * 0.82, W / 2 + 80, H * 0.95], high = [W / 2 - 80, H * 0.02, W / 2 + 80, H * 0.14];
+  assert.equal(layoutCaption(cap, W, H, []).top, false);
+  assert.equal(layoutCaption(cap, W, H, [{ box: low, w: 1 / 3 }]).top, true);
+  assert.equal(layoutCaption(cap, W, H, [{ box: low, w: 1 / 3 }, { box: high, w: 1 }]).top, false);
+});
+
+test('captions: in the test film no caption covers a head in the picture', async () => {
+  const plan = compile(await loadFilm('films/_test')), W = plan.W, H = plan.H;
+  const ov = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  for (let t = 0; t < plan.duration; t += 1 / 4) {
+    const fi = frameInfo(plan, t);
+    for (const c of fi.captions) for (const a of fi.actors) {
+      const h = a.headBox; if (h[2] < 0 || h[0] > W || h[3] < 0 || h[1] > H) continue;
+      const f = ov(c.box, h) / ((h[2] - h[0]) * (h[3] - h[1]));
+      assert.ok(f < 0.08, `${t.toFixed(2)} ${fi.shot}: "${c.text}" covers ${(f * 100).toFixed(0)}% of ${a.id}'s head`);
+    }
+  }
+});
+
+// ═════════════ round 5 ═════════════
+test('eyelines: a look at someone pitches toward their head; "down" keeps the look before it; a speaker with no look talks to the one in front', async () => {
+  const film = tiny({
+    cast: { owl: { rig: 'owl' }, pip: { rig: 'squirrel' } },
+    actors: { tortoise: { at: 'x:520,y:1060', face: 'right' }, owl: { at: 'low_branch', face: 'right' }, hare: { at: 'x:900,y:1060', face: 'left' }, pip: { on: 'tortoise', face: 'right', pose: 'sit' } },
+    shots: [
+      { id: 'a', camera: { size: 'wide' }, beats: [
+        { do: 'look', who: 'tortoise', to: 'owl', at: 0 }, { do: 'look', who: 'owl', to: 'tortoise', at: 0 },
+        { do: 'look', who: 'hare', to: 'tortoise', at: 0 }, { do: 'look', who: 'pip', to: 'tortoise', at: 0 },
+      ], dur: 2 },
+      { id: 'b', camera: { size: 'wide' }, beats: [{ do: 'look', who: 'hare', to: 'down', at: 0 }], dur: 2 },
+    ],
+  });
+  const plan = compile(await loadFilm(film)), st = (id, t) => stateAt(plan, id, t).st;
+  assert.ok(st('tortoise', 1.8).tilt > 0.3, `the tortoise looks up at the owl on its branch (${st('tortoise', 1.8).tilt})`);
+  assert.ok(st('owl', 1.8).tilt < -0.3, `the owl looks down at the tortoise (${st('owl', 1.8).tilt})`);
+  assert.ok(st('hare', 1.8).tilt < 0 && st('hare', 1.8).look < -0.3, 'the hare looks left and down at the tortoise');
+  // a rider and its carrier share a contact x: the rider's eyeline goes forward and down to the carrier's face
+  assert.ok(st('pip', 1.8).look > 0.2 && st('pip', 1.8).tilt < -0.2, `the rider looks down at its carrier's face (${st('pip', 1.8).look}, ${st('pip', 1.8).tilt})`);
+  // "down" pitches all the way and keeps the horizontal target of the look before it
+  near(st('hare', 3.9).tilt, -1, 1e-9); near(st('hare', 3.9).look, st('hare', 1.8).look, 0.05, 'still toward the tortoise');
+  // a speaker who has no look of their own talks to the one in front of them; one who looks at the sky keeps it
+  const talk = tiny({
+    actors: { tortoise: { at: 'x:1200,y:1060', face: 'right' }, hare: { at: 'x:1500,y:1060', face: 'left' } },
+    shots: [{ id: 'a', camera: { size: 'wide' }, beats: [
+      { say: 'tortoise', text: 'Good morning to you, my quick friend.' },
+      { do: 'look', who: 'hare', to: 'sky' }, { say: 'hare', text: 'What a sky we have this morning.' },
+    ] }],
+  });
+  const p2 = compile(await loadFilm(talk)), [l1, l2] = p2.lines, at = (id, L) => stateAt(p2, id, (L.t0 + L.t1) / 2).st;
+  assert.ok(at('tortoise', l1).look > 0.3, `the speaker turns to the hare (${at('tortoise', l1).look})`);
+  near(at('hare', l2).tilt, 1, 1e-9, 'a speaker told to look at the sky keeps looking at it');
+});
+
+test('a turn squashes the drawing through a narrow card over about six frames (not a one-frame mirror)', async () => {
+  const plan = compile(await loadFilm(tiny({ actors: { hare: { at: 'x:1200', face: 'right' } }, shots: [{ id: 'a', camera: { size: 'close', on: ['hare'] }, beats: [{ do: 'turn', who: 'hare', face: 'left', at: 0.5 }], dur: 1.5 }] })));
+  const fr = Array.from({ length: 36 }, (_, k) => stateAt(plan, 'hare', k / 24));
+  const narrow = fr.filter(a => a.squash < 0.9), min = Math.min(...fr.map(a => a.squash));
+  assert.ok(min <= 0.45, `the drawing narrows to a card (${min.toFixed(2)})`);
+  assert.ok(narrow.length >= 5 && narrow.length <= 8, `over about six frames (${narrow.length})`);
+  // it narrows facing one way and opens out facing the other
+  assert.ok(narrow.some(a => a.face === 1) && narrow.some(a => a.face === -1));
+});
+
+test('titles: a measured title stays inside title-safe and is centred over its shot\'s subject', async () => {
+  const film = tiny({
+    W: 640, H: 360, actors: { hare: { at: 'x:1200' } },
+    shots: [{ id: 'a', camera: { size: 'establishing', on: ['stump_top'] }, beats: [{ title: 'THE MORNING RACE', dur: 2 }] }],
+  });
+  const plan = compile(await loadFilm(film)), c = plan.captions.find(q => q.style === 'title'), W = plan.W, H = plan.H;
+  const B = titleBlock(c, W, H), y = titleY(plan, c), x = titleX(plan, c);
+  assert.ok(y - B.above >= TITLE_SAFE * H - 1 && y + B.below <= (1 - TITLE_SAFE) * H + 1, `inside title-safe (${(y / H).toFixed(2)} H)`);
+  const s = plan.shotAt(c.t0), cam = s.cameraAt((c.t0 + c.t1) / 2), sx = (s.set.anchor('stump_top').x - cam.cx) * cam.zoom + W / 2;
+  near(x, clamp(sx, TITLE_SAFE * W + B.w / 2, (1 - TITLE_SAFE) * W - B.w / 2), 1, 'over the stump, as far as title-safe allows');
+  // no subject: centred on the frame
+  const free = compile(await loadFilm(tiny({ W: 640, H: 360, actors: {}, shots: [{ id: 'a', camera: { size: 'establishing' }, beats: [{ title: 'X', dur: 1 }] }] })));
+  near(titleX(free, free.captions.find(q => q.style === 'title')), 320, 1e-9);
+});
+
+test('grades: dawn lights the land rose-gold (not the afternoon\'s yellow-green); a memory plate has a torn page edge that its gradeTo narrows away', async () => {
+  const W = 64, H = 36, meadow = g => {
+    const c = createCanvas(W, H), x = c.getContext('2d'); x.fillStyle = 'rgb(120,160,80)'; x.fillRect(0, 0, W, H);
+    grade(x, g, 0, W, H); const d = x.getImageData(W / 2, H / 2, 1, 1).data; return [d[0], d[1], d[2]];
+  };
+  const dawn = meadow(mixGrade([['dawn', 1]])), aft = meadow(mixGrade([['afternoon', 1]]));
+  assert.ok(dawn[0] / dawn[1] > aft[0] / aft[1] + 0.12, `dawn is warmer and rosier on the grass (${dawn} vs ${aft})`);
+  assert.ok(dawn[2] / dawn[1] > aft[2] / aft[1], 'and pinker (more blue against the green) than afternoon');
+  // the page edge: cream paper at the frame's edge, none in the middle; mixStory narrows it with the grade
+  assert.equal(STORY.memory.deckle, 1); near(mixStory(STORY.memory, null, 0.5).deckle, 0.5, 1e-9);
+  const c = createCanvas(320, 180), x = c.getContext('2d'); x.fillStyle = '#000'; x.fillRect(0, 0, 320, 180);
+  deckle(x, 1, 320, 180);
+  const px = (u, v) => x.getImageData(u, v, 1, 1).data;
+  assert.ok(px(1, 90)[0] > 180 && px(318, 90)[0] > 180 && px(160, 1)[0] > 180 && px(160, 178)[0] > 180, 'cream at every edge');
+  assert.equal(px(160, 90)[0], 0, 'the picture is untouched inside');
+  const c2 = createCanvas(320, 180), x2 = c2.getContext('2d'); x2.fillStyle = '#000'; x2.fillRect(0, 0, 320, 180); deckle(x2, 0.001, 320, 180);
+  assert.equal(x2.getImageData(1, 90, 1, 1).data[0], 0, 'gone once narrowed away');
+});
+
+test('shadows: the sun casts each figure\'s shadow away from the set\'s light, long at golden hour, short at noon, none at night', async () => {
+  assert.ok(SUN.noon.len < SUN.afternoon.len && SUN.afternoon.len < SUN.golden.len && SUN.golden.len < SUN.sunset.len);
+  assert.equal(SUN.night.a, 0); assert.equal(sunOf([['night', 1]]).a, 0);
+  near(sunOf([['noon', 0.5], ['golden', 0.5]]).len, (SUN.noon.len + SUN.golden.len) / 2, 1e-9);
+  // the same frame with and without the hare (the camera is on an anchor, so it doesn't move): what the hare adds
+  // beside its feet is its shadow
+  const mk = (time, hare = true) => tiny({ W: 640, H: 360, scene: { time }, actors: { hare: hare ? { at: 'meadow_centre', face: 'right' } : { offstage: 'right' } }, shots: [{ id: 'a', camera: { size: 'full', on: ['meadow_centre'] }, dur: 3 }] });
+  const img = (plan, t) => { const c = createCanvas(plan.W, plan.H), x = c.getContext('2d'); drawFrame(x, plan, t); return x.getImageData(0, 0, plan.W, plan.H).data; };
+  const t = 2, cast = async time => {
+    const with_ = compile(await loadFilm(mk(time))), without = compile(await loadFilm(mk(time, false)));
+    const a = frameInfo(with_, t).actors[0], cy = a.contact.screen[1], h = a.screenBox[3] - a.screenBox[1], A = img(with_, t), B = img(without, t);
+    // mean darkening (0..255, green) in a box beside the feet, outside the hare's own drawing
+    const box = (x0, x1) => { let s = 0, n = 0; for (let y = Math.round(cy - 2); y < Math.round(cy + 0.2 * h); y++) for (let x = Math.max(0, Math.round(x0)); x < Math.min(with_.W, Math.round(x1)); x++) { const i = (y * with_.W + x) * 4; s += B[i + 1] - A[i + 1]; n++; } return s / n; };
+    return { right: box(a.screenBox[2] + 0.05 * h, a.screenBox[2] + 0.7 * h), left: box(a.screenBox[0] - 0.7 * h, a.screenBox[0] - 0.05 * h) };
+  };
+  // the meadow's light is upper left, so the golden-hour shadow falls to the right
+  const g = await cast('golden');
+  assert.ok(g.right > 4 && g.right > 4 * Math.max(0.5, Math.abs(g.left)), `the shadow falls to the right of the hare (right ${g.right.toFixed(1)}, left ${g.left.toFixed(1)})`);
+  // a noon shadow stays at the feet; at night nothing is cast
+  const n = await cast('noon'), dark = await cast('night');
+  assert.ok(n.right < g.right / 2, `noon's shadow is short (${n.right.toFixed(1)} vs ${g.right.toFixed(1)})`);
+  assert.ok(Math.abs(dark.right) < 0.5 && Math.abs(dark.left) < 0.5, `no shadow at night (${dark.right.toFixed(2)})`);
 });

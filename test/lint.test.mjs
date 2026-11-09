@@ -203,7 +203,7 @@ test('scale, subject-size and caption-face', async () => {
 
 // ───────────── riding, wading, cast scale (DESIGN §9.4) ─────────────
 // R (meadow): a squirrel rides a big tortoise (cast scale 1.3) through a full shot while it talks, hops off and back
-// on, then a close-up of a tiny tortoise (cast scale 0.55) at the closest zoom and a pull-out from medium to wide.
+// on, then a close-up of a tiny tortoise (cast scale 0.55) and a pull-out from medium to wide.
 // W (stream): the tortoise wades across with the squirrel on its back (half under, depth 30 units) while the squirrel
 // talks, then wades back in and goes fully under, and speaks from there (the one fault, on purpose).
 // Scene overlays, marks, fx and sfx beats are sprinkled in: none of them may trip a rule.
@@ -295,11 +295,12 @@ test('a wading actor may stand in the water and is judged by what shows above it
 test('a cast member scaled down that the closest zoom cannot fill is judged at scale 1; a zoom move to another size at its start', async () => {
   const { plan } = await riding();
   const r3 = shotOf(plan, 'r3'), [t0, t1] = mid(r3);
-  assert.ok(r3.cameraAt((t0 + t1) / 2).zoom >= ZMAX * 0.98, 'the close-up of the tiny tortoise is at the closest zoom');
+  // since the zoom cap went from 12 to 36 the camera can really close in on a 0.55-scale tortoise
+  assert.ok(r3.cameraAt((t0 + t1) / 2).zoom > 12, 'the close-up of the tiny tortoise closes in past the old zoom cap');
   assert.equal(lintPlan(plan, { rules: ['subject-size'] }).warnings.length, 0);
   // half as big again is too small even at scale 1
   const small = lintPlan(perturb(plan, t0, t1, a => (a.id === 'tiny' ? { ...a, s: a.s * 0.5 } : a)), { rules: ['subject-size'] }).warnings;
-  assert.ok(small.some(x => x.shot === 'r3' && x.actor === 'tiny' && /closest zoom.*cast scale 0\.55/.test(x.message)), JSON.stringify(small));
+  assert.ok(small.some(x => x.shot === 'r3' && x.actor === 'tiny' && /fills \d+% of the frame height/.test(x.message)), JSON.stringify(small));
   // r4 ends at a wide framing: the medium-shot size would be far too small there
   const r4 = shotOf(plan, 'r4'), end = actorsOf(plan, r4.t1 - 2 / plan.fps).get('shell');
   assert.ok((end.screenBox[3] - end.screenBox[1]) / plan.H < 0.5 * 0.75, 'the pull-out really ends wide');

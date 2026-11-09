@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { canvas } from '../engine/core/lib.mjs';
-import rig, { POSES, GAITS, GESTURES, EXPR, skeleton, metrics, look, mixPose, sheetSection } from '../engine/cast/human.mjs';
+import rig, { POSES, GAITS, GESTURES, EXPR, skeleton, clothes, metrics, look, mixPose, sheetSection } from '../engine/cast/human.mjs';
 
 const AGES = ['child', 'teen', 'adult', 'elder'];
 const REQUIRED_POSES = ['stand', 'idle-weight-shift', 'sit-ground', 'sit-seat', 'crouch', 'kneel', 'lie', 'sleep', 'look-up', 'hands-on-hips', 'arms-crossed', 'reach-up', 'carry', 'hold-hand-out'];
@@ -436,4 +436,215 @@ test('accessories: false / null / "none" = not worn; material names (brass, gold
   assert.equal(look({ scarf: 'zzz' }).scarf, look({ scarf: true }).scarf);
   assert.notEqual(look({ glasses: 'gold' }).glasses, '#888888');
   assert.equal(pixDiff(face({ age: 'elder' }), face({ age: 'elder', glasses: 'none' })), 0, 'glasses "none" draws no glasses');
+});
+
+// ───────────────────────── round 3: the painted human (arms, hands, cardigan, cloth that turns) ─────────────────────────
+// Pixels of the torso between the neck and the waist, standing, scale 3 (shadow off).
+function torsoBand(params, faceDir = 1) {
+  const s = 3, W = 400, H = 760, [c, x] = canvas(W, H); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+  rig.draw(x, W / 2, H - 20, s, faceDir, { params, shadow: false, t: 0.5 });
+  const sk = skeleton(POSES.stand, params), y0 = Math.round(H - 20 + (sk.neck[1] + 12) * s), y1 = Math.round(H - 20 + (sk.hip[1] - 14) * s);
+  return x.getImageData(0, y0, W, y1 - y0).data;
+}
+const rgbOf = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const nearRgb = (d, [r, g, b], tol) => { let n = 0; for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - r) + Math.abs(d[i + 1] - g) + Math.abs(d[i + 2] - b) < tol) n++; return n; };
+
+test('look(): top "cardigan" is the elders\' default, worn over `under` (the dress colour when one is given); anything else is a shirt', () => {
+  assert.equal(look({ age: 'elder' }).top, 'cardigan');
+  for (const age of ['child', 'teen', 'adult']) assert.equal(look({ age }).top, 'shirt', age);
+  assert.equal(look({ age: 'elder', top: 'poncho' }).top, 'shirt', 'unknown top → shirt');
+  assert.equal(look({ age: 'adult', top: 'cardigan' }).top, 'cardigan');
+  assert.equal(look(NELL).top, 'cardigan', 'Nell wears her cardigan without the film saying so');
+  assert.equal(look(NELL).under, '#5f6f8c', 'her blue dress shows under it');
+  assert.equal(look({ ...NELL, under: 'cream' }).under, '#efe4c8');
+  assert.match(look({ age: 'elder' }).under, /^#[0-9a-f]{6}$/, 'a pale blouse when there is no dress colour');
+});
+
+test('the cardigan hangs open: the dress shows down the front between its button bands (a shirt hides it)', () => {
+  for (const f of [1, -1]) {
+    const open = nearRgb(torsoBand({ ...NELL, scarf: false }, f), rgbOf('#5f6f8c'), 30), shut = nearRgb(torsoBand({ ...NELL, scarf: false, top: 'shirt' }, f), rgbOf('#5f6f8c'), 30);
+    assert.ok(open > 400 && shut < 60, `face ${f}: dress pixels through the opening ${open}, under a shirt ${shut}`);
+  }
+});
+
+test('cloth turns: the cardigan, the smock and a shirt each carry a broad shadow side, never a flat slab', () => {
+  const CL = rgbOf('#ab9fcb');
+  for (const [name, params, col] of [['Nell\'s cardigan', { ...NELL, scarf: false }, '#cdbfa3'], ['young Nell\'s smock', { ...YOUNG, scarf: false }, '#d9a441'], ['a shirt', { age: 'adult' }, '#6f9a6a']]) for (const f of [1, -1]) {
+    const d = torsoBand(params, f), c = rgbOf(col), lit = nearRgb(d, c, 24), shade = nearRgb(d, c.map((v, i) => (v * CL[i]) / 255), 24);
+    assert.ok(lit > 1000, `${name} face ${f}: lit cloth ${lit}`);
+    assert.ok(shade / (lit + shade) > 0.15, `${name} face ${f}: shadow side ${shade} of ${lit + shade} px`);
+  }
+});
+
+test('arms bend forward at the elbow in every relaxed pose and gait phase (no straight sticks, no hyperextension)', () => {
+  const bend = a => { const u = [a.elbow[0] - a.shoulder[0], a.elbow[1] - a.shoulder[1]], v = [a.wrist[0] - a.elbow[0], a.wrist[1] - a.elbow[1]]; return -Math.atan2(u[0] * v[1] - u[1] * v[0], u[0] * v[0] + u[1] * v[1]); };
+  const frames = [...['stand', 'idle-weight-shift', 'look-up', 'sit-ground', 'sit-seat', 'crouch', 'kneel', 'carry', 'hold-hand-out'].map(k => [k, POSES[k]]),
+    ...[0, 0.2, 0.4, 0.6, 0.8].flatMap(u => [[`walk ${u}`, GAITS.walk(u)], [`run ${u}`, GAITS.run(u)]]), ['laugh seated', GESTURES.laugh.at(0.4, POSES['sit-ground'])], ['gasp', GESTURES.gasp.at(0.5, POSES['sit-ground'])]];
+  for (const age of AGES) for (const [name, pose] of frames) {
+    const sk = skeleton(pose, { age });
+    for (const side of ['front', 'back']) { const b = bend(sk[side].arm); assert.ok(b > 0.25 && b < 2.6, `${age} ${name} ${side} elbow ${b.toFixed(2)} rad`); }
+  }
+});
+
+test('cardigans and full sleeves stay inside draw() bounds in every pose, gesture and gait', () => {
+  const looks = [NELL, { age: 'elder' }, { age: 'adult', top: 'cardigan', bottom: 'dress', dress: '#d9894a' }];
+  const poses = [...Object.values(POSES), ...Object.values(GESTURES).map(g => g.at(0.5, POSES.stand)), GAITS.walk(0.3), GAITS.run(0.6)];
+  const W = 760, Hc = 620, s = 2, X = 380, Y = 560;
+  for (const params of looks) for (const pose of poses) for (const f of [1, -1]) {
+    const [c, x] = canvas(W, Hc), r = rig.draw(x, X, Y, s, f, { pose, params, shadow: false, t: 1.3 }), d = x.getImageData(0, 0, W, Hc).data;
+    let x0 = W, x1 = -1, y0 = Hc;
+    for (let yy = 0; yy < Hc; yy++) for (let xx = 0; xx < W; xx++) if (d[(yy * W + xx) * 4 + 3] > 60) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (yy < y0) y0 = yy; }
+    const over = Math.max(r.bounds[0] - x0, x1 - r.bounds[2], r.bounds[1] - y0) / s;
+    assert.ok(over < 2, `${JSON.stringify(params).slice(0, 50)} face ${f}: paint ${over.toFixed(1)} units past the bounds`);
+  }
+});
+
+// ───────────────────────── round 3 review: cuffs, the shoulder overlay, the cardigan when she bends ─────────────────────────
+// The near hand at zoom 8 in an ID skin colour: skin pixels past the wrist within reach of the hand, and the fraction
+// of skin in a strip just before the wrist (where the bare wrist shows between the cuff and the hand).
+function handSkin(params, pose, f) {
+  const z = 8, W = 380, sk = skeleton(pose, params), a = sk.front.arm, h = sk.metrics.hand, R = sk.metrics.wristW;
+  const v = [a.wrist[0] - a.elbow[0], a.wrist[1] - a.elbow[1]], L = Math.hypot(v[0], v[1]), t = [v[0] / L, v[1] / L];
+  const X = W / 2 - a.wrist[0] * z * f, Y = W / 2 - a.wrist[1] * z, [c, x] = canvas(W, W);
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W, W);
+  rig.draw(x, X, Y, z, f, { pose, params: { ...params, skin: '#e8402c' }, shadow: false, t: 0.4 });
+  const d = x.getImageData(0, 0, W, W).data;
+  let hand = 0, strip = 0, stripSkin = 0;
+  for (let py = 0; py < W; py++) for (let px = 0; px < W; px++) {
+    const q = [(px - X) / (z * f) - a.wrist[0], (py - Y) / z - a.wrist[1]], al = q[0] * t[0] + q[1] * t[1], pe = Math.abs(q[0] * t[1] - q[1] * t[0]);
+    const i = (py * W + px) * 4, skin = d[i] > 120 && d[i] > 2.2 * d[i + 1] && d[i] > 2.2 * d[i + 2];
+    if (al >= 0 && al < 1.1 * h && pe < 0.4 * h && skin) hand++;   // the near mitten's own footprint (the far hand can lie close by)
+    if (al > -0.2 * h && al < -0.06 * h && pe < R * 0.45) { strip++; if (skin) stripSkin++; }
+  }
+  return { hand, wrist: stripSkin / (strip || 1) };
+}
+const HAND_FRAMES = [[NELL, 'stand', POSES.stand], [NELL, 'hold-hand-out', POSES['hold-hand-out']], [NELL, 'crouch', POSES.crouch], [NELL, 'sit-ground', POSES['sit-ground']],
+  [YOUNG, 'sit-ground', POSES['sit-ground']], [YOUNG, 'point seated', GESTURES.point.at(0.5, POSES['sit-ground'])], [YOUNG, 'hold-hand-out', POSES['hold-hand-out']], [YOUNG, 'stand', POSES.stand]];
+
+test('cuffs never hide the hand, and a bare wrist shows between the cuff and the hand (both Nells)', () => {
+  for (const [params, name, pose] of HAND_FRAMES) for (const f of [1, -1]) {
+    const who = params === NELL ? 'Nell' : 'young Nell', long = handSkin(params, pose, f), bare = handSkin({ ...params, sleeves: 'short' }, pose, f);
+    assert.ok(long.hand / bare.hand > 0.95, `${who} ${name} face ${f}: the cuff hides ${(100 - (100 * long.hand) / bare.hand).toFixed(0)}% of the hand`);
+    assert.ok(long.wrist > 0.6, `${who} ${name} face ${f}: only ${(100 * long.wrist).toFixed(0)}% bare wrist before the hand`);
+  }
+});
+
+test('the shoulder overlay keeps the braids on top of the scarf: the scarf ring never paints over a braid', () => {
+  const frames = [['sit-ground', POSES['sit-ground']], ['point seated', GESTURES.point.at(0.5, POSES['sit-ground'])], ['laugh seated', GESTURES.laugh.at(0.5, POSES['sit-ground'])], ['stand', POSES.stand], ['carry', POSES.carry], ['clap', GESTURES.clap.at(0.5, POSES.stand)]];
+  const hair = (scarf, pose, f) => {
+    const [c, x] = canvas(520, 520); x.fillStyle = '#fff'; x.fillRect(0, 0, 520, 520);
+    const sk = skeleton(pose, YOUNG), z = 7; rig.draw(x, 260 - sk.neck[0] * z * f, 260 - sk.neck[1] * z, z, f, { pose, params: { ...YOUNG, hair: '#2050ff', scarf }, shadow: false, t: 0.4 });
+    const d = x.getImageData(0, 0, 520, 520).data; let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 2] > 140 && d[i + 2] > 1.6 * d[i] && d[i + 2] > 1.25 * d[i + 1]) n++;
+    return n;
+  };
+  for (const [name, pose] of frames) for (const f of [1, -1]) {
+    const a = hair('#5e7b3f', pose, f), b = hair(false, pose, f);
+    assert.ok(Math.abs(a - b) / b < 0.01, `${name} face ${f}: ${a} hair px with the scarf, ${b} without`);
+  }
+});
+
+const segX = (a, b, c, d) => { const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])); return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0; };
+const crossings = (P, closed) => { const n = P.length, m = closed ? n : n - 1; let k = 0; for (let i = 0; i < m; i++) for (let j = i + 2; j < m; j++) if (!(closed && i === 0 && j === m - 1) && segX(P[i], P[(i + 1) % n], P[j], P[(j + 1) % n])) k++; return k; };
+const insidePoly = (P, q) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > q[1]) !== (P[j][1] > q[1]) && q[0] < ((P[j][0] - P[i][0]) * (q[1] - P[i][1])) / (P[j][1] - P[i][1]) + P[i][0]) c = !c; return c; };
+const segDist = (q, a, b) => { const d = [b[0] - a[0], b[1] - a[1]], t = Math.max(0, Math.min(1, ((q[0] - a[0]) * d[0] + (q[1] - a[1]) * d[1]) / (d[0] ** 2 + d[1] ** 2 || 1))); return Math.hypot(q[0] - a[0] - t * d[0], q[1] - a[1] - t * d[1]); };
+const polyDist = (P, q) => Math.min(...P.map((a, i) => segDist(q, a, P[(i + 1) % P.length])));
+const BENT = [['stand', POSES.stand], ['crouch', POSES.crouch], ['sit-ground', POSES['sit-ground']], ['kneel', POSES.kneel], ['bow', GESTURES.bow.at(0.5, POSES.stand)], ['laugh', GESTURES.laugh.at(0.5, POSES.stand)],
+  ['gasp seated', GESTURES.gasp.at(0.5, POSES['sit-ground'])], ['walk', GAITS.walk(0.3)], ['crouch → sit', mixPose(POSES.crouch, POSES['sit-ground'], 0.5)], ['stand → crouch', mixPose(POSES.stand, POSES.crouch, 0.7)], ['lie', POSES.lie]];
+
+test('the cardigan hangs as one smooth curve when she bends: its outline and open front never fold over themselves', () => {
+  for (const params of [NELL, { age: 'adult', build: 'sturdy', top: 'cardigan' }]) for (const [name, pose] of BENT) {
+    const { cardigan: c } = clothes(pose, params);
+    assert.equal(crossings(c.outline, true), 0, `${params.age} ${name}: the outline folds`);
+    for (const k of ['edgeNear', 'edgeFar']) assert.equal(crossings(c[k], false), 0, `${params.age} ${name}: ${k} folds`);
+  }
+});
+
+test('no cardigan button sits on the pocket, in any pose', () => {
+  for (const [name, pose] of BENT) {
+    const { cardigan: c } = clothes(pose, NELL);
+    for (const b of c.buttons) {
+      const d = polyDist(c.pocket, b.c);
+      assert.ok(!insidePoly(c.pocket, b.c) && d > b.r + 0.8, `${name}: the button at s=${b.s} is ${d.toFixed(2)} units from the pocket edge (radius ${b.r.toFixed(2)})`);
+    }
+  }
+});
+
+test('the skirt never shows through the side of the cardigan above its hem', () => {
+  for (const [name, pose] of BENT) {
+    const { cardigan: c, skirt } = clothes(pose, NELL), [hb, hf] = c.hem, neck = skeleton(pose, NELL).neck;
+    const e = [hf[0] - hb[0], hf[1] - hb[1]], L = Math.hypot(e[0], e[1]), side = q => (e[0] * (q[1] - hb[1]) - e[1] * (q[0] - hb[0])) / L, along = q => (e[0] * (q[0] - hb[0]) + e[1] * (q[1] - hb[1])) / L / L;
+    const up = Math.sign(side(neck));                 // above the hem, and not out in front of the open front (over the knees)
+    for (const q of skirt) if (side(q) * up > 1 && along(q) < 0.95 && !insidePoly(c.outline, q)) {
+      const d = polyDist(c.outline, q);
+      assert.ok(d < 0.6, `${name}: the skirt shows ${d.toFixed(2)} units outside the cardigan above its hem at (${q[0].toFixed(1)}, ${q[1].toFixed(1)})`);
+    }
+  }
+});
+
+// ── round 4: an aimed point, the look's screen direction, the bun ──
+const elev = (a, b) => Math.atan2(-(b[1] - a[1]), b[0] - a[0]);     // elevation of a → b, radians above the horizontal
+const pointSk = (o, params, st = {}, base = POSES.stand, u = 0.5) => skeleton(GESTURES.point.at(u, base, o), params, st);
+
+test('point aims along the eyeline (st.tilt), a named aim, an elevation or a target point', () => {
+  for (const age of ['child', 'adult', 'elder']) for (const base of [POSES.stand, POSES['sit-ground']]) {
+    const fore = (o, st) => { const a = pointSk(o, { age }, st, base).front.arm; return elev(a.elbow, a.wrist); };   // the forearm carries the aim
+    const tag = `${age} ${base.seat ? 'sitting' : 'standing'}`;
+    assert.ok(fore(undefined, { tilt: 1 }) > 0.6, `${tag}: looking at the sky she points up`);
+    assert.ok(fore(undefined, { tilt: -0.6 }) < -0.2, `${tag}: looking down she points down`);
+    assert.ok(Math.abs(fore(undefined, {})) < 0.2, `${tag}: a level gaze points level`);
+    assert.ok(fore({ to: 'up' }) > 0.6 && fore({ to: 'sky' }) > 0.6, `${tag}: to up / sky`);
+    assert.ok(fore({ to: 'down' }) < -0.2, `${tag}: to down`);
+    assert.ok(Math.abs(fore({ to: 0.3 }) - 0.3) < 0.15, `${tag}: to an elevation`);
+    // a target point: the shoulder → hand line runs at it (or, where a child's face is in the way, the elbow goes first
+    // and the forearm carries the aim)
+    for (const tgt of [[120, -60], [150, -5], [90, -200]]) {
+      const a = pointSk({ to: tgt }, { age }, {}, base).front.arm, e = elev(a.shoulder, tgt);
+      assert.ok(Math.min(Math.abs(elev(a.shoulder, a.wrist) - e), Math.abs(elev(a.elbow, a.wrist) - e)) < 0.05, `${tag}: at [${tgt}]`);
+    }
+  }
+  // the shorthands a storyboard can name, and the plain point without an aim is unchanged by them
+  for (const [g, up] of [['point-up', true], ['point-down', false]]) {
+    const a = skeleton(GESTURES[g].at(0.5, POSES.stand), { age: 'adult' }).front.arm, e = elev(a.elbow, a.wrist);
+    assert.ok(up ? e > 0.6 : e < -0.2, `${g}: ${e.toFixed(2)}`);
+  }
+  // the point eases in and out of the base pose, and the hand goes straight to pointing (no open palm or fist between)
+  const s0 = skeleton(POSES.stand, { age: 'adult' }).front.arm.wrist, s1 = pointSk(undefined, { age: 'adult' }, { tilt: 1 }, POSES.stand, 1).front.arm.wrist;
+  assert.ok(Math.hypot(s0[0] - s1[0], s0[1] - s1[1]) < 1e-6, 'at u = 1 the arm is back where the pose holds it');
+  for (let u = 0; u <= 1; u += 0.05) assert.ok([0, 3].includes(GESTURES.point.at(u, POSES.stand).hF), `hand at u=${u.toFixed(2)}`);
+});
+
+test('a child points up at the sky elbow-first: the arm passes in front of her face, never across her mouth', () => {
+  const seg = (p, a, b) => { const d = [b[0] - a[0], b[1] - a[1]], u = clamp01(((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / (d[0] ** 2 + d[1] ** 2)); return Math.hypot(p[0] - a[0] - u * d[0], p[1] - a[1] - u * d[1]); };
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+  for (const base of [POSES.stand, POSES['sit-ground']]) for (const [o, st] of [[undefined, { tilt: 1 }], [{ to: 'up' }, {}]]) {
+    const sk = pointSk(o, { age: 'child' }, st, base), a = sk.front.arm, M = sk.metrics;
+    const d = Math.min(seg(sk.mouth, a.shoulder, a.elbow), seg(sk.mouth, a.elbow, a.wrist));
+    assert.ok(d > M.armW * 1.5, `the arm is ${d.toFixed(1)} units from her mouth (sleeve ${(M.armW * 1.24).toFixed(1)})`);
+    assert.ok(elev(a.elbow, a.wrist) > 0.6, 'and the forearm still points up');
+  }
+});
+
+test('st.look is in screen direction: a left-facing person looks the same way a right-facing one does, mirrored', () => {
+  const l = rig.draw(null, 0, 0, 1, -1, { look: -0.8 }), r = rig.draw(null, 0, 0, 1, 1, { look: 0.8 }), z = rig.draw(null, 0, 0, 1, 1, {});
+  assert.ok(Math.abs(l.eye[0] + r.eye[0]) < 1e-9 && Math.abs(l.eye[1] - r.eye[1]) < 1e-9, 'looking forward, facing either way');
+  assert.ok(Math.abs(r.eye[0] - z.eye[0]) > 1, 'the look turns the head');
+  // a pointing arm follows: facing left and looking up, the hand is up and in front of her (screen left)
+  const p = GESTURES.point.at(0.5, POSES.stand), up = rig.draw(null, 0, 0, 1, -1, { pose: p, tilt: 1, params: { age: 'adult' } }), sk = skeleton(POSES.stand, { age: 'adult' });
+  assert.ok(up.hands.front[1] < sk.head[1] && up.hands.front[0] < -20, `hand at ${up.hands.front.map(v => v.toFixed(0))}`);
+});
+
+test('the bun is a coil at the back of the head, not a bobble perched on top', () => {
+  const sil = params => {
+    const W = 420, [c, x] = canvas(W, W), s = 3.5, sk = skeleton(POSES.stand, params);
+    rig.draw(x, W / 2 - sk.head[0] * s, W / 2 - sk.head[1] * s, s, 1, { params, shadow: false });
+    const d = x.getImageData(0, 0, W, W).data; let top = W, back = W;
+    for (let y = 0; y < W; y++) for (let i = 0; i < W; i++) if (d[(y * W + i) * 4 + 3] > 40) { top = Math.min(top, y); if (y < W / 2) back = Math.min(back, i); }
+    return { top, back, k: sk.metrics.k * s };
+  };
+  for (const age of ['elder', 'adult', 'child']) {
+    const bun = sil({ age, hairStyle: 'bun', hair: '#d9d6d0' }), short = sil({ age, hairStyle: 'short', hair: '#d9d6d0' });
+    assert.ok(bun.top >= short.top - 0.04 * bun.k, `${age}: the bun adds no height (${bun.top} vs ${short.top})`);
+    assert.ok(bun.back <= short.back - 0.1 * bun.k, `${age}: the bun stands out behind the head (${bun.back} vs ${short.back})`);
+  }
 });

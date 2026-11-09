@@ -6,10 +6,12 @@
 // read at validation time so there is one source of truth. Round 2 (DESIGN §9.1) adds: say tts / trimEnd, mark
 // beats (unique names), riding ("on:<actor>" for hop / place, scene actors { on }), wade / depth, look to up / sky /
 // down, camera to / toOn / zoomTo / moveAt / moveDur / offset, shot time / grade / gradeTo / music, scene overlays
-// and rim, music motif / motifVoice / hold / downbeat / tempo, the film's score, touch / contact on any beat.
+// and rim, music motif / motifVoice / hold / downbeat / tempo, the film's score, touch / contact on any beat; title
+// beats' place (a TITLE_PLACES name, "auto" or a fraction of the frame height).
 import * as SFX from '../audio/sfx.mjs';
 import * as MUSIC from '../audio/music.mjs';
 import { parseTarget, rigPose, poseNames } from './util.mjs';
+import { TITLE_PLACES } from './text.mjs';
 
 export const SIZES = ['establishing', 'wide', 'full', 'medium', 'close', 'extreme-close'];
 export const MOVES = ['static', 'push-in', 'pull-out', 'pan', 'track', 'tilt-up', 'tilt-down', 'handheld'];
@@ -42,7 +44,7 @@ const BEAT_KEYS = {
   fx: ['fx', 'dur', 'on', 'who', 'size', 'n', 'dir', 'color'],
   music: ['music', 'mood', 'intensity', 'sting', 'name', 'key', ...MUSIC_EXTRAS],
   wait: ['wait'],
-  title: ['title', 'sub', 'subtitle', 'dur'],
+  title: ['title', 'sub', 'subtitle', 'dur', 'place'],
   mark: ['mark'],
   do: ['do', 'who', 'to', 'from', 'speed', 'gait', 'pose', 'dur', 'expr', 'name', 'face', 'params', 'run', 'look', 'end', 'over', 'height', 'alpha', 'wade', 'depth'],
 };
@@ -328,6 +330,7 @@ export function validateFilm(film, ctx) {
         } else if (kind === 'title') {
           if (typeof b.title !== 'string') P(`${bp}.title`, 'must be a string');
           if (b.dur !== undefined && !(isNum(b.dur) && b.dur > 0)) P(`${bp}.dur`, 'must be a positive number of seconds');
+          if (b.place !== undefined && b.place !== null && b.place !== 'auto' && !TITLE_PLACES[b.place] && !(isNum(b.place) && b.place > 0 && b.place < 1)) P(`${bp}.place`, `must be "auto", one of ${Object.keys(TITLE_PLACES).join(', ')}, or a fraction of the frame height (0..1) for the title line`);
         } else if (kind === 'do') {
           const d = b.do, R = rigOf[b.who];
           if (!DO.includes(d)) { P(`${bp}.do`, `unknown action "${d}" (one of ${DO.join(', ')})`); return; }

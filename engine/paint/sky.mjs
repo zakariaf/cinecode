@@ -61,14 +61,24 @@ function milkyWay(x, r, w, h) {
   for (let i = 0; i < 1400; i++) { const u = r(), px = u * w, py = yAt(u) + (r() - 0.5) * 170 * r() * r(); x.fillStyle = `rgba(255,252,240,${0.15 + r() * 0.45})`; x.beginPath(); x.arc(px, py, 0.45 + r() * 0.5, 0, 7); x.fill(); }
   x.restore();
 }
-function moon(x, cx, cy, rad, phase, skyCol) {
-  glow(x, cx, cy, rad, rad * 7, '220,228,255', 0.35);
-  const [m, mx] = canvas(Math.ceil(rad * 2 + 8), Math.ceil(rad * 2 + 8)), c = rad + 4;
-  mx.fillStyle = '#f4f1e0'; path(mx, ell(c, c, rad, rad, 93, 0.6)); mx.fill();
-  mx.fillStyle = 'rgba(196,192,172,.55)';
-  for (const [a, b, s] of [[-0.3, -0.2, 0.22], [0.25, 0.15, 0.17], [-0.1, 0.38, 0.14], [0.35, -0.35, 0.1], [-0.42, 0.18, 0.09]]) { mx.beginPath(); mx.arc(c + a * rad, c + b * rad, s * rad, 0, 7); mx.fill(); }
-  mx.globalCompositeOperation = 'multiply'; mx.fillStyle = 'rgba(200,196,230,.5)'; mx.beginPath(); mx.arc(c + rad * 0.35, c + rad * 0.2, rad * 0.95, 0, 7); mx.fill();
-  if (phase) { mx.globalCompositeOperation = 'destination-out'; mx.beginPath(); mx.arc(c + rad * phase, c - rad * 0.18, rad * 0.98, 0, 7); mx.fill(); }
+// The moon: a cream face with soft grey seas and a thin cool cel shade along the limb away from its light, the seas
+// and the shade clipped to the disc so nothing spills past the limb. phase > 0 cuts it to a crescent lit on the left,
+// phase < 0 to one lit on the right (a full moon is lit from the upper left); the dark part keeps a faint ghost of the disc.
+function moon(x, cx, cy, rad, phase) {
+  const lit = phase < 0 ? 1 : -1, c = Math.ceil(rad * 1.3) + 4, [m, mx] = canvas(2 * c, 2 * c), disc = ell(c, c, rad, rad, 93, 0.6), r = rng(93);
+  glow(x, cx, cy, rad * 0.6, rad * 7, '220,228,255', 0.35);
+  mx.fillStyle = '#f6f2e0'; path(mx, disc); mx.fill();
+  mx.save(); path(mx, disc); mx.clip();
+  mx.fillStyle = 'rgba(190,186,172,.42)';
+  for (const [a, b, s] of [[-0.28, -0.22, 0.26], [0.22, 0.12, 0.2], [-0.08, 0.36, 0.16], [0.34, -0.36, 0.11], [-0.44, 0.16, 0.1], [0.05, -0.05, 0.12]]) blob(mx, c + a * rad, c + b * rad, s * rad, s * rad * 0.8, r() * 3, r, 9);
+  // the shade: the disc outside a circle shifted toward the light (even-odd), a crescent on the far limb
+  mx.globalCompositeOperation = 'multiply'; mx.fillStyle = 'rgba(196,194,232,.62)';
+  mx.beginPath(); mx.rect(0, 0, 2 * c, 2 * c); mx.arc(c + lit * rad * 0.24, c - rad * 0.16, rad * 0.98, 0, 7); mx.fill('evenodd');
+  mx.restore();
+  if (phase) {
+    mx.globalCompositeOperation = 'destination-out'; mx.beginPath(); mx.arc(c + rad * phase, c - rad * 0.18, rad * 0.98, 0, 7); mx.fill();
+    mx.globalCompositeOperation = 'destination-over'; mx.fillStyle = 'rgba(206,212,240,.1)'; path(mx, disc); mx.fill();
+  }
   x.drawImage(m, cx - c, cy - c);
 }
 
@@ -86,7 +96,7 @@ export const SKY_STYLE = {
     clouds: { n: 7, y: [0.1, 0.48], pal: ['#9e7f9c', '#c99aa2', '#f2b89a', '#ffdcb0'], light: [0.6, 0.55], kind: 'cumulus', size: 0.9 }, haze: '246,214,176' },
   sunset: { grad: [[0, '#3c3a72'], [0.32, '#8a5a88'], [0.52, '#e2786a'], [0.68, '#ff9a5c'], [0.82, '#ffc27a'], [1, '#ffd89a']], sun: { x: 0.7, y: 0.8, r: 58, col: '#ffe6b0', rgb: '255,150,90', glow: 1000, a: 1 },
     clouds: { n: 4, y: [0.12, 0.4], pal: ['#5a3c66', '#8a4a6a', '#d0606a', '#ffa070'], light: [0.5, 0.8], kind: 'cumulus', size: 0.7 }, streaks: { n: 9, y: [0.45, 0.74], pal: ['#7a4a72', '#a85a72', '#d8706e', '#f09070'] }, haze: '232,160,140', stars: 40 },
-  twilight: { grad: [[0, '#141c40'], [0.4, '#3c3c6c'], [0.62, '#86607e'], [0.78, '#e08a6c'], [1, '#f2b484']], moon: { x: 0.24, y: 0.3, r: 30, phase: 0.55 },
+  twilight: { grad: [[0, '#141c40'], [0.4, '#3c3c6c'], [0.62, '#86607e'], [0.78, '#e08a6c'], [1, '#f2b484']], moon: { x: 0.24, y: 0.3, r: 44, phase: 0 },
     clouds: { n: 4, y: [0.3, 0.55], pal: ['#3a3058', '#5a4468', '#8a5670', '#c47070'], light: [0.6, 0.6], kind: 'cumulus', size: 0.7 }, streaks: { n: 5, y: [0.62, 0.76], pal: ['#9a5c70', '#c46c6c', '#d88470'] }, haze: '128,112,150', stars: 320 },
   night: { grad: [[0, '#081028'], [0.45, '#18264e'], [0.78, '#2e3a68'], [1, '#424a76']], moon: { x: 0.3, y: 0.24, r: 44, phase: 0 },
     clouds: { n: 4, y: [0.34, 0.62], pal: ['#121a36', '#18223f', '#222e52', '#4a5688'], light: [-0.6, -0.75], kind: 'cumulus', size: 0.8 }, haze: '60,72,118', stars: 900, milky: true },
@@ -94,14 +104,15 @@ export const SKY_STYLE = {
 
 export function skyHaze(name) { return (SKY_STYLE[name] || SKY_STYLE.morning).haze; }
 
-// Paint the backdrop of a sky. side = -1 puts the sun/moon on the left (set lit from the left).
-export function paintSkyBack(name, x, r, w, h, { side = -1 } = {}) {
-  const S = SKY_STYLE[name] || SKY_STYLE.morning, sx = f => (side < 0 ? f : 1 - f) * w;
+// Paint the backdrop of a sky. side = -1 puts the sun/moon on the left (set lit from the left); moonSide places the
+// moon alone (a set lit from the left by day whose night key is still the moon at upper right).
+export function paintSkyBack(name, x, r, w, h, { side = -1, moonSide = side } = {}) {
+  const S = SKY_STYLE[name] || SKY_STYLE.morning, sx = (f, s = side) => (s < 0 ? f : 1 - f) * w;
   skyGradient(x, w, h, S.grad);
   if (S.milky) milkyWay(x, r, w, h);
   if (S.stars) stars(x, r, w, h, S.stars, name === 'night' ? 0.85 : 0.55, name === 'dawn' || name === 'sunset' ? 0.4 : 1);
   if (S.sun) { const s = S.sun, cx = sx(s.x), cy = s.y * h; glow(x, cx, cy, 10, s.glow, s.rgb, s.a); if (s.r) sunDisc(x, cx, cy, s.r, s.col, s.rgb); }
-  if (S.moon) moon(x, sx(S.moon.x), S.moon.y * h, S.moon.r, S.moon.phase * (side < 0 ? 1 : -1));
+  if (S.moon) moon(x, sx(S.moon.x, moonSide), S.moon.y * h, S.moon.r, S.moon.phase * (moonSide < 0 ? 1 : -1));
   if (S.streaks) { const k = S.streaks; for (let i = 0; i < k.n; i++) streak(x, r, r() * w, lerp(k.y[0], k.y[1], r()) * h, 400 + r() * 500, 14 + r() * 16, k.pal); }
   paper(x, 0.022);
 }
@@ -117,17 +128,28 @@ export function paintSkyClouds(name, x, r, w, h, { side = -1 } = {}) {
   paper(x, 0.03);
 }
 
-// Global cache: a sky depends only on its name, its side and an optional tint.
+// Global cache: a sky depends only on its name, its side, its moon's side and an optional tint.
 const CACHE = new Map();
-export function skyCanvases(name, { side = -1, tint = null } = {}) {
-  const key = `${name}|${side}|${tint ? tint.join(',') : ''}`;
+export function skyCanvases(name, { side = -1, moonSide = side, tint = null } = {}) {
+  const key = `${name}|${side}|${moonSide}|${tint ? tint.join(',') : ''}`;
   if (CACHE.has(key)) return CACHE.get(key);
   const seed = 500 + SKY_TIMES.indexOf(name) * 31 + (side < 0 ? 0 : 7);
   const [b, bx] = canvas(SKY_W, SKY_H), [c, cx] = canvas(SKY_W, SKY_H);
-  paintSkyBack(name, bx, rng(seed), SKY_W, SKY_H, { side });
+  paintSkyBack(name, bx, rng(seed), SKY_W, SKY_H, { side, moonSide });
   paintSkyClouds(name, cx, rng(seed + 1), SKY_W, SKY_H, { side });
   if (tint) for (const x of [bx, cx]) { x.save(); x.globalCompositeOperation = 'source-atop'; x.fillStyle = `rgba(${tint[0]},${tint[1]})`; x.fillRect(0, 0, SKY_W, SKY_H); x.restore(); }
   const v = { back: b, clouds: c };
   CACHE.set(key, v); return v;
 }
 export const clearSkyCache = () => CACHE.clear();
+
+// How dark the land is for a sky name, or a crossfade list [[name, weight]…] (0 = day .. 1 = full night): sets that
+// re-light themselves for the night (a moonlit crest, a moonlit stone) fade those passes in with it.
+export const NIGHT_LEVEL = { dawn: 0.1, morning: 0, noon: 0, afternoon: 0, golden: 0, sunset: 0.1, twilight: 0.55, night: 1 };
+export function nightLevel(sky) {
+  if (sky == null) return 0;
+  if (typeof sky === 'number') return Math.max(0, Math.min(1, sky));
+  if (typeof sky === 'string') return NIGHT_LEVEL[sky] ?? 0;
+  let a = 0, n = 0; for (const [name, w] of sky) { if (!(w > 0)) continue; a += (NIGHT_LEVEL[name] ?? 0) * w; n += w; }
+  return n ? a / n : 0;
+}

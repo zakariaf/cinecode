@@ -1,0 +1,34 @@
+{
+ "id": "3449257df6c5",
+ "who": "hollis",
+ "text": "Then he'll be seventy-five years early for the next comet.",
+ "voice": "Enceladus",
+ "tone": "drowsy, clipped, dry, dry, matter-of-fact",
+ "prompt": "[clipped, dry, matter-of-fact] Then he'll be seventy-five years early for the next comet.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 2.68,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0.069,0.999,0.999,0.962,0.878,0.73,0.958,0.981,0.797,0.964,0.956,0.756,0.384,0.087,0,0.906,0.965,0.861,0.993,1,0.968,0.703,0.892,1,1,0.992,0.883,0.856,1,1,0.999,0.886,0.62,0.349,0.957,1,1,1,1,0.999,0.934,0.63,0.561,0.748,0.928,0.939,0.976,0.926,0.662,0.303,0.1,0,0.755,0.88,0.973,0.996,0.98,0.844,0.458,0.081,0,0,0,0],
+ "qa": {
+  "wer": 0.182,
+  "transcript": "Then he'll be 75 years early for the next comet.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "clipped, dry, matter-of-fact",
+    "wer": 0.182,
+    "transcript": "Then he'll be 75 years early for the next comet.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 2.68
+   }
+  ]
+ }
+}

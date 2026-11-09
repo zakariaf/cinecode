@@ -50,7 +50,7 @@ export default function valley(params = {}) {
         const base = px => 1050 - 20 * Math.sin(px / 260 + 1);
         for (const [a, b] of [[E.x0, 820], [2060, E.x1]]) {
           const env = px => (a === E.x0 ? 1 - smooth(b - 420, b, px) : smooth(a, a + 420, px));
-          treeline(x, r, a, b, base, px => base(px) - 40 - (190 + 50 * Math.sin(px / 90)) * env(px), { light: L, crownW: [160, 260], step: [70, 120], trunkW: [8, 14], pal: ['#2c4a36', '#38583e', '#4a6e48', '#6a8c58', '#94ac6e'], interior: '#2a4232', density: 0.8 });
+          treeline(x, r, a, b, base, px => base(px) - 40 - (190 + 50 * Math.sin(px / 90)) * env(px), { light: L, crownW: [160, 260], step: [70, 120], trunkW: [8, 14], pal: ['#2c4a36', '#38583e', '#4a6e48', '#6a8c58', '#94ac6e'], interior: '#2a4232', under: ['#2f4e38', '#3c5f40', '#4e7249', '#6a8c58'], thin: 320, density: 0.8 });
         }
         paper(x, 0.06);
       } },

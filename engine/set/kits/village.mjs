@@ -6,7 +6,7 @@
 // and S.drawLights() adds them again as emitted light after the grade, hidden by whatever stands in front.
 import { lerp, clamp, noise1, canvas, rpoly, rng } from '../../core/lib.mjs';
 import { makeSet, bandPoly } from '../set.mjs';
-import { paper, hazeBand, blades, fern, ridge, contactShadow, LEFT, meadowFloor, pathBand, dirtPath, farHills, bigTree, smallTree, crown, tuft, treeline } from '../../paint/paint.mjs';
+import { paper, hazeBand, blades, fern, ridge, contactShadow, LEFT, meadowFloor, pathBand, dirtPath, farHills, bigTree, treeSkirt, smallTree, crown, tuft, treeline } from '../../paint/paint.mjs';
 import { stonework, cottage, cottageGeom, cottageLights, picketFence, fencePost, gateLeaf, stoneWell, wellGeom, bench, benchGeom, wheelbarrow, lanternPost, lanternGeom, lanternBody,
   cobbles, flagstones, vegBed, cottageFlower, smallCottage, farVillage, farWindowsLit, worldCanvas, glow, lampLevel, WARM } from '../../paint/structures.mjs';
 
@@ -75,6 +75,7 @@ export default function village(params = {}) {
     area: { x0: -400, x1: 3200, y0: -380, y1: 1700 },
     view: { x0: 600, x1: 2300, y0: 300, y1: 1350 },
     horizon: HORIZON, laneY: LANE_Y, baseS: BASE_S, light: L, lane: villageLane,
+    moonSide: 1,                                                        // lit from the left by day; the moon stays upper right, as on the hill
     defaultSky: 'morning', surface: 'grass',
     layers: [
       // far hills and a dark band of forest along the horizon
@@ -165,7 +166,7 @@ export default function village(params = {}) {
       { id: 'lantern', x: LANTERN.x, y: LANTERN.base, base: LANTERN.base, solid: { x: LANTERN.x, y: LANTERN.base, rx: 12, ry: 6 }, bounds: LANTERN_G.bounds, res: 1.5, inkW: 1.8,
         paint: (x, r) => lanternPost(x, r, LANTERN, { light: L }),
         ground: x => contactShadow(x, LANTERN.x + 4, LANTERN.base + 2, 24, 7, 0.45) },
-      { id: 'tree', x: VILLAGE_TREE.x, y: 895, base: VILLAGE_TREE.base, solid: { x: VILLAGE_TREE.x, y: 900, rx: 100, ry: 24 }, bounds: [VILLAGE_TREE.x - 900, -600, VILLAGE_TREE.x + 800, 950],
+      { id: 'tree', x: VILLAGE_TREE.x, y: 895, base: VILLAGE_TREE.base, inkFloor: treeSkirt(VILLAGE_TREE).inkFloor, solid: { x: VILLAGE_TREE.x, y: 900, rx: 100, ry: 24 }, bounds: [VILLAGE_TREE.x - 900, -600, VILLAGE_TREE.x + 800, 950],
         paint: (x, r) => bigTree(x, r, { ...VILLAGE_TREE, light: L, branches: [VILLAGE_BRANCH], roots: 5,
           back: [[VILLAGE_TREE.x + 40, -40, 1100, 520]],
           canopy: [[VILLAGE_TREE.x + 20, 20, 1100, 480], [VILLAGE_TREE.x - 400, 210, 520, 300], [VILLAGE_TREE.x + 400, 220, 560, 320], [VILLAGE_TREE.x + 60, 320, 500, 220], [VILLAGE_TREE.x + 560, 380, 360, 220]],
@@ -243,7 +244,7 @@ function addLights(S) {
   const lanternLit = () => cache.lantern ??= worldCanvas([LG.glass.x0 - 30, LG.glass.y0 - 40, LG.glass.x1 + 30, LG.glass.y1 + 30], 2, x => lanternBody(x, rng(4106), LG, 1));
   const flick = (t, k = 1) => 1 - k * 0.12 * (nz(t * 7.3) * 0.7 + nz(t * 2.1 + 40) * 0.3);
   const lampHalo = (x, t, a) => { const [lx, ly] = LG.lamp, f = flick(t); glow(x, lx, ly, 3, 190 * LG.s * f, WARM.rgb, 0.5 * a * f); glow(x, lx, ly, 1, 46 * LG.s, '255,236,190', 0.7 * a); };
-  const winHalo = (x, a) => { for (const w of G.windows) glow(x, w.cx, (w.y0 + w.y1) / 2, 4, w.w * 1.05, WARM.rgb, 0.24 * a); if (G.dormer) glow(x, G.dormer.cx, (G.dormer.y0 + G.dormer.y1) / 2 + 6, 4, G.dormer.w * 0.8, WARM.rgb, 0.2 * a); };
+  const winHalo = (x, a) => { for (const w of G.windows) glow(x, w.cx, (w.y0 + w.y1) / 2, 4, w.w * 1.05, WARM.rgb, 0.24 * a); if (G.dormer) { const w = G.dormer.win; glow(x, w.cx, (w.y0 + w.y1) / 2, 4, w.w * 1.05, WARM.rgb, 0.2 * a); } };
   const pool = (x, t, a) => { const f = flick(t); x.save(); x.translate(LG.lamp[0] - 10, LANTERN.base + 10); x.scale(1, 0.3); glow(x, 0, 0, 4, 200 * LG.s * f, WARM.rgb, 0.55 * a); x.restore(); };
   const draw = (x, k, a) => { x.save(); x.globalAlpha = a; x.drawImage(k.c, k.x0, k.y0, k.w, k.h); x.restore(); };
   const screen = (x, fn) => { x.save(); x.globalCompositeOperation = 'screen'; fn(); x.restore(); };

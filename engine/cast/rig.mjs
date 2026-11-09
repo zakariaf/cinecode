@@ -7,7 +7,7 @@
 // purpose — for lying over a shell or a branch; leg(..., { free: true }) skips the ground clamps).
 import { clamp, lerp, rng } from '../core/lib.mjs';
 import { limb, ell, rpoly } from '../core/lib.mjs';
-import { groundShadow, setLineScale, lineScaleFor, cel, line } from '../core/style.mjs';
+import { groundShadow, setLineScale, lineScaleFor, cel, line, smoothPts } from '../core/style.mjs';
 
 // Built-in rig kinds (the registry key used in film.json "rig").
 export const RIG_KINDS = Object.freeze(['hare', 'tortoise', 'fox', 'owl', 'squirrel', 'songbird', 'mouse', 'hedgehog', 'badger', 'deer', 'frog', 'beetle', 'butterfly', 'human']);
@@ -57,12 +57,12 @@ export function idle(rig, t, seed = 0) {
 
 // ───────────── expressions ─────────────
 // Every rig maps these numbers onto its own eyes / brows / mouth:
-//  eye: 'open'|'wide'|'happy'   lid: upper-lid closure   tilt: +1 angry slant, -1 sad slant
+//  eye: 'open'|'wide'|'happy'   lid: upper-lid closure   tilt: +1 angry slant, -1 sad slant   cheek: lower lid pushed up (smile)
 //  browY: -1..1 brow raise      browT: +1 angry (front end down), -1 worried (front end up)
 //  smile: -1 frown .. 1 smile   open: mouth open 0..1    round: 'o' mouth 0..1   pupil: pupil size
 export const FACES = {
   neutral:    { eye: 'open',  lid: 0.08, tilt: 0,    browY: 0,     browT: 0,    smile: 0.2,  open: 0,    round: 0,   pupil: 1 },
-  happy:      { eye: 'open',  lid: 0.15, tilt: -0.2, browY: 0.35,  browT: -0.2, smile: 1,    open: 0.12, round: 0,   pupil: 1.05 },
+  happy:      { eye: 'open',  lid: 0.04, tilt: -0.2, browY: 0.5,   browT: -0.35, smile: 1,   open: 0.12, round: 0,   pupil: 1.05, cheek: 0.55 },
   laugh:      { eye: 'happy', lid: 0,    tilt: 0,    browY: 0.55,  browT: -0.3, smile: 1,    open: 0.8,  round: 0,   pupil: 1 },
   sad:        { eye: 'open',  lid: 0.38, tilt: -0.8, browY: 0.35,  browT: -1,   smile: -0.8, open: 0,    round: 0,   pupil: 1.1 },
   surprised:  { eye: 'wide',  lid: 0,    tilt: 0,    browY: 1,     browT: -0.1, smile: 0,    open: 0.5,  round: 1,   pupil: 0.62 },
@@ -185,7 +185,7 @@ export function leg(T, root, foot, o) {
   const w = o.w, sh = o.sh ?? 2, sd = o.seed || 1, low = o.low || o.col;
   if (!o.free && knee[1] > -w[1] - 0.6) knee[1] = -w[1] - 0.6;     // a knee never goes through the ground
   const pts = meta ? [root, knee, ank, pc] : [root, knee, ank], ws = meta ? [w[0], w[1], w[2], w[3]] : [w[0], w[1], w[2]];
-  const Tb = tube(pts, ws, sd);
+  const Tb = smoothPts(T, tube(pts, ws, sd));
   cel(T, Tb, o.col, sh, 0, sd);
   const lf = o.lowFrom ?? 1;
   if (low !== o.col && lf < 1.5) {
@@ -204,15 +204,16 @@ export function leg(T, root, foot, o) {
   return { knee, ank, pc };
 }
 // A tail (or any soft appendage) along a bending spine. It leaves `base` at angle a0 (0 = straight back, + up;
-// local +x is forward) and turns by `bend` radians along its length L. Points that would go below the ground lie on
+// local +x is forward) and turns by `bend` radians along its length L — or, when `bend` is a function, by bend(u)
+// radians at u (0..1) along it (S-curves, flicks, travelling waves). Points that would go below the ground lie on
 // it. wf(u) gives the half-width along it. Returns { poly, pts, ws }.
 export function spine(base, a0, bend, L, wf, { n = 16, ground = true, wave = 0, t = 0 } = {}) {
-  const pts = [], ws = [];
+  const pts = [], ws = [], turn = typeof bend === 'function' ? bend : u => bend * u;
   let x = base[0], y = base[1];
   for (let i = 0; i <= n; i++) {
     const u = i / n, w = wf(u);
     pts.push([x, ground ? Math.min(y, -w - 0.45) : y]); ws.push(w);
-    const th = a0 + bend * u + wave * Math.sin(t * 2.3 - u * 3) * u;
+    const th = a0 + turn(u) + wave * Math.sin(t * 2.3 - u * 3) * u;
     x += -Math.cos(th) * (L / n); y += -Math.sin(th) * (L / n);
   }
   const Lf = [], Rt = [];
@@ -257,8 +258,13 @@ export function jumpAt(u, base, { h = 30, crouch = {}, air = {} } = {}) {
 // stroked or used as a clip (fills inside a clip are bounded by that clip). Also gives rigs the local→screen
 // mapping (head/mouth anchors) and the light direction for cel shading.
 export class Tee {
-  constructor(ctx, s0 = 1) { this.c = ctx; this.m = [1, 0, 0, 1, 0, 0]; this.st = []; this.clip0 = 0; this.p = []; this.s0 = s0; this.b = [Infinity, Infinity, -Infinity, -Infinity]; }
+  constructor(ctx, s0 = 1) {
+    this.c = ctx; this.m = [1, 0, 0, 1, 0, 0]; this.st = []; this.clip0 = 0; this.p = []; this.s0 = s0; this.b = [Infinity, Infinity, -Infinity, -Infinity];
+    const m = ctx?.getTransform?.(); this.k0 = m ? Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1 : 1;
+  }
   map(x, y) { const m = this.m; return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]; }
+  // screen pixels per unit of the current local frame (with the canvas transform underneath; smoothPts uses it)
+  pxPerUnit() { const m = this.m; return Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) * this.k0; }
   _mul(a, b, c, d, e, f) { const m = this.m; this.m = [m[0] * a + m[2] * b, m[1] * a + m[3] * b, m[0] * c + m[2] * d, m[1] * c + m[3] * d, m[0] * e + m[2] * f + m[4], m[1] * e + m[3] * f + m[5]]; }
   _pt(x, y) { const [X, Y] = this.map(x, y); this.p.push(X, Y); }
   _add(pad = 0) { const p = this.p, b = this.b; for (let i = 0; i < p.length; i += 2) { const x = p[i], y = p[i + 1]; if (x - pad < b[0]) b[0] = x - pad; if (y - pad < b[1]) b[1] = y - pad; if (x + pad > b[2]) b[2] = x + pad; if (y + pad > b[3]) b[3] = y + pad; } }
@@ -288,6 +294,9 @@ export class Tee {
   fill(rule) { if (!this.clip0) this._add(); rule ? this.c?.fill(rule) : this.c?.fill(); }
   stroke() { if (!this.clip0) this._add((this.lineWidth || 1) * this.s0 / 2); this.c?.stroke(); }
   clip(rule) { if (!this.clip0) this._add(); this.clip0++; rule ? this.c?.clip(rule) : this.c?.clip(); }
+  // A clip that only hides paint (e.g. a disc where a limb's ink should not show): it neither adds its own path to the
+  // bounds nor stops later fills from being tracked.
+  mask(rule) { this.p = []; rule ? this.c?.clip(rule) : this.c?.clip(); }
   fillRect(x, y, w, h) { if (!this.clip0) { const p = this.p; this.p = []; this.rect(x, y, w, h); this._add(); this.p = p; } this.c?.fillRect(x, y, w, h); }
   createLinearGradient(...a) { return this.c ? this.c.createLinearGradient(...a) : { addColorStop() {} }; }
   createRadialGradient(...a) { return this.c ? this.c.createRadialGradient(...a) : { addColorStop() {} }; }

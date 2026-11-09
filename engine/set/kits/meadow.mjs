@@ -3,7 +3,7 @@
 import { lerp, smooth, rpoly } from '../../core/lib.mjs';
 import { makeSet, ellipsePoly } from '../set.mjs';
 import { paper, hazeBand, blades, fern, ridge, contactShadow, paintWater, lilyPad, waterShimmer, bankFringe, reeds,
-  LEFT, meadowFloor, treeline, bigTree, hollowClip, stump, boulder, bush } from '../../paint/paint.mjs';
+  LEFT, meadowFloor, treeline, bigTree, treeSkirt, hollowClip, stump, boulder, bush } from '../../paint/paint.mjs';
 
 export const OWL_TREE = { x: 420, base: 1012, w: 150, top: -140, hollow: { cx: 436, cy: 560, rx: 34, ry: 46 } };
 export const MEADOW_BRANCH = { pts: [[470, 712], [600, 690], [740, 664], [830, 650]], w0: 26, w1: 9 };
@@ -57,7 +57,7 @@ export default function meadow(params = {}) {
       } },
     ],
     props: [
-      { id: 'owl_tree', x: OWL_TREE.x, y: 1000, base: OWL_TREE.base, solid: { rx: 96, ry: 24 }, bounds: [-280, -600, 1040, 1060],
+      { id: 'owl_tree', x: OWL_TREE.x, y: 1000, base: OWL_TREE.base, inkFloor: treeSkirt(OWL_TREE).inkFloor, solid: { rx: 96, ry: 24 }, bounds: [-280, -600, 1040, 1060],
         paint: (x, r) => bigTree(x, r, { ...OWL_TREE, light: L, hollow: OWL_TREE.hollow, branches: [MEADOW_BRANCH],
           back: [[200, -260, 900, 520]],
           canopy: [[420, -300, 1200, 620], [60, 60, 520, 340], [780, 40, 560, 320], [420, 230, 560, 260]],

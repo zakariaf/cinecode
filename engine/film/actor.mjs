@@ -7,11 +7,21 @@
 // carrier's walk bob, turns and wading sink; hops on and off are jump legs whose moving end tracks that point. A rider
 // is visible only while its carrier is (it exits with it) and fades with it.
 // Wading: a wade route carries a sink (world px) that grows with the distance travelled into the water.
+// Eyelines: a look at an actor runs from this head to that head (an anchor or point: to the point), so it has a
+// horizontal part (st.look) and a vertical one (st.tilt, the pitch of that line as a share of PITCH); "up" / "sky" /
+// "down" only pitch the head and keep the horizontal target of the look before them.
+// A turn (a face flip) squashes the drawing through a narrow card over about six frames, so it reads as a turn.
 import { noise1 } from '../core/lib.mjs';
 import { idle } from '../cast/index.mjs';
-import { clamp, lerp, ease, rigPose, mixFor, contactKeys, rigSizes, hash32, mountPoint } from './util.mjs';
+import { clamp, lerp, ease, rigPose, mixFor, contactKeys, rigSizes, hash32, mountPoint, profile as rigProfile } from './util.mjs';
 
 const BLEND_IN = 0.22, BLEND_OUT = 0.28, LOOK_BLEND = 0.28;
+// an eyeline's pitch: the angle (rad) that makes a full tilt, and the most a look at someone uses (the extremes stay
+// for an explicit "up" / "down")
+export const PITCH = 0.8, PITCH_MAX = 0.9;
+// a turn: the squash's half-width (s) and its depth (the drawing's width at the flip = 1 − TURN_DEPTH)
+export const TURN_HALF = 0.14, TURN_DEPTH = 0.7;
+const VERTICAL = new Set(['up', 'sky', 'down']);
 const frac = x => x - Math.floor(x);
 
 // ───────────── positions ─────────────
@@ -57,8 +67,10 @@ function profile(U, v, ta = 0.3, rampIn = true, rampOut = true) {
 // route cross water: inside a water polygon the actor sinks 0.6 px per px travelled from where it went in (or before
 // where it comes out), up to depth × s.
 export class RouteLeg {
-  constructor({ S, pts, k, gait, speed, stride, phase0 = 0, rampIn = true, rampOut = true, face0 = 1, rig, cycleDur, wade = null }) {
+  constructor(args) {
+    const { S, pts, k, gait, speed, stride, phase0 = 0, rampIn = true, rampOut = true, face0 = 1, rig, cycleDur, wade = null } = args;
     this.type = 'route'; this.gait = gait; this.stride = stride; this.phase0 = phase0; this.rig = rig;
+    this.args = args;                              // to rebuild the leg longer (an exit walking on out of frame)
     const X = [], Y = [], Sc = [], U = [], F = [];
     let u = 0, face = face0;
     for (let i = 0; i < pts.length - 1; i++) {
@@ -278,10 +290,11 @@ export class Actor {
     let f = 1; for (const e of this.faceEv) if (e.t <= t) f = e.face;
     return f;
   }
-  // horizontal squash around a turn (a quick card flip reads as a turn in 2-D)
+  // horizontal squash around a turn: the drawing narrows to a sliver at the flip and opens out mirrored (a card turn,
+  // three frames each side at 24 fps), so a turn reads as a turn even in a close-up instead of a one-frame mirror
   squashAt(t) {
     let k = 1;
-    for (const e of this.faceEv) if (e.flip && Math.abs(t - e.t) < 0.12) k = Math.min(k, 1 - 0.4 * Math.cos((Math.PI / 2) * ((t - e.t) / 0.12)));
+    for (const e of this.faceEv) if (e.flip && Math.abs(t - e.t) < TURN_HALF) k = Math.min(k, 1 - TURN_DEPTH * Math.cos((Math.PI / 2) * ((t - e.t) / TURN_HALF)));
     return k;
   }
   // ── poses ──
@@ -358,16 +371,40 @@ export class Actor {
     return 0;
   }
   speaking(t) { return this.talk.some(L => t >= L.t0 && t < L.t1); }
+  // The head's world position at t (base pose, facing, hop lift and wading sink): where eyelines start and end.
+  headAt(t) {
+    const pos = this.posAt(t), h = rigProfile(this.rig, this.basePoseName(t), this.paramsAt(t)).head;
+    return [pos.x + this.faceAt(t) * h[0] * pos.s, pos.y + (pos.sink || 0) + (h[1] - (pos.lift || 0)) * pos.s];
+  }
+  // What a look target is at t: another actor's head, or a point ({ x, y }); null for keywords and unknown ids.
+  lookPoint(target, t) {
+    if (target && typeof target === 'object') return Number.isFinite(target.x) ? [target.x, Number.isFinite(target.y) ? target.y : null] : null;
+    const o = typeof target === 'string' ? this.others?.get(target) : null;
+    return o && o !== this && o.place0 ? o.headAt(t) : null;
+  }
   lookValue(target, t, pos) {
     if (!target || target === 'none' || target === 'camera') return 0;
     if (target === 'left') return -0.7;
     if (target === 'right') return 0.7;
-    if (target === 'up' || target === 'sky' || target === 'down') return 0;
-    let tx;
-    if (typeof target === 'object') tx = target.x;
-    else { const o = this.others?.get(target); if (!o) return 0; tx = o.posAt(t).x; }
-    const dx = tx - pos.x;
+    if (VERTICAL.has(target)) return 0;
+    const p = this.lookPoint(target, t); if (!p) return 0;
+    // head to head for an actor (a rider looking down at its carrier's face has the same contact x)
+    const dx = p[0] - (typeof target === 'object' ? pos.x : this.headAt(t)[0]);
     return clamp(0.8 * Math.tanh(dx / (90 * pos.s)), -0.85, 0.85);
+  }
+  // Head pitch toward a target: "up" / "sky" +1, "down" −1, an actor or a point the angle of the line from this head
+  // to it (± PITCH_MAX at most), other keywords 0.
+  pitchValue(target, t) {
+    if (target === 'up' || target === 'sky') return 1;
+    if (target === 'down') return -1;
+    const p = this.lookPoint(target, t); if (!p || p[1] == null) return 0;
+    const [hx, hy] = this.headAt(t);
+    return clamp(Math.atan2(hy - p[1], Math.abs(p[0] - hx) + 1e-6) / PITCH, -PITCH_MAX, PITCH_MAX);
+  }
+  // The horizontal target of look i: its own, or for "up" / "sky" / "down" that of the look before it.
+  hTarget(i) {
+    for (let j = i; j >= 0; j--) if (!VERTICAL.has(this.lookEv[j].target)) return this.lookEv[j].target;
+    return null;
   }
   lookTargetAt(t) {
     let ev = null; for (const e of this.lookEv) if (e.t <= t) ev = e;
@@ -381,9 +418,9 @@ export class Actor {
     let i = -1; for (let j = 0; j < this.lookEv.length; j++) if (this.lookEv[j].t <= t) i = j;
     let base = 0;
     if (i >= 0) {
-      const e = this.lookEv[i], prev = i > 0 ? this.lookEv[i - 1].target : null;
+      const e = this.lookEv[i], prev = i > 0 ? this.hTarget(i - 1) : null;
       const u = ease((t - e.t) / (this.rig.lookTime ?? LOOK_BLEND));
-      base = lerp(val(prev, t), val(e.target, t), u);
+      base = lerp(val(prev, t), val(this.hTarget(i), t), u);
     }
     // glances at a speaker (ease in and out) unless an explicit look came later
     for (const g of this.glances) {
@@ -394,17 +431,25 @@ export class Actor {
     }
     return base;
   }
-  // Head pitch: +1 looking up ("up", "sky"), -1 looking down, 0 otherwise; each change blends from the current value
-  // over rig.lookTime (default 0.3 s).
-  tiltAt(t) {
+  // Head pitch (pitchValue of the look target); each change blends from where the head was then over rig.lookTime
+  // (default 0.3 s), and glances at a speaker pitch toward them the same way (glances = false: the explicit looks only).
+  tiltAt(t, glances = true) {
     if (this.asleep(t)) return 0;
-    const val = g => (g === 'up' || g === 'sky' ? 1 : g === 'down' ? -1 : 0), T = this.rig.lookTime ?? 0.3;
-    let from = 0, to = 0, t0 = -Infinity;
-    for (const e of this.lookEv) {
-      if (e.t > t) break;
-      from = t0 === -Infinity ? to : lerp(from, to, ease((e.t - t0) / T)); to = val(e.target); t0 = e.t;
+    const T = this.rig.lookTime ?? 0.3, ev = this.lookEv;
+    const chain = (i, tt) => {
+      if (i < 0) return 0;
+      const e = ev[i], u = ease((tt - e.t) / T), to = this.pitchValue(e.target, tt);
+      return u >= 1 ? to : lerp(chain(i - 1, e.t), to, u);
+    };
+    let i = -1; for (let j = 0; j < ev.length; j++) if (ev[j].t <= t) i = j;
+    let v = chain(i, t);
+    if (glances) for (const g of this.glances) {
+      if (t < g.t0 || t >= g.t1 + T) continue;
+      if (i >= 0 && ev[i].t > g.t0) continue;
+      const w = Math.min(ease((t - g.t0) / T), 1 - ease((t - g.t1) / T));
+      v = lerp(v, this.pitchValue(g.target, t), w);
     }
-    return t0 === -Infinity ? 0 : lerp(from, to, ease((t - t0) / T));
+    return v;
   }
   // A rider is seen only while its carrier is (it leaves with a carrier that exits, and comes back with it).
   visibleAt(t) {

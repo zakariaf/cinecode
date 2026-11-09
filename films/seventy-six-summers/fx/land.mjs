@@ -13,22 +13,28 @@
 //                         the hill's foot under the crest, on its own parallax plane; defaults per set in PLACE), k
 //                         (parallax, default 0.22: farther than every painted layer, so the set's own layers overlap its
 //                         foot), trail (0..1: her path of pressed grass up the lit face), haze (aerial perspective,
-//                         default from frac). Painted once per size (gouache dabs along the slope, field hedges, trees,
-//                         a hawthorn) and lit per frame from the clock: the sun-side wash, the far flank shaded, the
-//                         blue shadow band climbing from below, gold on the stone, haze, a thin ink line.
+//                         default from frac), halo (0..1: the clouds kept out from behind the stone while it is gold,
+//                         HALO). Painted once per size (gouache dabs along the slope, field hedges, trees, a hawthorn)
+//                         and lit per frame from the clock: the sun-side wash, the far flank shaded, the blue shadow
+//                         climbing from below (a soft edge that bows down a little toward the flanks, shadowEdgeAt, and
+//                         a cool SHADOW_BLUE glaze laid over the haze so it reads as shadow, not as mist), gold on the
+//                         stone, haze, a thin ink line.
 //   overlay set-patch     layer 'back'. Paints out a feature of one set layer (params.k, its parallax; params.poly, world
 //                         points on that layer's plane) by re-rendering what lies behind it there: the sky, the scene's
 //                         far hill and the other back layers. The valley kit paints its own small standing stone on a
 //                         knoll in front of the far hill; the patch removes it, so the film has one stone.
 //   overlay empty-house   layer 'sky' (village). Nobody is home: keeps the kit's lamp level at 0, so the windows stay
 //                         dark at dusk (the kit lights windows and lantern from the sky); the film lights the lantern.
-//   overlay pressed-trail layer 'back' (village). A track of pressed, darker grass from the gate along the verge, past the
-//                         lantern and away up the meadow toward the hill; faint until the scene's lantern-reveal beat
-//                         starts, then clear over its rise (it was there all along; the glare hid it).
-//   custom reflection     layer 'front' (3.2). The bank's edge across the frame just under Pebble's chin and, below it,
-//                         the water: his mirrored head and a mirrored sky rippling in a slow sine; for a few frames
-//                         (params.glint, s from the beat start; params.glintX, a frame fraction, default ahead of his
-//                         face) the comet glints in the reflected sky and nowhere else.
+//   overlay pressed-trail layer 'back' (village). A track of pressed grass (TRAIL, TRAIL_W) from the gate along the verge,
+//                         past the lantern, round behind the well and away up the meadow toward the hill: bent blades,
+//                         mostly darker, some pale, feathered at the edges and broken along its length; faint until the
+//                         scene's lantern-reveal beat starts, then clear over its rise (it was there all along).
+//   custom reflection     layer 'front' (3.2). The bank's edge across the frame (params.waterline, a frame fraction, so
+//                         the water keeps its share of the frame as he looks down; default just under his chin) and,
+//                         below it, the water: his mirrored head and a mirrored sky rippling in a slow sine; for a few
+//                         frames (params.glint, s from the beat start, for params.glintDur s; params.glintX, a frame
+//                         fraction, default ahead of his face) the comet glints in the middle of the reflected sky and
+//                         nowhere else, its warm nucleus (glintCore) burning through the water's tint.
 //   custom lantern-reveal layer 'grade' (6.5 → the scene's end, so give it a long dur). The lantern was lit all along:
 //                         its glass, flame and bloom rise as the ambient light falls (params.rise, s), drawn after the
 //                         grade; one firefly lifts off it and drifts up along the trail.
@@ -40,8 +46,12 @@
 //                         found from his drawn head and mouth (api.actor); hidden while he blinks.
 //   custom star-highlight layer 'grade' (9.3). A cool moon highlight gliding across the star marking on Pebble's shell
 //                         (the rig's star position, through his pose's shell transform).
+//   custom firefly-fill   layer 'grade' (9.11). The first fireflies lift out of the grass behind the actor (params.who,
+//                         default nell; params.n) and rise through the close-up, hidden where her silhouette is in
+//                         front of them; their light falls on her as a soft yellow-green fill (params.fill). Placed in
+//                         frame fractions (fireflyPoints), so they stay in a close-up's frame at any zoom.
 import { rng, noise1, clamp, lerp, smooth, canvas, blob, ink, path, quad } from '../../../engine/core/lib.mjs';
-import { skyHaze } from '../../../engine/paint/sky.mjs';
+import { skyHaze, SKY_W, SKY_H } from '../../../engine/paint/sky.mjs';
 import { glow, lanternBody, lampLevel, WARM } from '../../../engine/paint/structures.mjs';
 import { LANTERN_G, villageScale } from '../../../engine/set/kits/village.mjs';
 
@@ -115,13 +125,14 @@ export const STONE_P = (() => {
   return out;
 })();
 // Default placement per set: the foot under the crest (world, on its own plane) where the stone clears the painted
-// forest edge, the wayside tree's canopy and the cottage roof in the scenes' framings.
+// forest edge, the wayside tree's canopy and the cottage roof in the scenes' framings. The village's is also where the
+// 6.6 push-in (clamped at the set's top) can end on the crest figure, clear of the big tree's crown.
 export const PLACE = {
   meadow: { x: 2154, y: 580 },
   stream: { x: 1286, y: 597 },
   wayside: { x: 2401, y: 753 },
   valley: { x: 2264, y: 768 },
-  village: { x: 1676, y: 1320 },
+  village: { x: 1525, y: 1420 },
 };
 
 /** Where the far hill is on screen: { sx, sy (the foot under the crest), U (px per hill unit), at(x, h) → [sx, sy] }. */
@@ -232,13 +243,18 @@ function hazeRGB(api) {
 const hazeOf = p => p.haze ?? clamp(0.55 - (p.frac ?? 0.1) * 0.9, 0.06, 0.55);
 const inkW = U => clamp(0.7 + U * 0.0022, 0.8, 2.4);
 
-// The shadow band (screen polygon below the wavy line at height lineH, hill units).
+// The shadow band (screen polygon below the wavy line at height lineH, hill units). The line is a level contour on the
+// round hill, seen from a little above: it bows down toward the flanks (SHADOW_BOW per hill unit², from the crest).
+export const SHADOW_BOW = 0.025;
+export const shadowEdgeAt = (lineH, u) => lineH - SHADOW_BOW * u * u;
 function shadowPoly(G, lineH, u0, u1) {
   const nz = noise1(311), P = [];
-  for (let u = u0; u <= u1 + 1e-9; u += 0.04) P.push(G.at(u, lineH + 0.012 * Math.sin(u * 6.3 + 1.1) + 0.012 * (nz(u * 2.7 + 5) - 0.5)));
+  for (let u = u0; u <= u1 + 1e-9; u += 0.04) P.push(G.at(u, shadowEdgeAt(lineH, u) + 0.012 * Math.sin(u * 6.3 + 1.1) + 0.012 * (nz(u * 2.7 + 5) - 0.5)));
   P.push(G.at(u1, BOT - 1), G.at(u0, BOT - 1));
   return P;
 }
+// The distant shadow is blue (skylight), even through the haze: a cool multiply laid after the haze, soft at its top.
+export const SHADOW_BLUE = [93, 111, 160];
 
 /** Draw the far hill (everything but the stone) into ctx (screen space). → the screen box drawn, or null. */
 function drawHill(ctx, api, p, G, dayT) {
@@ -260,11 +276,10 @@ function drawHill(ctx, api, p, G, dayT) {
   // the climbing shadow: everything below the line goes blue (soft edged): a cool multiply, then a violet glaze
   const lineH = shadowLine(dayT);
   if (L.sh[3] > 0.01 && lineH > -0.05) {
-    const edge = Math.max(2, 0.02 * U), [, ly] = G.at(0, lineH), poly = shadowPoly(G, lineH, X0, X1), lite = L.sh.map((v, i) => (i < 3 ? lerp(v, 255, 0.4) : v));
+    // soft along its whole (bowed) top edge: blurred fills rather than a level gradient
+    const edge = Math.max(1.5, 0.02 * U), poly = shadowPoly(G, lineH + edge / U, X0, X1), lite = L.sh.map((v, i) => (i < 3 ? lerp(v, 255, 0.4) : v));
     for (const [col, a, op] of [[lite, L.sh[3], 'multiply'], [L.sh, L.sh[3] * 0.42, 'source-atop']]) {
-      const g = x.createLinearGradient(0, ly - edge, 0, ly + edge);
-      g.addColorStop(0, rgba(col, 0)); g.addColorStop(1, rgba(col, a));
-      x.globalCompositeOperation = op; x.fillStyle = g; path(x, poly); x.fill();
+      x.globalCompositeOperation = op; x.fillStyle = rgba(col, a); x.filter = `blur(${edge.toFixed(1)}px)`; path(x, poly); x.fill(); x.filter = 'none';
     }
   }
   // sunlight on the lit face above the line (screen), strongest toward the sun
@@ -293,6 +308,13 @@ function drawHill(ctx, api, p, G, dayT) {
   const [, fy] = G.at(0, 0), [, cy] = G.at(0, 1), hg = x.createLinearGradient(0, cy, 0, fy);
   hg.addColorStop(0, rgba(hz, haze * 0.75)); hg.addColorStop(1, rgba(hz, Math.min(0.92, haze * 1.35)));
   x.fillStyle = hg; x.fillRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
+  // the shadow's blue, through the haze (aerial perspective turns a far shadow toward the sky's blue, not toward grey)
+  if (L.sh[3] > 0.01 && lineH > -0.05) {
+    const soft = Math.max(2, 0.03 * U), a = 0.42 * clamp(L.sh[3] / 0.6);
+    x.globalCompositeOperation = 'multiply'; x.fillStyle = rgba(SHADOW_BLUE, a); x.filter = `blur(${soft.toFixed(1)}px)`;
+    path(x, shadowPoly(G, lineH + 0.5 * soft / U, X0, X1)); x.fill(); x.filter = 'none';
+    x.globalCompositeOperation = 'destination-in'; x.drawImage(spr.c, bx0, by0, bx1 - bx0, by1 - by0);
+  }
   x.restore();
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(cv, box[0], box[1], box[2] - box[0], box[3] - box[1], box[0], box[1], box[2] - box[0], box[3] - box[1]); ctx.restore();
   return box;
@@ -367,9 +389,11 @@ function crestDayT(api) {
 
 // ───────────── village helpers ─────────────
 // The pressed-grass trail (world, village): from the gate along the verge in front of the fence, past the lantern, up
-// between the lantern and the well and away across the back meadow toward the hill.
-export const TRAIL = [[1050, 1094], [1110, 1092], [1230, 1090], [1340, 1092], [1430, 1094], [1500, 1086], [1548, 1060], [1566, 1028],
-  [1560, 996], [1572, 962], [1612, 928], [1680, 900], [1766, 876], [1850, 860], [1930, 850]];
+// past the well's left side and round behind it (where the well hides it), then away across the back meadow toward
+// the hill.
+export const TRAIL = [[1050, 1094], [1110, 1092], [1230, 1090], [1340, 1092], [1430, 1094], [1496, 1084], [1528, 1060], [1540, 1030],
+  [1536, 998], [1544, 966], [1572, 938], [1616, 916], [1690, 898], [1770, 878], [1850, 862], [1930, 850]];
+export const TRAIL_W = 26;                     // the band's half width at scale 1 (world px)
 function polyAt(P, v) {                       // a point at arc-length fraction v (0..1) along a polyline
   const L = [0]; for (let i = 1; i < P.length; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
   const s = clamp(v) * L[L.length - 1]; let i = 1; while (i < L.length - 1 && L[i] < s) i++;
@@ -388,7 +412,9 @@ function drawReflection(ctx, u, api) {
   const a = api.actor(api.params.who ?? 'pebble');
   if (!a) return;
   const { W, H, cam } = api, z = cam.zoom, R = a.R, ss = a.s * z, hh = (R.headHeight || 20) * ss;
-  const [hx, hy] = api.toScreen(a.head), lip = Math.max(10, 0.28 * hh), wl = Math.round(hy + 0.45 * hh + lip);
+  // the waterline: a fixed frame height (params.waterline), so the mirrored sky keeps its share of the frame while
+  // his head goes down to look (it then dips behind the bank's lip); or, by default, just under his chin
+  const [hx, hy] = api.toScreen(a.head), lip = Math.max(10, 0.28 * hh), wl = Math.round(api.params.waterline != null ? api.params.waterline * H : hy + 0.45 * hh + lip);
   if (wl >= H - 4) return;
   const t = api.t, bt = api.bt ?? u * (api.dur || 1);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -396,9 +422,10 @@ function drawReflection(ctx, u, api) {
   const [src, sx] = scratch('refl-src', W, H);
   sx.clearRect(0, 0, W, H);
   sx.filter = 'blur(3px)'; api.set.drawSky(sx, cam, api.shot.skyAt(t), t); sx.filter = 'none';
-  const g0 = api.params.glint ?? 1.67, gd = api.params.glintDur ?? 0.42, gv = (bt - g0) / gd;
-  // in the reflected sky ahead of his face (the head's own reflection is behind it)
-  if (gv > 0 && gv < 1) glint(sx, W * (api.params.glintX ?? ((a.face || 1) > 0 ? 0.76 : 0.24)), wl - (H - wl) * 0.5, Math.sin(Math.PI * gv), H);
+  const g0 = api.params.glint ?? 1.67, gd = api.params.glintDur ?? 0.42, gv = (bt - g0) / gd, gk = gv > 0 && gv < 1 ? Math.sin(Math.PI * gv) : 0;
+  // in the reflected sky ahead of his face (the head's own reflection is behind it), in the middle of the band
+  const gx = W * (api.params.glintX ?? ((a.face || 1) > 0 ? 0.76 : 0.24)), gy = wl + (H - wl) * 0.5;
+  if (gk > 0) glint(sx, gx, 2 * wl - gy, gk, H);
   sx.save(); sx.beginPath(); sx.rect(0, 0, W, wl - lip * 0.6); sx.clip();
   R.draw(sx, (a.x - cam.cx) * z + W / 2, (a.y + (a.sink || 0) - cam.cy) * z + H / 2, ss, a.face, { ...a.st, shadow: false });
   sx.restore();
@@ -408,15 +435,16 @@ function drawReflection(ctx, u, api) {
   mx.clearRect(0, 0, W, H); mx.translate(0, 2 * wl); mx.scale(1, -1); mx.drawImage(src, 0, 0); mx.setTransform(1, 0, 0, 1, 0, 0);
   const water = ctx.createLinearGradient(0, wl, 0, H); water.addColorStop(0, '#9fc4cf'); water.addColorStop(1, '#4f8496');
   ctx.fillStyle = water; ctx.fillRect(0, wl, W, H - wl);
-  const step = 3;
-  for (let y = wl; y < H; y += step) {
+  const step = 3, sway = y => {
     const d = (y - wl) / Math.max(1, H - wl), amp = (1.5 + 14 * d) * (H / 1080);
-    const off = amp * Math.sin(y * 0.045 * (1080 / H) - t * 1.6) + amp * 0.35 * Math.sin(y * 0.11 * (1080 / H) + t * 2.3);
-    ctx.drawImage(mir, 0, y, W, step, off, y, W, step);
-  }
+    return amp * Math.sin(y * 0.045 * (1080 / H) - t * 1.6) + amp * 0.35 * Math.sin(y * 0.11 * (1080 / H) + t * 2.3);
+  };
+  for (let y = wl; y < H; y += step) ctx.drawImage(mir, 0, y, W, step, sway(y), y, W, step);
   // the water's own colour and depth over the reflection
   const tint = ctx.createLinearGradient(0, wl, 0, H); tint.addColorStop(0, 'rgba(62,112,128,.22)'); tint.addColorStop(1, 'rgba(36,74,92,.5)');
   ctx.fillStyle = tint; ctx.fillRect(0, wl, W, H - wl);
+  // the glint's nucleus burns through the water's tint (the reflection of a light, not of the sky): swaying with its row
+  if (gk > 0) glintCore(ctx, gx + sway(gy), gy, gk, H);
   // slow light ripples on the surface
   const r = rng(4411), nz = noise1(4412);
   ctx.globalCompositeOperation = 'screen';
@@ -462,6 +490,27 @@ function glint(x, gx, gy, k, H) {
   glow(x, gx, gy, 0, 46 * s * k, '255,243,214', 0.8 * k);
   x.fillStyle = `rgba(255,252,240,${k})`;
   for (const [a, l] of [[0, 26], [Math.PI / 2, 26], [Math.PI / 4, 11], [-Math.PI / 4, 11]]) { x.save(); x.translate(gx, gy); x.rotate(a); x.beginPath(); x.ellipse(0, 0, l * s * k, 1.6 * s, 0, 0, 7); x.fill(); x.restore(); }
+  x.restore();
+}
+// The glint's nucleus as seen in the water (k 0..1): on a pale noon reflection a light only reads by being warmer and
+// brighter than everything round it, so a gold bloom first (multiplied in, so it deepens the pale water around the
+// light), then a 60 px warm glow, a 7 px #FFF3D6 core at full strength, a short gold tail (mirrored: down and to the
+// left) and a long horizontal shimmer streak, the way a point light lies on moving water.
+export function glintCore(x, gx, gy, k, H) {
+  if (k <= 0.01) return;
+  const s = H / 1080, a = Math.min(1, 1.15 * k);
+  x.save();
+  x.globalCompositeOperation = 'multiply';
+  glow(x, gx, gy, 0, 70 * s, '214,168,96', 0.55 * a);
+  x.globalCompositeOperation = 'screen';
+  glow(x, gx, gy, 0, 60 * s * (0.6 + 0.4 * k), '255,226,160', a);
+  const ex = gx - 90 * s * k, ey = gy + 38 * s * k, g = x.createLinearGradient(gx, gy, ex, ey);
+  g.addColorStop(0, `rgba(255,214,138,${0.9 * a})`); g.addColorStop(1, 'rgba(255,214,138,0)');
+  x.strokeStyle = g; x.lineWidth = 7 * s; x.lineCap = 'round'; x.beginPath(); x.moveTo(gx, gy); x.lineTo(ex, ey); x.stroke();
+  x.globalCompositeOperation = 'source-over';
+  x.fillStyle = `rgba(255,252,244,${0.85 * a})`;
+  for (const [rx, ry] of [[46 * k, 1.6], [1.4, 22 * k]]) { x.beginPath(); x.ellipse(gx, gy, rx * s, ry * s, 0, 0, 7); x.fill(); }
+  x.fillStyle = `rgba(255,243,214,${a})`; x.beginPath(); x.arc(gx, gy, 3.6 * s, 0, 7); x.fill();
   x.restore();
 }
 
@@ -573,11 +622,96 @@ function drawStarHighlight(ctx, u, api) {
   ctx.restore();
 }
 
+// ───────────── the first fireflies (9.11) ─────────────
+// params.n fireflies lift out of the grass at the bottom of the frame behind the actor (most behind her back, a few
+// beyond her face), staggered, wandering as they rise through the close-up past her head; her own silhouette hides
+// those behind her. Their light falls on her as a soft yellow-green fill, as strong as the fireflies now up (params.fill,
+// its strength). Placed in frame fractions from the drawn head, so they stay in the frame of a close-up at any zoom.
+// → the fireflies' screen points, for tests: [{ x, y, a }]
+export function fireflyPoints(head, face, bt, W, H, { n = 9, seed = 7301 } = {}) {
+  const r = rng(seed), out = [];
+  for (let i = 0; i < n; i++) {
+    const t0 = 0.2 + i * 0.5 + r() * 0.35, v = (0.1 + r() * 0.06) * H, side = i % 3 === 2 ? face : -face;
+    const x0 = clamp(head[0] + side * (0.1 + r() * 0.32) * W, 0.05 * W, 0.95 * W), y0 = H * (0.94 + r() * 0.1), ph = r() * 6, w = 0.18 + r() * 0.2;
+    const tt = bt - t0;
+    if (tt <= 0) continue;
+    const x = x0 + Math.sin(tt * (0.9 + w) + ph) * 0.022 * W, y = y0 - v * tt + Math.sin(tt * 1.7 + ph) * 0.012 * H;
+    const a = Math.min(1, tt / 0.6) * (0.62 + 0.38 * Math.sin(tt * (2.2 + w * 3) + ph) ** 2) * clamp(y / (0.12 * H));
+    if (a > 0.02) out.push({ x, y, a });
+  }
+  return out;
+}
+function drawFireflyFill(ctx, u, api) {
+  const a = api.actor(api.params.who ?? 'nell');
+  if (!a) return;
+  const { W, H, cam } = api, z = cam.zoom, R = a.R, ss = a.s * z, hh = (R.headHeight || 20) * ss, f = a.face || 1, bt = api.bt ?? 0;
+  const head = api.toScreen(a.head), pts = fireflyPoints(head, f, bt, W, H, { n: api.params.n ?? 9, seed: api.params.seed ?? 7301 });
+  // a beat that stops before the cut lets them go out over its last 0.4 s, not all at once
+  const left = (api.dur ?? Infinity) - bt, out = api.t + left < (api.shot?.t1 ?? Infinity) - 1e-3 ? clamp(left / 0.4) : 1;
+  for (const p of pts) p.a *= out;
+  const [ax, ay] = [(a.x - cam.cx) * z + W / 2, (a.y + (a.sink || 0) - cam.cy) * z + H / 2];
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // the fireflies, then her silhouette cut out of them (the ones behind her are hidden by her)
+  const [cv, x] = scratch('ff-fill', W, H);
+  x.clearRect(0, 0, W, H);
+  x.globalCompositeOperation = 'lighter';
+  const rr = clamp(0.012 * H + 0.04 * hh, 8, 40);
+  for (const p of pts) {
+    glow(x, p.x, p.y, 0, rr * 3, '200,255,110', 0.5 * p.a);
+    glow(x, p.x, p.y, 0, rr * 0.8, '236,255,170', 0.9 * p.a);
+    x.fillStyle = `rgba(250,255,214,${p.a})`; x.beginPath(); x.arc(p.x, p.y, Math.max(1.5, rr * 0.16), 0, 7); x.fill();
+  }
+  x.globalCompositeOperation = 'destination-out';
+  R.draw(x, ax, ay, ss, f, { ...a.st, shadow: false });
+  ctx.globalCompositeOperation = 'screen';
+  ctx.drawImage(cv, 0, 0);
+  // their light on her: a yellow-green fill from behind and below, only on her
+  const lit = clamp(pts.reduce((s, p) => s + p.a, 0) / 3) * (api.params.fill ?? 1);
+  if (lit > 0.01) {
+    const [fc, fx] = scratch('ff-light', W, H);
+    fx.clearRect(0, 0, W, H);
+    R.draw(fx, ax, ay, ss, f, { ...a.st, shadow: false });
+    fx.globalCompositeOperation = 'source-in';
+    const g = fx.createRadialGradient(head[0] - f * 0.6 * hh, head[1] + 0.9 * hh, 0, head[0] - f * 0.6 * hh, head[1] + 0.9 * hh, 2.6 * hh);
+    g.addColorStop(0, `rgba(214,255,150,${0.38 * lit})`); g.addColorStop(0.55, `rgba(200,250,140,${0.15 * lit})`); g.addColorStop(1, 'rgba(200,250,140,0)');
+    fx.fillStyle = g; fx.fillRect(0, 0, W, H);
+    ctx.drawImage(fc, 0, 0);
+  }
+  ctx.restore();
+}
+
 /** The far hill and its stone for the api's frame (screen space), lit by the scene's clock. */
 function drawFarHill(ctx, api, p) {
   const G = hillGeom(api, p), d = crestDayT(api) ?? dayTAt(p, api.su);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (p.halo) stoneHalo(ctx, api, G, d, p.halo);
   if (drawHill(ctx, api, p, G, d)) drawStone(ctx, api, p, G, d);
+  ctx.restore();
+}
+// params.halo (0..1): the clouds kept out from behind the stone. Inside a soft ellipse round it the set's own sky is
+// painted again without its clouds (the same backdrop, placed as the set's drawSky places it), so the stone's last gold
+// stands against the deeper open sky instead of melting into a peach cloud of the same value. Only while it is gold.
+export const HALO = { a: 0.95, rx: 0.34, ry: 0.42 };
+function stoneHalo(ctx, api, G, dayT, k) {
+  const L = lightAt(dayT), a = HALO.a * clamp(k) * clamp(L.gold / 0.5) * Math.min(1, stoneLight(dayT) * 4), S = api.set;
+  if (a <= 0.01 || G.U < 2 || !S?.skyCanvases) return;
+  const { W, H, cam } = api, [cx, cy] = G.at(STONE.x, stoneBase + STONE_H * 0.55), rx = HALO.rx * G.U, ry = HALO.ry * G.U;
+  const box = [Math.max(0, Math.floor(cx - rx)), Math.max(0, Math.floor(cy - ry)), Math.min(W, Math.ceil(cx + rx)), Math.min(H, Math.ceil(cy + ry))];
+  if (box[2] <= box[0] || box[3] <= box[1]) return;
+  // the backdrop as S.drawSky lays it (screen space, scaled a little with the zoom, a slow parallax), clouds left out
+  const s = Math.max(W / 1920, H / 1080) * (1 + clamp(cam.zoom - 1, -0.4, 3) * 0.04), w = SKY_W * s, h = SKY_H * s;
+  const ox = clamp((cam.cx - S.refX) * 0.05 * s, -(w - W) / 2, (w - W) / 2), oy = clamp((cam.cy - S.refY) * 0.06 * s, -(h - H) / 2, (h - H) / 2);
+  const [cv, x] = scratch('halo', W, H), sky = api.shot?.skyAt?.(api.t), list = !sky ? [[S.defaultSky, 1]] : typeof sky === 'string' ? [[sky, 1]] : sky;
+  clear(x, box);
+  let acc = 0;
+  for (const [name, wgt] of list) { if (!(wgt > 0)) continue; acc += wgt; x.globalAlpha = wgt / acc; x.drawImage(S.skyCanvases(name).back, (W - w) / 2 - ox, (H - h) / 2 - oy, w, h); }
+  x.globalAlpha = 1; x.globalCompositeOperation = 'destination-in';
+  x.save(); x.translate(cx, cy); x.scale(1, ry / rx);
+  const g = x.createRadialGradient(0, 0, 0, 0, 0, rx);
+  g.addColorStop(0, `rgba(0,0,0,${a})`); g.addColorStop(0.42, `rgba(0,0,0,${a * 0.88})`); g.addColorStop(0.75, `rgba(0,0,0,${a * 0.35})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g; x.fillRect(-rx, -rx, 2 * rx, 2 * rx); x.restore();
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(cv, box[0], box[1], box[2] - box[0], box[3] - box[1], box[0], box[1], box[2] - box[0], box[3] - box[1]);
   ctx.restore();
 }
 
@@ -608,14 +742,24 @@ export const overlays = {
   'empty-house': { layer: 'sky', draw(ctx, api) { if (api.set) api.set.lamps = 0; } },
   'pressed-trail': {
     layer: 'back',
+    // A band of grass someone has walked through: bent blades lying along the way she went, mostly darker (the blades
+    // flattened into their own shade), some pale (the undersides turned up to the light). Feathered at its edges (the
+    // blades thin out across it) and broken along its length (here the grass sprang back), not a painted line.
     draw(ctx, api) {
-      const k = (api.params.faint ?? 0.3) + (1 - (api.params.faint ?? 0.3)) * revealAt(api), r = rng(6200), n = 220;
+      const k = (api.params.faint ?? 0.3) + (1 - (api.params.faint ?? 0.3)) * revealAt(api), r = rng(6200), nz = noise1(6201), n = 1100;
+      ctx.save(); ctx.lineCap = 'round';
       for (let i = 0; i < n; i++) {
-        const [x, y, a] = polyAt(TRAIL, i / n + (r() - 0.5) * 0.004), s = villageScale(y), w = (16 + r() * 10) * s, off = (r() - 0.5) * 12 * s;
-        ctx.fillStyle = `rgba(48,74,44,${(0.16 + r() * 0.12) * k})`;
-        blob(ctx, x - Math.sin(a) * off, y + Math.cos(a) * off * 0.4, w * 0.9, w * 0.22, a, r, 7);
-        if (r() < 0.35) { ctx.fillStyle = `rgba(190,206,150,${0.12 * k})`; blob(ctx, x - Math.sin(a) * off * 1.6, y + Math.cos(a) * off * 0.6 - 2 * s, w * 0.5, w * 0.1, a + 0.2, r, 6); }
+        const v = r(), across = (r() + r() + r() - 1.5) / 1.5, len = r(), lean = r() - 0.5, pale = r() < 0.28, wd = r();
+        const [x, y, a] = polyAt(TRAIL, v), s = villageScale(y), keep = smooth(0.18, 0.42, nz(v * 16 + 3));
+        const fade = (1 - across * across) * keep * k;
+        if (fade < 0.02) continue;
+        const off = across * TRAIL_W * s, px = x - Math.sin(a) * off, py = y + Math.cos(a) * off * 0.45;
+        const L = (9 + len * 15) * s, dir = a + lean * 0.8, ex = px + Math.cos(dir) * L, ey = py + Math.sin(dir) * L * 0.5;
+        ctx.strokeStyle = pale ? `rgba(200,214,160,${0.3 * fade})` : `rgba(40,64,38,${0.36 * fade})`;
+        ctx.lineWidth = (1.3 + wd * 1.6) * s;
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.quadraticCurveTo((px + ex) / 2 + Math.cos(dir + 1.57) * 2 * s, (py + ey) / 2 - 1.5 * s, ex, ey); ctx.stroke();
       }
+      ctx.restore();
     },
   },
 };
@@ -626,4 +770,5 @@ export const custom = {
   'crest-figure': { layer: 'sky', draw: drawCrestFigure },
   'eye-glint': { layer: 'grade', draw: drawEyeGlint },
   'star-highlight': { layer: 'grade', draw: drawStarHighlight },
+  'firefly-fill': { layer: 'grade', draw: drawFireflyFill },
 };

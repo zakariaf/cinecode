@@ -1,5 +1,6 @@
 // Words on screen: burned-in captions (wrapped, kept inside safe margins, moved to the top when they would
-// cover a speaker's head), in-picture titles, and the parchment opening and end cards.
+// cover a head there, a speaker's above all; sound captions and non-verbal lines in dialogue size and colour, in italics), in-picture
+// titles (at a height chosen by frame.mjs), and the parchment opening and end cards.
 import { createCanvas } from '@napi-rs/canvas';
 import { rng, ink, wobble, canvas } from '../core/lib.mjs';
 import { paper } from '../paint/atmos.mjs';
@@ -9,11 +10,12 @@ export const SERIF = '"Hoefler Text", Georgia, "Times New Roman", serif';
 const CAP_FONT = 'Georgia, "Times New Roman", serif';
 const U = (W, H) => Math.min(W, H) / 1080;
 
-export function captionStyle(style, W, H) {
+// Sound captions ("[croak]") and non-verbal lines ("[laughs]") read like dialogue: the same size and colour, in italics.
+export function captionStyle(style, W, H, text = '') {
   const u = U(W, H);
   if (style === 'narration') return { size: Math.round(42 * u), font: `italic ${Math.round(42 * u)}px ${CAP_FONT}`, color: '#f8ead0', band: 0.34 };
-  if (style === 'sound') return { size: Math.round(34 * u), font: `italic ${Math.round(34 * u)}px ${CAP_FONT}`, color: '#efe6d6', band: 0 };
-  return { size: Math.round(44 * u), font: `${Math.round(44 * u)}px ${CAP_FONT}`, color: '#fffaf0', band: 0 };
+  const it = style === 'sound' || /^\s*\[/.test(text);
+  return { size: Math.round(44 * u), font: `${it ? 'italic ' : ''}${Math.round(44 * u)}px ${CAP_FONT}`, color: '#fffaf0', band: 0 };
 }
 const maxWidth = (W, H) => Math.min(W * 0.84, 1500 * U(W, H));
 
@@ -44,7 +46,7 @@ export function wrapText(ctx, text, maxW) {
  * → [{ t0, t1, text, lines }]
  */
 export function chunkCaption(text, style, t0, t1, W, H) {
-  const ctx = measurer(), st = captionStyle(style, W, H); ctx.font = st.font;
+  const ctx = measurer(), st = captionStyle(style, W, H, text); ctx.font = st.font;
   const lines = wrapText(ctx, text, maxWidth(W, H));
   if (lines.length <= 2) return [{ t0, t1, text, lines }];
   // regroup the words into chunks at sentence/clause boundaries where possible
@@ -55,14 +57,15 @@ export function chunkCaption(text, style, t0, t1, W, H) {
   return chunks.map(c => { const d = ((t1 - t0) * c.length) / total, out = { t0: t, t1: t + d, text: c, lines: wrapText(ctx, c, maxWidth(W, H)) }; t += d; return out; });
 }
 
-// Where a caption goes. avoid: screen boxes (speakers' heads) it should not cover. → { lines, box, top, st }
+// Where a caption goes: at the bottom, or at the top when that covers less of the heads in the picture. avoid: screen
+// boxes, or { box, w } (a weight: a speaker's head counts more than a listener's). → { lines, box, top, st }
 export function layoutCaption(cap, W, H, avoid = []) {
-  const ctx = measurer(), st = captionStyle(cap.style, W, H); ctx.font = st.font;
+  const ctx = measurer(), st = captionStyle(cap.style, W, H, cap.text); ctx.font = st.font;
   const lines = cap.lines || wrapText(ctx, cap.text, maxWidth(W, H));
   const lh = st.size * 1.28, w = Math.max(...lines.map(l => ctx.measureText(l).width)), pad = st.size * 0.4;
   const blockH = lines.length * lh;
   const at = top => { const y0 = top ? H * 0.065 : H - H * 0.07 - blockH; return [W / 2 - w / 2 - pad, y0 - pad * 0.6, W / 2 + w / 2 + pad, y0 + blockH + pad * 0.4]; };
-  const hit = b => avoid.reduce((a, q) => a + Math.max(0, Math.min(b[2], q[2]) - Math.max(b[0], q[0])) * Math.max(0, Math.min(b[3], q[3]) - Math.max(b[1], q[1])), 0);
+  const hit = b => avoid.reduce((a, o) => { const q = o.box || o; return a + (o.w ?? 1) * Math.max(0, Math.min(b[2], q[2]) - Math.max(b[0], q[0])) * Math.max(0, Math.min(b[3], q[3]) - Math.max(b[1], q[1])); }, 0);
   const bottom = at(false), topB = at(true);
   const top = hit(bottom) > 0 && hit(topB) < hit(bottom);
   return { lines, box: top ? topB : bottom, top, st, lh };
@@ -89,18 +92,29 @@ export function drawCaption(ctx, L, alpha, W, H) {
   ctx.restore();
 }
 
-// A title over the picture (title beats): large glowing italic, centred in the upper half.
-export function drawTitle(ctx, cap, t, W, H) {
+// Where a title beat may go: "place" names (or a fraction of the frame height) for the title line's centre.
+export const TITLE_PLACES = { top: 0.16, upper: 0.3, center: 0.45, middle: 0.45, lower: 0.66, bottom: 0.8 };
+// The title's lettering: the title line's size and the block it covers around its centre line y (above / below).
+export function titleBlock(cap, W, H) {
+  const u = U(W, H), ctx = measurer();
+  let size = Math.round(96 * u);
+  ctx.font = `italic ${size}px ${SERIF}`;
+  while (ctx.measureText(cap.text).width > W * 0.86 && size > 20) { size -= 4; ctx.font = `italic ${size}px ${SERIF}`; }
+  let w = ctx.measureText(cap.text).width, below = size * 0.5;
+  if (cap.sub) { ctx.font = `italic ${Math.round(36 * u)}px ${SERIF}`; w = Math.max(w, ctx.measureText(cap.sub).width); below = size * 0.85 + 26 * u; }
+  return { size, w, above: size * 0.55, below };
+}
+
+// A title over the picture (title beats): large glowing italic, its line centred at (x, y) (default: the upper middle).
+export function drawTitle(ctx, cap, t, W, H, y = H * 0.38, x = W / 2) {
   const u = U(W, H), a = Math.min(ease((t - cap.t0) / 0.7), 1 - ease((t - (cap.t1 - 0.7)) / 0.7));
   if (a <= 0) return;
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const ctxM = ctx; let size = Math.round(96 * u);
-  ctxM.font = `italic ${size}px ${SERIF}`;
-  while (ctxM.measureText(cap.text).width > W * 0.86 && size > 20) { size -= 4; ctxM.font = `italic ${size}px ${SERIF}`; }
-  const y = H * 0.38;
-  ctx.shadowColor = 'rgba(15,10,8,.85)'; ctx.shadowBlur = 22 * u; ctx.fillStyle = '#fff8e8'; ctx.fillText(cap.text, W / 2, y);
-  ctx.shadowBlur = 6 * u; ctx.fillText(cap.text, W / 2, y);
-  if (cap.sub) { ctx.font = `italic ${Math.round(36 * u)}px ${SERIF}`; ctx.shadowBlur = 14 * u; ctx.fillStyle = '#fff0d4'; ctx.fillText(cap.sub, W / 2, y + size * 0.85); }
+  const { size } = titleBlock(cap, W, H);
+  ctx.font = `italic ${size}px ${SERIF}`;
+  ctx.shadowColor = 'rgba(15,10,8,.85)'; ctx.shadowBlur = 22 * u; ctx.fillStyle = '#fff8e8'; ctx.fillText(cap.text, x, y);
+  ctx.shadowBlur = 6 * u; ctx.fillText(cap.text, x, y);
+  if (cap.sub) { ctx.font = `italic ${Math.round(36 * u)}px ${SERIF}`; ctx.shadowBlur = 14 * u; ctx.fillStyle = '#fff0d4'; ctx.fillText(cap.sub, x, y + size * 0.85); }
   ctx.restore();
 }
 

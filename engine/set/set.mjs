@@ -9,6 +9,7 @@ import { SKY_TIMES, SKY_W, SKY_H, skyCanvases, skyHaze } from '../paint/sky.mjs'
 export { SKY_TIMES };
 export const MIN_ZOOM = 0.6;                       // at 1920×1080
 export const MAX_VIEW = { w: 1920 / MIN_ZOOM, h: 1080 / MIN_ZOOM };   // widest world rect a camera may show
+export const INK_FADE = 24;                        // a prop's silhouette ink fades out over this many units above its inkFloor
 
 // ───────────── geometry ─────────────
 export function pointInPoly(P, x, y) {
@@ -298,8 +299,10 @@ export function makeSet(def) {
       p.clipped = T && (T.x0 === 0 || T.y0 === 0 || T.x1 === c.width - 1 || T.y1 === c.height - 1);
       const tx0 = T ? Math.max(0, T.x0 - pad) : 0, ty0 = T ? Math.max(0, T.y0 - pad) : 0, tx1 = T ? Math.min(c.width, T.x1 + 1 + pad) : 1, ty1 = T ? Math.min(c.height, T.y1 + 1 + pad) : 1;
       const [t, tc] = canvas(tx1 - tx0, ty1 - ty0); tc.drawImage(c, -tx0, -ty0);
-      p.sprite = p.inkW === 0 ? t : inkSilhouette(t, (p.inkW ?? 2.2) * res, { light });
       p.sx = bx0 + tx0 / res; p.sy = by0 + ty0 / res; p.sw = t.width / res; p.sh = t.height / res;
+      // inkFloor (world y): the silhouette ink fades out over the INK_FADE units above it (grass at a trunk's foot)
+      const fade = p.inkFloor != null ? [(p.inkFloor - INK_FADE - p.sy) * res, (p.inkFloor - p.sy) * res] : null;
+      p.sprite = p.inkW === 0 ? t : inkSilhouette(t, (p.inkW ?? 2.2) * res, { light, fade });
       p.box = [p.sx, p.sy, p.sx + p.sw, p.sy + p.sh];
     }
     S.built = true;
@@ -363,7 +366,7 @@ export function makeSet(def) {
       return S._sky.get(name);
     }
     const known = SKY_TIMES.includes(name) ? name : S.defaultSky;
-    return skyCanvases(known, { side, tint: def.skyTint || null });
+    return skyCanvases(known, { side, moonSide: def.moonSide ?? side, tint: def.skyTint || null });
   };
   S.drawSky = (ctx, cam, sky, t = 0) => {
     const list = !sky ? [[S.defaultSky, 1]] : typeof sky === 'string' ? [[sky, 1]] : sky;

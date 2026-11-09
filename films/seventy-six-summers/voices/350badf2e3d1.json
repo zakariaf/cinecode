@@ -1,0 +1,32 @@
+{
+ "id": "350badf2e3d1",
+ "who": "nell",
+ "text": "Hahaha!",
+ "voice": "Sulafat",
+ "tone": "elderly, warm, wry, giggling",
+ "prompt": "[warm, wry, giggling] Hahaha!",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 4.18,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0.99,1,1,0.829,0.446,0.108,0,0,0,0,0,0.042,1,1,1,0.901,0.51,0.831,0.964,0.74,0.319,0.127,0.841,0.98,0.77,0.349,0.133,0.332,1,0.97,0.672,0.24,0.096,0.867,0.756,0.352,0,0,0.106,0.973,1,0.833,0.238,0,0,0,0,0,0,0,0,0.671,1,0.96,0.629,0.2,0,0,0,0,0,0,0.775,1,0.952,0.759,0.416,0.106,0,0,0,0,0,0,0,0,0,0,0,1,1,0.955,0.631,0.229,0,0,0,0.998,1,1,0.86,0.449,0.097,0,0,0,0,0,0,0],
+ "qa": {
+  "wer": null,
+  "transcript": "",
+  "nonverbal": true,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "warm, wry, giggling",
+    "wer": null,
+    "transcript": "",
+    "nonverbal": true,
+    "dur": 4.18
+   }
+  ]
+ }
+}

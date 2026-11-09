@@ -6,9 +6,10 @@ import os from 'node:os';
 import nodePath from 'node:path';
 import { createCanvas } from '@napi-rs/canvas';
 import { getRig, listRigs, register, requireRig, mixPose, idle, RIG_KINDS, EXPRESSIONS } from '../engine/cast/index.mjs';
-import { faceOf, pitchPose, gaze } from '../engine/cast/rig.mjs';
-import { SHADE, cel, darken, lighten, groundShadow, eye } from '../engine/core/style.mjs';
+import { faceOf, pitchPose, gaze, Tee } from '../engine/cast/rig.mjs';
+import { SHADE, cel, darken, lighten, groundShadow, eye, smoothPts } from '../engine/core/style.mjs';
 import { castSheet } from '../engine/cast/sheet.mjs';
+import { HJ, HS } from '../engine/cast/hare.mjs';
 
 const ANIMALS = ['hare', 'tortoise', 'fox', 'owl', 'squirrel', 'songbird', 'mouse', 'hedgehog', 'badger', 'deer', 'frog', 'beetle', 'butterfly'];
 const FLYERS = ['owl', 'songbird', 'butterfly'];
@@ -505,4 +506,339 @@ test('owl: one-eye expression (one open, one shut) — also when woken from slee
   assert.ok(eyeDiff(one, shut, 6.6) > 300 && eyeDiff(one, n, -6.6) > 300, 'the other is open');
   assert.ok(pixelDiff(shot(O, { pose: O.poses.stand, expr: 'one-eye', blink: 1 }, o).data, one.data) > 50, 'the open eye still blinks');
   assert.ok(pixelDiff(shot(O, { pose: O.poses.sleep, expr: 'one-eye' }, o).data, shot(O, { pose: O.poses.sleep }, o).data) > 100, 'a sleeping owl opens one eye');
+});
+
+// ───────────── round 3: animal-rig polish ─────────────
+// the tortoise eye at s = 10: iris pixels (warm), catch-light pixels (white) and the iris's top edge, from res.head/mouth
+function tortoiseEyeAt(st, params = ELDER) {
+  const T = getRig('tortoise'), s = 10, R = shot(T, { pose: T.poses.stand, params, ...st }, { s, W: 1100, H: 700, cx: 450, cy: 650 });
+  const h = R.res.head, m = R.res.mouth, a = Math.atan2(m[1] - h[1], m[0] - h[0]) - Math.atan2(3.8, 6.5);
+  const ex = h[0] + (4.6 * Math.cos(a) + 2.4 * Math.sin(a)) * s, ey = h[1] + (4.6 * Math.sin(a) - 2.4 * Math.cos(a)) * s;
+  let iris = 0, white = 0, top = Infinity;
+  for (let y = Math.round(ey - 3 * s); y < ey + 3 * s; y++) for (let x = Math.round(ex - 3 * s); x < ex + 3 * s; x++) {
+    const i = (y * R.W + x) * 4, r = R.data[i], g = R.data[i + 1], b = R.data[i + 2];
+    if (r > 120 && r - b > 80) { iris++; top = Math.min(top, (y - ey) / s); }
+    if (r > 235 && g > 235 && b > 235) white++;
+  }
+  return { iris, white, top };
+}
+test('tortoise: lids 0.6 is an old, heavy-lidded but awake eye; speaking and surprise lift the lid; a blink shuts it', () => {
+  const n = tortoiseEyeAt({}), sp = tortoiseEyeAt({ speaking: 1 }), talk = tortoiseEyeAt({ talk: 0.6 }), sur = tortoiseEyeAt({ expr: 'surprised' });
+  assert.ok(n.iris > 300, `iris shows under the heavy lid (${n.iris} px)`);
+  assert.ok(n.white > 10, `the catch-light shows (${n.white} px)`);
+  assert.ok(n.iris < tortoiseEyeAt({}, { ...ELDER, lids: 0 }).iris * 0.8, 'still heavier than a young eye');
+  assert.ok(sp.iris > n.iris + 60 && sp.top < n.top - 0.3, `st.speaking lifts the lid (${n.iris} → ${sp.iris} px)`);
+  assert.ok(talk.iris > n.iris + 20, 'without st.speaking the jaw (talk) lifts it a little');
+  assert.ok(sur.iris > sp.iris && sur.top < sp.top, 'surprise lifts it right up');
+  const bl = tortoiseEyeAt({ blink: 1 });
+  assert.equal(bl.iris + bl.white, 0, 'a blink is a full close');
+  assert.equal(tortoiseEyeAt({}, { ...ELDER, lids: 1 }).iris, 0, 'lids 1 is the sleepy end');
+  assert.equal(pixelDiff(shot(getRig('tortoise'), { pose: getRig('tortoise').poses.stand, params: ELDER, speaking: 0 }).data, shot(getRig('tortoise'), { pose: getRig('tortoise').poses.stand, params: ELDER }).data), 0, 'speaking 0 with no talk is the resting eye');
+});
+
+test('tortoise: looking up (tilt +1) bends the neck in an S and tips the head ~40°, the neck keeping its length (no periscope)', () => {
+  const T = getRig('tortoise'), root = [29, -17];               // the neck's root in the shell, standing
+  const at = tilt => { const r = T.draw(null, 0, 0, 1, 1, { pose: T.poses.stand, params: ELDER, tilt, t: 0.5 }); return { ...r, pitch: -(Math.atan2(r.mouth[1] - r.head[1], r.mouth[0] - r.head[0]) - Math.atan2(3.8, 6.5)) * 180 / Math.PI, reach: Math.hypot(r.head[0] - root[0], r.head[1] - root[1]) }; };
+  const a = at(0), b = at(1);
+  assert.ok(b.pitch > 35 && b.pitch < 50, `head pitched up ${b.pitch.toFixed(1)}°`);
+  assert.ok(b.head[1] < a.head[1] - 12, `the head rises (${a.head[1].toFixed(1)} → ${b.head[1].toFixed(1)})`);
+  assert.ok(b.reach < a.reach * 1.15, `the neck keeps its length: root→head ${a.reach.toFixed(1)} → ${b.reach.toFixed(1)}`);
+  assert.ok(b.head[0] < a.head[0] && b.head[0] > root[0] + 15, 'the head draws back over the curve, still well out of the shell');
+  let prev = a;
+  for (let k = 1; k <= 8; k++) { const c = at(k / 8); assert.ok(c.head[1] <= prev.head[1] + 0.3 && c.pitch >= prev.pitch - 1, `smooth lift at tilt ${k / 8}`); prev = c; }
+  // the neck comes out from under the carapace: in flat test colours, no skin over the shell's front edge and rim
+  const s = 4, cx = 300, cy = 330, P = { shell: '#00a000', rim: '#0000c0', skin: '#ff00ff', seam: '#004000', moss: null, lids: 0.6 };
+  for (const tilt of [0, 1]) {
+    const R = shot(T, { pose: T.poses.stand, params: P, tilt }, { s, W: 700, H: 360, cx, cy });
+    let skin = 0, shell = 0;
+    for (let v = 30; v <= 36; v += 0.25) for (let u = -26; u <= -12; u += 0.25) {
+      const i = (Math.round(cy + u * s) * 700 + Math.round(cx + v * s)) * 4, [r, g, b] = [R.data[i], R.data[i + 1], R.data[i + 2]];
+      if (r > 120 && b > 120 && g < 110) skin++; else if (g > r + 30 || b > r + 40) shell++;
+    }
+    assert.ok(skin === 0 && shell > 300, `tilt ${tilt}: the shell covers the neck's root (${skin} skin, ${shell} shell samples)`);
+  }
+  // the wave gesture lifts the head on the same curve
+  const w = T.gestures.wave.at(0.5, T.poses.stand);
+  assert.ok(w.nb > 0.5, 'wave bends the neck too');
+});
+
+test('squirrel: the run tail streams behind and flows (a travelling wave), not a stiff vertical paddle', () => {
+  const S = getRig('squirrel'), o = { s: 4, W: 600, H: 340, cx: 340, cy: 300 };
+  const info = pose => { const R = shot(S, { pose }, o); let top = 0, left = R.W;
+    for (let y = 0; y < R.H && !top; y++) for (let x = 0; x < R.cx - 8 * R.s; x++) if (R.data[(y * R.W + x) * 4 + 3] > 128) { top = (y - R.cy) / R.s; break; }
+    for (let x = 0; x < R.W && left === R.W; x++) for (let y = 0; y < R.H; y++) if (R.data[(y * R.W + x) * 4 + 3] > 128) { left = x; break; }
+    return { top, back: (left - R.cx) / R.s, data: R.data }; };
+  const ph = [0, 0.25, 0.5, 0.75].map(u => info(S.gaits.run(u)));
+  for (const [i, q] of ph.entries()) {
+    assert.ok(q.back < -42, `run@${i / 4}: the tail streams out behind (${q.back.toFixed(1)})`);
+    assert.ok(q.top > -40, `run@${i / 4}: not held up as a paddle (top ${q.top.toFixed(1)})`);
+  }
+  const tops = ph.map(q => q.top);
+  assert.ok(Math.max(...tops) - Math.min(...tops) > 3, `the tail rises and falls through the stride (${tops.map(v => v.toFixed(1)).join(' ')})`);
+  assert.ok(pixelDiff(ph[0].data, ph[2].data) > 400, 'the brush changes shape through the stride');
+  assert.equal(pixelDiff(info(S.gaits.run(0)).data, info(S.gaits.run(1)).data), 0, 'the wave loops');
+  const wk = [0, 0.25, 0.5, 0.75].map(u => info(S.gaits.walk(u)));
+  assert.ok(pixelDiff(wk[0].data, wk[2].data) > 200, 'the walking tail sways as well');
+  for (const p of Object.values(S.poses)) for (const k of ['tf', 'tws', 'twc']) assert.ok(finite(p[k]), `pose key ${k} is a number`);
+});
+
+test('squirrel: the hop tail follows through — trails low and back in flight, is thrown up and curls over on landing', () => {
+  const S = getRig('squirrel'), J = S.gestures.jump, o = { s: 4, W: 700, H: 420, cx: 420, cy: 380 };
+  // top: the brush's highest point and back: how far behind the contact it reaches, in units of the lifted body
+  const info = (u, k) => { const p = J.at(u, S.poses.stand), R = shot(S, { pose: p, params: { tail: k } }, o), lift = p.lift || 0; let top = null, left = R.W;
+    for (let y = 0; y < R.H && top === null; y++) for (let x = 0; x < R.cx - 8 * R.s; x++) if (R.data[(y * R.W + x) * 4 + 3] > 128) { top = (y - R.cy) / R.s + lift; break; }
+    for (let x = 0; x < R.W && left === R.W; x++) for (let y = 0; y < R.H; y++) if (R.data[(y * R.W + x) * 4 + 3] > 128) { left = x; break; }
+    return { top, back: (left - R.cx) / R.s, data: R.data }; };
+  for (const k of [1, 1.35]) {
+    const q = u => info(u, k), rest = q(0);
+    for (const u of [0.3, 0.4, 0.5, 0.6, 0.7]) {
+      const f = q(u), mid = u >= 0.4 && u <= 0.6;
+      assert.ok(f.back < (mid ? -44 : -38), `tail ${k}, hop ${u}: the brush trails out behind (${f.back.toFixed(1)})`);
+      assert.ok(f.top > (mid ? -40 : -50), `tail ${k}, hop ${u}: not held up as a paddle (top ${f.top.toFixed(1)})`);
+    }
+    assert.ok(q(0.78).top < q(0.6).top - 12, `tail ${k}: thrown up as the body drops (${q(0.6).top.toFixed(1)} → ${q(0.78).top.toFixed(1)})`);
+    assert.ok(q(0.85).back > rest.back + 5, `tail ${k}: overshoots on landing, curling over the back (${rest.back.toFixed(1)} → ${q(0.85).back.toFixed(1)})`);
+    assert.ok(pixelDiff(q(0.4).data, q(0.6).data) > 400, `tail ${k}: the brush changes shape through the flight`);
+    assert.equal(pixelDiff(rest.data, q(1).data), 0, `tail ${k}: a hop ends where the next begins`);
+  }
+  // smooth: no key pops (the film's hop moves run these back to back)
+  let prev = J.at(0, S.poses.stand);
+  for (let i = 1; i <= 96; i++) {
+    const p = J.at(i / 96, S.poses.stand);
+    for (const key of ['ta', 'tc', 'tf', 'tws', 'twc', 'br']) assert.ok(Math.abs(p[key] - prev[key]) < 0.22, `${key} jumps at u=${(i / 96).toFixed(3)} (${prev[key].toFixed(2)} → ${p[key].toFixed(2)})`);
+    prev = p;
+  }
+  for (const key of ['ta', 'tc', 'tf']) assert.ok(Math.abs(J.at(0, S.poses.stand)[key] - S.poses.stand[key]) < 1e-9, `${key} starts at the stand pose`);
+});
+
+test('squirrel: tail 1.35 stays a squirrel\'s tail (bigger than 1, not grotesque)', () => {
+  const S = getRig('squirrel'), o = { s: 4, W: 600, H: 340, cx: 340, cy: 300 };
+  for (const [name, pose] of [['sit', S.poses.sit], ['stand', S.poses.stand], ['run', S.gaits.run(0.3)]]) {
+    const c = k => coverage(shot(S, { pose, params: { tail: k } }, o)), r = c(1.35) / c(1);
+    assert.ok(r > 1.05 && r < 1.2, `${name}: coverage 1.35/1 = ${r.toFixed(3)}`);
+  }
+});
+
+test('squirrel: "flop" over a shell is grounded — a contact shadow under the belly, the tail draped along the dome', () => {
+  const S = getRig('squirrel'), T = getRig('tortoise'), s = 3, W = 800, H = 460, cx = 420, cy = 420;
+  const lum = (d, i) => 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2];
+  for (const [ratio, k] of [[1.35, 1.35], [1.35, 1]]) for (const tp of ['stand', 'sit']) {
+    const cv = createCanvas(W, H), ctx = cv.getContext('2d'), m = T.mount(T.poses[tp], ELDER);
+    T.draw(ctx, cx, cy, s * ratio, 1, { pose: T.poses[tp], params: ELDER, shadow: false, t: 0.5 });
+    const shell = ctx.getImageData(0, 0, W, H).data, c2 = createCanvas(W, H), x2 = c2.getContext('2d'), mx = cx + m[0] * s * ratio, my = cy + m[1] * s * ratio;
+    const st = { pose: S.poses.flop, params: { tail: k }, shadow: false, t: 0.5 };
+    S.draw(x2, mx, my, s, 1, st);                             // alone on a clear canvas: its own silhouette
+    S.draw(ctx, mx, my, s, 1, st);                            // lying on the shell
+    const sq = x2.getImageData(0, 0, W, H).data, both = ctx.getImageData(0, 0, W, H).data, tag = `shell ×${ratio} ${tp}, tail ${k}`;
+    let band = 0, halo = 0;                                   // just under the belly's lowest ink: the shell darkened, the silhouette clear
+    for (let x = Math.round(mx - 5 * s); x < mx + 5 * s; x++) {
+      let yl = -1; for (let y = 0; y < H; y++) if (sq[(y * W + x) * 4 + 3] > 128) yl = y;
+      if (yl >= 0) for (let y = yl + 2; y < yl + 2 + 1.5 * s; y++) { const i = (y * W + x) * 4; if (shell[i + 3] > 200 && lum(both, i) < lum(shell, i) - 6) band++; if (sq[i + 3] > 8) halo++; }
+    }
+    assert.ok(band > 30, `${tag}: contact shadow darkens the shell under the belly (${band} px)`);
+    // the shade only darkens what is beneath: it is not part of the squirrel's silhouette, so a rim light (which
+    // paints the actor alone onto a clear canvas) never lights it up into a pale haze under the belly
+    assert.equal(halo, 0, `${tag}: no contact shade in the squirrel's own silhouette (${halo} px)`);
+    for (let du = 16; du <= 40; du += 4) {
+      const x = Math.round(mx - du * s); let low = -1, top = -1;
+      for (let y = 0; y < H; y++) if (sq[(y * W + x) * 4 + 3] > 128) low = y;
+      for (let y = 0; y < H; y++) if (shell[(y * W + x) * 4 + 3] > 128) { top = y; break; }
+      if (low < 0) continue;
+      const gap = (top - low) / s;
+      assert.ok(gap > -2.5 && gap < 1.5, `${tag}: ${du} units back the tail lies on the dome (${gap.toFixed(1)} units; - overlaps it)`);
+    }
+  }
+});
+
+test('squirrel: a dry tail riding a shell stays on or above the dome, never hanging below its edge', () => {
+  const S = getRig('squirrel'), T = getRig('tortoise'), s = 3, W = 900, H = 460, cx = 450, cy = 420, ratio = 1.35;
+  for (const name of ['sit', 'stand', 'alert']) for (const fT of [1, -1]) for (const tp of [T.poses.stand, T.gaits.walk(0.3)]) for (const k of [1, 1.35]) {
+    const cv = createCanvas(W, H), ctx = cv.getContext('2d'), m = T.mount(tp, ELDER);
+    T.draw(ctx, cx, cy, s * ratio, fT, { pose: tp, params: ELDER, shadow: false, t: 0.5 });
+    const shell = ctx.getImageData(0, 0, W, H).data, c2 = createCanvas(W, H), x2 = c2.getContext('2d'), mx = cx + m[0] * s * ratio * fT;
+    S.draw(x2, mx, cy + m[1] * s * ratio, s, 1, { pose: S.poses[name], params: { tail: k }, shadow: false, t: 0.5 });
+    const sq = x2.getImageData(0, 0, W, H).data;
+    for (let x = 0; x < mx - 8 * s; x++) {
+      let low = -1, top = -1;
+      for (let y = 0; y < H; y++) if (sq[(y * W + x) * 4 + 3] > 128) low = y;
+      for (let y = 0; y < H; y++) if (shell[(y * W + x) * 4 + 3] > 128) { top = y; break; }
+      if (low >= 0 && top >= 0) assert.ok((top - low) / s > -1, `${name} tail ${k} (tortoise face ${fT}): ${((low - top) / s).toFixed(1)} units below the dome at x ${((x - mx) / s).toFixed(0)}`);
+    }
+  }
+});
+
+test('eye(): opt.cheek is a smiling lower lid (FACES.happy uses it); the happy face reads warm, not stern', () => {
+  const draw = opt => { const cv = createCanvas(80, 80), ctx = cv.getContext('2d'); eye(ctx, 40, 40, 12, 14, 'open', '#2a1a14', 0, 0.04, -0.2, opt); return ctx.getImageData(0, 0, 80, 80).data; };
+  const a = draw({}), b = draw({ cheek: 0.55 });
+  const lower = d => { let n = 0; for (let y = 47; y < 56; y++) for (let x = 28; x < 52; x++) if (d[(y * 80 + x) * 4 + 3] > 128) n++; return n; };
+  assert.ok(pixelDiff(a, b) > 40, 'cheek changes the eye');
+  assert.ok(lower(b) < lower(a) * 0.8, `the lower lid rises over the eye (${lower(a)} → ${lower(b)} px)`);
+  assert.equal(pixelDiff(draw({ cheek: 0 }), a), 0, 'cheek 0 is the plain eye');
+  const H = faceOf({ expr: 'happy' });
+  assert.ok(H.cheek > 0.3 && H.lid < 0.1 && H.browT < 0 && H.browY > 0.3, 'happy: cheeks up, lids open, brows raised and soft');
+  for (const e of ['neutral', 'sad', 'angry']) assert.ok(!faceOf({ expr: e }).cheek, `${e}: no cheek`);
+  const Hr = getRig('hare'), o = { s: 5, W: 520, H: 600, cx: 260, cy: 580 };
+  assert.ok(pixelDiff(shot(Hr, { pose: Hr.poses.stand, expr: 'happy' }, o).data, shot(Hr, { pose: Hr.poses.stand }, o).data) > 100, 'the hare\'s happy face differs');
+});
+
+test('hare: the jaw line runs into a neck and the chest (no tuft hanging under the chin, no floating head)', () => {
+  const Hr = getRig('hare'), s = 4;
+  for (const name of ['stand', 'sit', 'alert']) {
+    const R = shot(Hr, { pose: Hr.poses[name] }, { s, W: 700, H: 520, cx: 330, cy: 480 }), h = R.res.head, m = R.res.mouth;
+    let prev = -Infinity, n = 0;
+    for (let x = Math.round(m[0]); x > h[0] - 14 * s; x -= s) {          // the lower edge, from the mouth back past the skull
+      let y = Math.round(h[1]); if (R.data[(y * R.W + x) * 4 + 3] < 128) continue;
+      while (y < R.H - 1 && R.data[(y * R.W + x) * 4 + 3] >= 128) y++;
+      const e = (y - h[1]) / s; if (e > 30) break;             // past the throat into the chest and legs
+      n++;
+      assert.ok(e > prev - 1, `${name}: the underside rises again ${(prev - e).toFixed(1)} units at ${((x - h[0]) / s).toFixed(0)} — a gap or a hanging tuft`);
+      prev = Math.max(prev, e);
+    }
+    assert.ok(n > 10, `${name}: sampled the chin`);
+  }
+});
+
+test('hare: the near foreleg grows out of the chest — no shade slab at the shoulder, no cream notch, inked outline', () => {
+  const Hr = getRig('hare'), s = 9, W = 900, H = 1100, cx = 300, cy = 1000;
+  const lum = (d, i) => 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2];
+  for (const [name, pose] of [['stand', Hr.poses.stand], ['sit', Hr.poses.sit], ['walk 0.75', Hr.gaits.walk(0.75)]]) {
+    const cv = createCanvas(W, H), ctx = cv.getContext('2d'); Hr.draw(ctx, cx, cy, s, 1, { pose, shadow: false, t: 0.5 });
+    const d = ctx.getImageData(0, 0, W, H).data, J = HJ(pose), g = J.g + (pose.lift || 0), sc = ([x, y]) => [Math.round(cx + x * s), Math.round(cy + (y - g) * s)];
+    const sd = HS(J.S, J.paw1, 4.5), S = sc(J.S);
+    // down the leg's shaded edge from above its top into the shoulder: the shadow fades in, no hard-topped slab
+    let prev = null, step = 0;
+    for (let t = -1; t <= sd.r * 0.75; t += 0.25) {
+      const off = 4.5 * 1.45 - 1.6, [x, y] = sc([sd.top[0] + sd.ux * t - sd.bx * off, sd.top[1] + sd.uy * t - sd.by * off]), L = lum(d, (y * W + x) * 4);
+      if (prev !== null) step = Math.max(step, Math.abs(L - prev)); prev = L;
+    }
+    assert.ok(step < 8, `${name}: the leg's shadow starts with a hard edge in the shoulder (a ${step.toFixed(0)} step)`);
+    // the front silhouette below the shoulder: inked at its edge, and no belly cream just inside the ink
+    let bare = 0, cream = 0;
+    for (let y = S[1]; y < S[1] + sd.r * s; y++) {
+      let xr = -1; for (let x = W - 1; x >= 0; x--) if (d[(y * W + x) * 4 + 3] > 128) { xr = x; break; }
+      if (xr < 0) continue;
+      let ink = false; for (let x = xr; x > xr - 0.7 * s; x--) if (lum(d, (y * W + x) * 4) < 70) ink = true;
+      if (!ink) bare++;
+      let x = xr; while (x > 0 && lum(d, (y * W + x) * 4) < 90) x--;
+      for (let k = 0; k < 2.5 * s; k++, x--) { const i = (y * W + x) * 4; if (Math.abs(d[i] - 239) + Math.abs(d[i + 1] - 226) + Math.abs(d[i + 2] - 200) < 30) cream++; }
+    }
+    assert.equal(bare, 0, `${name}: ${bare} rows of the chest/leg silhouette without ink`);
+    assert.ok(cream < 5, `${name}: belly cream shows as a notch between the leg and the chest outline (${cream} px)`);
+  }
+});
+
+test('fox: one head — the cream cheek and jaw are painted inside it (no inked bib flap, no separate jaw wedge)', () => {
+  const F = getRig('fox'), s = 6, W = 900, H = 700, cx = 380, cy = 660;
+  const innerInk = (pose, st) => {                              // dark ink strokes inside the silhouette under the head
+    const cv = createCanvas(W, H), ctx = cv.getContext('2d'), r = F.draw(ctx, cx, cy, s, 1, { pose, shadow: false, t: 0.5, ...st }), d = ctx.getImageData(0, 0, W, H).data, a = (x, y) => d[(y * W + x) * 4 + 3];
+    let n = 0; const [hx, hy] = r.head;
+    for (let y = Math.round(hy + 2 * s); y < hy + 16 * s; y++) for (let x = Math.round(hx - 16 * s); x < hx + 6 * s; x++) {
+      const i = (y * W + x) * 4, R = d[i], G = d[i + 1], B = d[i + 2];
+      if (d[i + 3] < 200 || 0.3 * R + 0.59 * G + 0.11 * B > 75 || Math.abs(R - B) > 30 || Math.abs(R - G) > 30) continue;
+      if (a(x - 5, y) > 200 && a(x + 5, y) > 200 && a(x, y - 5) > 200 && a(x, y + 5) > 200) n++;
+    }
+    return n;
+  };
+  for (const name of ['stand', 'sit', 'alert']) {
+    const closed = innerInk(F.poses[name], {}), open = innerInk(F.poses[name], { expr: 'surprised' });
+    assert.ok(closed < 300, `${name}: no inked flap under the head (${closed} px of inner ink)`);
+    assert.ok(open - closed < 80, `${name}: opening the mouth adds no outlined jaw wedge (+${open - closed} px)`);
+  }
+});
+
+test('Tee.mask: a hiding clip adds no bounds and keeps later fills tracked (Tee.clip does both)', () => {
+  const fillAfter = how => { const T = new Tee(null); T.save(); T.beginPath(); T.rect(-400, -400, 800, 800); T.arc(0, 0, 3, 0, 7); T[how]('evenodd'); T.beginPath(); T.rect(0, 0, 10, 5); T.fill(); T.restore(); return T.box(); };
+  assert.deepEqual(fillAfter('mask'), [0, 0, 10, 5]);
+  assert.deepEqual(fillAfter('clip'), [-400, -400, 400, 400]);
+  const cv = createCanvas(20, 20), ctx = cv.getContext('2d'), T = new Tee(ctx);
+  T.beginPath(); T.rect(0, 0, 20, 20); T.arc(10, 10, 5, 0, 7); T.mask('evenodd'); T.fillStyle = '#000'; T.fillRect(0, 0, 20, 20);
+  const d = ctx.getImageData(0, 0, 20, 20).data;
+  assert.ok(d[(10 * 20 + 10) * 4 + 3] === 0 && d[(1 * 20 + 1) * 4 + 3] === 255, 'the mask hides the disc, paints the rest');
+});
+
+// ───────────── round 3: close-up polish (smooth outlines, the squirrel's mouth and eyes, point, sprawl) ─────────────
+// the silhouette's top edge, to subpixel precision (coverage-weighted), for columns x0..x1 of a render
+const topEdge = (R, x0, x1, y0 = 0) => { const out = []; for (let x = Math.round(x0); x <= x1; x++) { let y = y0, t = 0; while (y < R.H && R.data[(y * R.W + x) * 4 + 3] < 250) { t += 1 - R.data[(y * R.W + x) * 4 + 3] / 255; y++; } out.push(y0 + t); } return out; };
+// the worst kink in an edge profile: the largest second difference over a k-pixel stencil (a facet corner of a polygon
+// shows as a spike; a smooth curve of radius r stays near k² / r)
+const kink = (e, k) => { let m = 0; for (let i = k; i < e.length - k; i++) m = Math.max(m, Math.abs(e[i - k] - 2 * e[i] + e[i + k])); return m; };
+
+test('smoothPts: fine outlines pass through untouched; coarse ones become curves through the same points, corners stay sharp', () => {
+  const sq = createCanvas(10, 10).getContext('2d');
+  const hex = Array.from({ length: 8 }, (_, i) => [Math.cos(i * Math.PI / 4) * 10, Math.sin(i * Math.PI / 4) * 10]);
+  assert.equal(smoothPts(sq, hex, { px: 9 }), hex, 'segments under px screen pixels: the same array');
+  const T = new Tee(null, 20); T.scale(20, 20);                               // 20 px per unit
+  const S = smoothPts(T, hex);
+  assert.ok(S.length > 8 * 15, `resampled to ~4 px steps (${S.length} points)`);
+  for (const q of hex) assert.ok(S.some(p => Math.hypot(p[0] - q[0], p[1] - q[1]) < 1e-9), 'passes through every original vertex');
+  const r = S.map(p => Math.hypot(...p)), dev = Math.max(...r.map(v => Math.abs(v - 10)));
+  assert.ok(Math.max(...r) > 10 - 1e-9 && dev < 0.6, `bulges out toward the circle between vertices (max |r - 10| ${dev.toFixed(2)})`);
+  const tri = [[0, 0], [10, 0], [5, -12]], St = smoothPts(T, tri);
+  for (let i = 1; i < St.length; i++) { const a = St[i - 1], b = St[i]; assert.ok(b[1] <= 1e-9 && b[1] >= -12 - 1e-9 && Math.abs(b[0] - 5) <= 5 + 1e-9 + Math.abs(b[1]) * 0, 'a triangle stays a triangle'); }
+  const near = (P, q) => P.some(p => Math.hypot(p[0] - q[0], p[1] - q[1]) < 1e-9);
+  assert.ok(near(St, [5, -12]) && near(St, [0, 0]), 'its corners are kept');
+  const open = smoothPts(T, [[0, 0], [5, 3], [10, 0]], { closed: false });
+  assert.deepEqual([open[0], open[open.length - 1]], [[0, 0], [10, 0]], 'an open stroke keeps its ends');
+});
+
+test('close-ups: the squirrel and owl outlines are smooth curves, not polygon facets', () => {
+  const O = getRig('owl'), s = 30, Ro = shot(O, { pose: O.poses.stand }, { s, W: 1300, H: 1900, cx: 650, cy: 1880 });
+  const hx = Ro.res.head[0], eo = topEdge(Ro, hx - 5 * s, hx + 5 * s);       // the crown between the ear tufts
+  assert.ok(kink(eo, 10) < 1.5, `owl crown: worst kink ${kink(eo, 10).toFixed(2)} px`);
+  const Q = getRig('squirrel'), Rq = shot(Q, { pose: Q.poses.sit }, { s, W: 1100, H: 1700, cx: 400, cy: 1650 });
+  const P = Q.poses.sit, es = topEdge(Rq, Rq.cx + (P.hx + 2.6) * s, Rq.cx + (P.hx + 4.6) * s, Math.round(Rq.cy + (P.hy - 9) * s));   // the skull's arc in front of the ear
+  assert.ok(kink(es, 8) < 1.5, `squirrel head: worst kink ${kink(es, 8).toFixed(2)} px`);
+});
+
+test('squirrel: the mouth opens inside the muzzle — the jaw drops ~20% of the head and the mouth sits above it, not under the chin', () => {
+  const Q = getRig('squirrel'), s = 20, o = { s, W: 800, H: 900, cx: 250, cy: 850 }, P = Q.poses.stand;   // nothing under the chin
+  const isMouth = (d, i) => { const r = d[i], g = d[i + 1], b = d[i + 2]; return d[i + 3] > 200 && ((Math.abs(r - 0x5e) < 9 && Math.abs(g - 0x20) < 9 && Math.abs(b - 0x26) < 9) || (Math.abs(r - 0xc4) < 9 && Math.abs(g - 0x62) < 9 && Math.abs(b - 0x6c) < 9)); };   // the mouth and tongue paint (exact: nothing shades them)
+  const chin = (R, x) => { let low = -1; for (let y = Math.round(R.cy + P.hy * s); y < R.cy + (P.hy + 9) * s; y++) if (R.data[(y * R.W + x) * 4 + 3] > 200) low = y; return low; };
+  const closed = shot(Q, { pose: P }, o), open = shot(Q, { pose: P, talk: 1 }, o);
+  let drop = 0; for (let x = Math.round(o.cx + (P.hx + 3) * s); x < o.cx + (P.hx + 9) * s; x++) drop = Math.max(drop, (chin(open, x) - chin(closed, x)) / s);   // the most any column of the underside moves
+  assert.ok(drop > 0.15 * 12.4 && drop < 0.26 * 12.4, `the chin drops ${drop.toFixed(2)} units (head ≈ 12.4)`);
+  const cols = [], [mx, my] = open.res.mouth;                                // the mouth's colours near its anchor (not the tail's dark strands)
+  for (let x = Math.round(mx - 6 * s); x < mx + 6 * s; x++) { let ym = -1; for (let y = Math.round(my - 5 * s); y < my + 5 * s; y++) if (isMouth(open.data, (y * open.W + x) * 4)) ym = y; if (ym >= 0) cols.push([x, ym]); }
+  const n = cols.length, xa = cols[0][0], xb = cols[n - 1][0], face = 1;
+  let under = Infinity;
+  for (const [x, ym] of cols) {
+    if ((face > 0 ? xb - x : x - xa) < 0.15 * (xb - xa)) continue;              // the opening at the front: the lower jaw is set back under it
+    let fur = 0; for (let y = ym + 1; y < open.H && open.data[(y * open.W + x) * 4 + 3] > 200; y++) { const i = (y * open.W + x) * 4; if (0.3 * open.data[i] + 0.59 * open.data[i + 1] + 0.11 * open.data[i + 2] > 110 && !isMouth(open.data, i)) fur++; }
+    under = Math.min(under, fur);
+  }
+  assert.ok(n > 2.5 * s, `the open mouth shows (${n} columns)`);
+  assert.ok(under >= 0.5 * s, `every column of the mouth has the lower jaw's fur under it (min ${under} px)`);
+  for (const k of ['talk', 'expr']) { const a = shot(Q, k === 'talk' ? { pose: P, talk: 0.02 } : { pose: P, expr: 'neutral' }, o); let m = 0; for (let y = Math.round(my - 5 * s); y < my + 5 * s; y++) for (let x = Math.round(mx - 6 * s); x < mx + 6 * s; x++) if (isMouth(a.data, (y * a.W + x) * 4)) m++; assert.ok(m < 3 * s, `closed (${k}): no mouth cut-out (${m} px)`); }
+});
+
+test('eye(): the catch-light survives a heavy lid; a smiling eye (cheek) under a heavy lid arches into a ∩ instead of a flat half-moon', () => {
+  const draw = (lid, opt = {}) => { const cv = createCanvas(80, 80), ctx = cv.getContext('2d'); eye(ctx, 40, 40, 12, 15, 'open', '#2a1a14', 0, lid, 0, opt); return ctx.getImageData(0, 0, 80, 80).data; };
+  const white = d => { let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200 && d[i] > 235 && d[i + 1] > 235 && d[i + 2] > 235) n++; return n; };
+  for (const lid of [0.55, 0.66, 0.75]) assert.ok(white(draw(lid)) > 12, `lid ${lid}: the eye still has a highlight (${white(draw(lid))} px)`);
+  assert.ok(white(draw(0.08)) > 30, 'an open eye keeps its big highlight');
+  const top = (d, x) => { for (let y = 0; y < 80; y++) if (d[(y * 80 + x) * 4 + 3] > 128) return y; return 80; };
+  const flat = draw(0.55), arched = draw(0.55, { cheek: 0.55 });
+  const rise = d => (top(d, 29) + top(d, 51)) / 2 - top(d, 40);
+  assert.ok(rise(arched) > rise(flat) + 2, `the lid arches up in the middle (${rise(flat).toFixed(1)} → ${rise(arched).toFixed(1)} px)`);
+});
+
+test('squirrel: "point" reaches out past the nose with a forward lean (it reads in a wide shot), also rearing up from all fours', () => {
+  const Q = getRig('squirrel'), G = Q.gestures.point;
+  for (const bn of ['sit', 'stand']) {
+    const b = Q.poses[bn], p = G.at(0.5, b), nose = p.hx + 7.05 * Math.cos(p.hr), rest = Q.bbox(b), at = Q.bbox(p);
+    assert.ok(p.f1x > nose + 1, `${bn}: the paw (${p.f1x.toFixed(1)}) is out past the nose (${nose.toFixed(1)})`);
+    assert.ok(p.br > -1.1 && p.br < -0.6, `${bn}: sitting up, leaning out over the front (br ${p.br.toFixed(2)})`);
+    if (bn === 'sit') assert.ok(at[2] - rest[2] > 3, `sit: the silhouette reaches ${(at[2] - rest[2]).toFixed(1)} units further forward`);
+    else { const hy = pose => Q.draw(null, 0, 0, 1, 1, { pose, shadow: false }).head[1]; assert.ok(hy(b) - hy(p) > 4, `stand: he rears up (head ${(hy(b) - hy(p)).toFixed(1)} units higher)`); }
+    assert.ok(Math.abs(p.h1x - b.h1x) < 1e-9 && Math.abs(p.h2x - b.h2x) < 1e-9, `${bn}: the hind feet stay put`);
+  }
+});
+
+test('squirrel: "sprawl" is the flop for flat ground — flat on the grass, the tail lying out behind, nothing below the contact line', () => {
+  const Q = getRig('squirrel'), b = Q.bbox(Q.poses.sprawl), sit = Q.bbox(Q.poses.sit);
+  assert.ok(!Q.hangPoses.includes('sprawl'), 'not a hanging pose');
+  assert.ok(b[3] <= GROUND_TOL, `on the ground (${b[3].toFixed(2)})`);
+  assert.ok(-b[1] < -sit[1] * 0.45, `flat (${(-b[1]).toFixed(1)} tall)`);
+  assert.ok(b[0] < -40, `the tail lies out behind (${b[0].toFixed(1)})`);
+  for (let u = 0.1; u < 1; u += 0.15) assert.ok(Q.bbox(Q.gestures.laugh.at(u, Q.poses.sprawl))[3] <= GROUND_TOL, `laughing while sprawled stays above the ground (u ${u.toFixed(2)})`);
 });

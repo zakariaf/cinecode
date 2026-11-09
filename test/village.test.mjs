@@ -216,3 +216,22 @@ test('structure geometry helpers are pure and consistent', () => {
   assert.ok(LANTERN.base - Lg.glass.y1 > 200 * villageScale(LANTERN.base), 'the lamp hangs above head height');
   assert.ok(VILLAGE_BRANCH.pts.length >= 2);
 });
+
+test('the dormer is a small gabled roof window: a framed casement under a gable, standing on the roof slope, lit at night', () => {
+  const G = cottageGeom(COTTAGE), d = G.dormer, w = d.win;
+  assert.ok(w.x0 > Math.min(...d.face.map(p => p[0])) && w.x1 < Math.max(...d.face.map(p => p[0])), 'window inside the dormer wall');
+  assert.ok(w.y0 > d.apex && w.y1 <= Math.max(...d.face.map(p => p[1])), 'window below the little gable');
+  assert.ok(d.apex < d.eave && d.eave < w.y0, 'a gable over the window');
+  assert.ok(d.apex > G.ridgeY && Math.max(...d.face.map(p => p[1])) < G.eaveL[1], 'stands on the front slope, below the ridge, above the eaves');
+  assert.ok(w.w > 40 && w.h / w.w > 0.6, `a window, not a slit (${w.w.toFixed(0)}×${w.h.toFixed(0)})`);
+  assert.deepEqual(w.bars, [2, 2]);
+  // it lights up with the other windows
+  S.build();
+  const px = w.cx - w.w * 0.18, py = w.y0 + w.h * 0.3, W = 120, H = 90, cam = { cx: px, cy: py, zoom: 1 };
+  const [c, x] = canvas(W, H); x.fillStyle = '#101018'; x.fillRect(0, 0, W, H);
+  x.setTransform(1, 0, 0, 1, W / 2 - px, H / 2 - py);
+  assert.equal(S.drawLights(x, cam, { t: 1, sky: 'night' }), true);
+  const p = x.getImageData(W / 2, H / 2, 1, 1).data;
+  assert.ok(p[0] > 150 && p[0] > p[2] + 50, `warm dormer pane at night: ${[...p]}`);
+  void c;
+});

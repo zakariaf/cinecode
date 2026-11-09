@@ -1,0 +1,34 @@
+{
+ "id": "747ffc6e61a2",
+ "who": "fidget",
+ "text": "Old Shell, humans forget.",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, soft, kind, sincere",
+ "prompt": "[soft, kind, sincere] Old Shell, humans forget.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 2.56,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0.715,0.928,0.995,1,0.957,0.67,0.302,0.103,0.041,0.725,1,0.999,0.988,1,1,1,1,0.969,0.837,0.486,0.101,0,0,0,0,0,0,0,0,0.553,0.596,0.369,0.253,0.26,0.26,0.058,0,0.126,0.785,0.865,0.991,1,0.989,0.924,0.715,0.376,0.081,0.187,0.881,0.687,0.356,0.694,0.828,0.948,0.997,1,0.913,0.606,0.337,0.071,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "old shell humans forget",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "soft, kind, sincere",
+    "wer": 0,
+    "transcript": "old shell humans forget",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 2.56
+   }
+  ]
+ }
+}

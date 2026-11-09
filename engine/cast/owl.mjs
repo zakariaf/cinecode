@@ -4,7 +4,7 @@
 // Round 2 (DESIGN §9.2): expression "one-eye" (the near eye peeks open under a raised brow, the other stays shut —
 // a dozing owl checking who's there); st.tilt pitches the face (features slide up or down in the disc, pupils follow).
 import { clamp, lerp, ell, rpoly, arcPts } from '../core/lib.mjs';
-import { cel, darken, lighten, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
+import { cel, darken, lighten, line, fillP, dot, eye, brow, rgba, smoothPts } from '../core/style.mjs';
 import { makeRig, mixPose, plus, jumpAt, ease, frac, footAt, tube, EXPRESSIONS } from './rig.mjs';
 
 const SH = 2.2;
@@ -30,7 +30,7 @@ function wing(T, p, side, P, near) {
   const s = clamp(p.ws), pts = W_FOLD.map((q, i) => [lerp(q[0], W_SPREAD[i][0], s), lerp(q[1], W_SPREAD[i][1], s)]);
   const a = -p.wa * 0.75 * s;
   T.save(); T.translate(side * 12.5, -30 + p.by + p.sq * 1.5); T.scale(side, 1); T.rotate(a);
-  const Wg = rpoly(pts, 3, { seed: side > 0 ? 160 : 161, jit: 0.4 });
+  const Wg = smoothPts(T, rpoly(pts, 3, { seed: side > 0 ? 160 : 161, jit: 0.4 }));
   cel(T, Wg, near ? P.wing : darken(P.wing, 0.88), SH, 1.15, side > 0 ? 160 : 161);
   T.save(); T.beginPath(); Wg.forEach((q, i) => (i ? T.lineTo(q[0], q[1]) : T.moveTo(q[0], q[1]))); T.closePath(); T.clip();
   for (let i = 0; i < 4; i++) { const u = 0.35 + i * 0.16; line(T, [[lerp(1, 30, u * s) + (1 - s) * 0.5, lerp(4 + i * 3.5, 0, s)], [lerp(2, 40, u * s) + (1 - s) * 1.5, lerp(9 + i * 3.5, 4, s)]], 0.6, { seed: 162 + i, color: 'rgba(60,40,25,.55)' }); }
@@ -40,7 +40,7 @@ function wing(T, p, side, P, near) {
 }
 function talons(T, x, y, lg, P, seed) {
   const top = [x * 0.8, -6 - (1 - lg) * 0], ft = [x, y];
-  if (lg > 0.15) { const L = tube([[top[0], top[1] - 3], [lerp(top[0], ft[0], 0.5), lerp(top[1], ft[1] - 2, 0.5)], [ft[0], ft[1] - 2.2]], [3.6, 3.2, 2.6], seed, 0.2); cel(T, L, P.leg, SH * 0.6, 0.9, seed); }
+  if (lg > 0.15) { const L = smoothPts(T, tube([[top[0], top[1] - 3], [lerp(top[0], ft[0], 0.5), lerp(top[1], ft[1] - 2, 0.5)], [ft[0], ft[1] - 2.2]], [3.6, 3.2, 2.6], seed, 0.2)); cel(T, L, P.leg, SH * 0.6, 0.9, seed); }
   for (const [dx, k] of [[-3, 0], [0.2, 1], [3.2, 2]]) {
     const b = [ft[0] + dx * 0.5, ft[1] - 2.2], e = [ft[0] + dx, ft[1] - 1];
     line(T, [b, e], 1.7, { seed: seed + k, color: P.toe, taper: false });
@@ -54,11 +54,11 @@ function head(T, p, F, P, o) {
   // tufts
   cel(T, [[-15, -6], [-12 - tx * 0.3, -18 - tu * 4], [-6, -9]], darken(P.body, 0.88), SH, 1, 160);
   cel(T, [[15, -6], [12 - tx * 0.3, -18 - tu * 4], [6, -9]], darken(P.body, 0.88), SH, 1, 161);
-  const Hd = ell(0, 0, 17, 13.5, 162, 0.3);
+  const Hd = smoothPts(T, ell(0, 0, 17, 13.5, 162, 0.3));
   cel(T, Hd, P.body, SH, 1.2, 162);
   T.save(); T.beginPath(); Hd.forEach((q, i) => (i ? T.lineTo(q[0], q[1]) : T.moveTo(q[0], q[1]))); T.closePath(); T.clip();
   // facial disc: two pale rounds meeting at the beak, with a darker rim
-  for (const sx of [-1, 1]) { const D2 = ell(tx + sx * 6.8, 0.6 + ty * 0.6, 8.6, 8.4, 163 + sx, 0.25); fillP(T, D2, P.disc); line(T, arcPts(tx + sx * 6.8, 0.6 + ty * 0.6, 8.6, 8.4, sx < 0 ? Math.PI * 0.55 : -Math.PI * 0.45, sx < 0 ? Math.PI * 1.45 : Math.PI * 0.45, 2), 0.7, { seed: 165 + sx, color: rgba(darken(P.body, 0.6), 0.6) }); }
+  for (const sx of [-1, 1]) { const D2 = smoothPts(T, ell(tx + sx * 6.8, 0.6 + ty * 0.6, 8.6, 8.4, 163 + sx, 0.25)); fillP(T, D2, P.disc); line(T, smoothPts(T, arcPts(tx + sx * 6.8, 0.6 + ty * 0.6, 8.6, 8.4, sx < 0 ? Math.PI * 0.55 : -Math.PI * 0.45, sx < 0 ? Math.PI * 1.45 : Math.PI * 0.45, 2), { closed: false }), 0.7, { seed: 165 + sx, color: rgba(darken(P.body, 0.6), 0.6) }); }
   for (let i = 0; i < 6; i++) line(T, [[tx + (i < 3 ? -1 : 1) * (10 + (i % 3) * 2), 6 + (i % 3)], [tx + (i < 3 ? -1 : 1) * (12 + (i % 3) * 2), 8 + (i % 3)]], 0.5, { seed: 170 + i, color: 'rgba(120,95,70,.5)' });
   T.restore();
   const op = clamp(F.open), r = Math.max(F.round, p.round || 0);
@@ -74,7 +74,7 @@ function head(T, p, F, P, o) {
   // beak: upper hook over a lower mandible that drops
   const bx = tx, lo = op * 3.4 + r * op;
   T.save(); T.translate(0, ty * 0.8);
-  if (op > 0.03) { fillP(T, ell(bx, 6 + lo * 0.5, 2.4 + r * 0.6, 1.2 + lo * 0.55, 177, 0.1), '#5a2a20'); }
+  if (op > 0.03) { fillP(T, smoothPts(T, ell(bx, 6 + lo * 0.5, 2.4 + r * 0.6, 1.2 + lo * 0.55, 177, 0.1)), '#5a2a20'); }
   const lower = [[bx - 2.1, 5.6 + lo * 0.3], [bx + 2.1, 5.6 + lo * 0.3], [bx, 8.6 + lo]];
   cel(T, lower, darken(P.beak, 0.85), SH * 0.4, 0.75, 178);
   const upper = [[bx - 2.6, 1.6], [bx + 2.6, 1.6], [bx + 1.2, 6.6], [bx, 8.2 - lo * 0.15], [bx - 1.2, 6.6]];
@@ -91,10 +91,10 @@ function paint(T, p, F, o) {
   const by = p.by;
   // tail fan behind the feet
   cel(T, [[-5.5, -10 + by], [5.5, -10 + by], [7.5, -1], [-7.5, -1]], darken(P.body, 0.8), SH, 1, 155);
-  const bry = (18 + p.sq * 0.8) * (1 + F.breath * 0.02), body = ell(0, Math.min(-21 + by, -bry - 1.1) - F.breath * 0.4, 16.5 * puff, bry, 150, 0.4);
+  const bry = (18 + p.sq * 0.8) * (1 + F.breath * 0.02), body = smoothPts(T, ell(0, Math.min(-21 + by, -bry - 1.1) - F.breath * 0.4, 16.5 * puff, bry, 150, 0.4));
   cel(T, body, P.body, SH, 0, 150);
   T.save(); T.beginPath(); body.forEach((q, i) => (i ? T.lineTo(q[0], q[1]) : T.moveTo(q[0], q[1]))); T.closePath(); T.clip();
-  fillP(T, ell(0, -14 + by, 10.5 * puff, 14, 151, 0.3), P.belly);
+  fillP(T, smoothPts(T, ell(0, -14 + by, 10.5 * puff, 14, 151, 0.3)), P.belly);
   for (let i = 0; i < 12; i++) { const cx = -6 + (i % 4) * 4 - (Math.floor(i / 4) % 2) * 2, cy = -22 + by + Math.floor(i / 4) * 5.5; line(T, [[cx - 1.4, cy], [cx, cy + 1.2], [cx + 1.4, cy]], 0.7, { seed: 152 + i, color: rgba(darken(P.body, 0.75), 0.75) }); }
   T.restore(); line(T, [...body, body[0]], 1.2, { seed: 150, taper: false });
   // feet are ground points: undo the body tilt so they land where the gait put them

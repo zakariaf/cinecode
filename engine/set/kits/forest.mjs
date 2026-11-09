@@ -2,7 +2,7 @@
 // an old oak with a den between its roots, a fallen log, a mossy boulder, dappled light on the floor.
 import { pick, blob, clump } from '../../core/lib.mjs';
 import { makeSet } from '../set.mjs';
-import { paper, fern, contactShadow, mushroom, RIGHT, meadowFloor, dirtPath, pathBand, paintTrunk, canopy, canopyBand, lightShafts, boulder, log, bush, hollowClip, bigTree } from '../../paint/paint.mjs';
+import { paper, fern, contactShadow, mushroom, RIGHT, meadowFloor, dirtPath, pathBand, paintTrunk, canopy, canopyBand, lightShafts, boulder, log, bush, hollowClip, bigTree, treeSkirt } from '../../paint/paint.mjs';
 
 export const forestGround = x => 1062 + 6 * Math.sin(x / 300);
 export const OAK = { x: 1500, base: 1004, w: 128, top: -260, den: { cx: 1488, cy: 976, rx: 30, ry: 22 } };
@@ -65,8 +65,8 @@ export default function forest(params = {}) {
       } },
     ],
     props: [
-      { id: 'oak', x: OAK.x, y: 994, base: OAK.base, solid: { rx: 92, ry: 22 }, bounds: [OAK.x - 700, -560, OAK.x + 500, 1040],
-        paint: (x, r) => { bigTree(x, r, { ...OAK, light: L, roots: 5, bark: { col: '#64503e' }, hollow: OAK.den }); canopy(x, r, [[OAK.x, -40, 820, 360], [OAK.x - 200, -260, 700, 360]], { light: L, pal: ['#28432e', '#33533a', '#456a48', '#618a5a', '#8cac70'], shade: 0.35 }); },
+      { id: 'oak', x: OAK.x, y: 994, base: OAK.base, inkFloor: treeSkirt(OAK).inkFloor, solid: { rx: 92, ry: 22 }, bounds: [OAK.x - 700, -560, OAK.x + 500, 1040],
+        paint: (x, r) => { bigTree(x, r, { ...OAK, light: L, roots: 5, bark: { col: '#64503e' }, hollow: OAK.den, grass: { back: ['#5f7a58', '#6a8462', '#748e6a'], front: ['#869e7c', '#91a886', '#9cb290'], tips: ['#b8c8a6', '#c4d2b2'], ground: ['#8aa080', '#80967a'] } }); canopy(x, r, [[OAK.x, -40, 820, 360], [OAK.x - 200, -260, 700, 360]], { light: L, pal: ['#28432e', '#33533a', '#456a48', '#618a5a', '#8cac70'], shade: 0.35 }); },
         ground: x => contactShadow(x, OAK.x - 20, OAK.base + 6, 200, 30, 0.45),
         anchors: { den: { type: 'hollow', x: OAK.den.cx, y: OAK.den.cy + OAK.den.ry - 3, clip: hollowClip(OAK.den), face: 'right' } } },
       { id: 'elm', x: ELM.x, y: 987, base: ELM.base, solid: { rx: 76, ry: 20 }, bounds: [ELM.x - 450, -560, ELM.x + 700, 1030],

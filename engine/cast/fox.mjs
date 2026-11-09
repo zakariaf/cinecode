@@ -1,8 +1,8 @@
 // The Fox. Legacy look (russet coat, cream bib, black socks, white-tipped brush) on an IK skeleton:
 // walk, trot and gallop whose planted paws never slide, a hinged jaw for talking, brows and expressions.
 // Round 2 (DESIGN §9.2): st.tilt pitches the head on the neck; the pupils follow (+1 up, -1 down).
-import { clamp, lerp, ell, rpoly, limb } from '../core/lib.mjs';
-import { cel, darken, line, fillP, dot, eye, brow, rgba } from '../core/style.mjs';
+import { clamp, lerp, ell, rpoly, limb, poly, shift } from '../core/lib.mjs';
+import { cel, darken, line, fillP, dot, eye, brow, rgba, SHADE } from '../core/style.mjs';
 import { makeRig, quadFeet, leg, mixPose, plus, jumpAt, ease, frac, pitchPose, gaze } from './rig.mjs';
 
 const rot = (v, a) => [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a)];
@@ -97,38 +97,50 @@ function tail(T, p, P, t) {
   for (let i = 3; i < 12; i += 2) { const q = pts[i]; line(T, [[q[0] - 2, q[1] - 2], [q[0] + 1, q[1] + 2]], 0.6, { seed: 132 + i, color: 'rgba(90,40,20,.4)' }); }
   T.restore(); line(T, [...Tl, Tl[0]], 1.2, { seed: 130, taper: false });
 }
+const clipTo = (T, P) => { T.beginPath(); poly(T, P); T.clip(); };
+// clip away a disc (no ink there: where one part of the body flows into another)
+function hideNear(T, [x, y], r) { T.beginPath(); T.rect(x - 200, y - 200, 400, 400); T.moveTo(x + r, y); T.arc(x, y, r, 0, Math.PI * 2, true); T.mask('evenodd'); }
+// fill a shape, paint `inner` inside it, then its cel shadow (no ink)
+function form(T, P, col, sh, inner) {
+  T.save(); clipTo(T, P); fillP(T, P, col); if (inner) inner();
+  const [dx, dy] = T.lightShift(sh); T.globalCompositeOperation = 'multiply'; T.fillStyle = SHADE; T.beginPath(); T.rect(-120, -120, 240, 240); poly(T, shift(P, dx, dy)); T.fill('evenodd');
+  T.restore();
+}
 function head(T, p, F, P, o) {
   T.save(); T.translate(p.hx, p.hy - F.breath * 0.6); T.rotate(p.hr - F.look * 0.08);
   const op = clamp(F.open), sm = F.smile, ea = p.ea + 0.04 * Math.sin(o.t * 2.1);
   const earAt = (Bx, By, A) => { T.save(); T.translate(Bx, By); T.rotate(A); };
   earAt(-5, -7, -0.12 + ea * 0.8); cel(T, [[-4, 0], [-3, -19], [4, -1]], darken(P.coat, 0.75), SH, 1, 121); T.restore();
-  cel(T, ell(0, 0, 12, 10, 122, 0.3), P.coat, SH, 1.15, 122);
-  // ruff: a cream tuft at the back of the jaw
-  { const Rf = rpoly([[-2, 2], [-9, 5], [-13, 10.5], [-7.5, 9.5], [-4.5, 12], [-1, 8.6], [3, 8]], 1.5, { seed: 125, jit: 0.3 }); cel(T, Rf, P.cream, SH * 0.3, 0, 125); line(T, Rf.slice(2, Rf.length - 4), 0.7, { seed: 125, color: 'rgba(42,33,48,.7)' }); }
+  // The head is one form: skull and snout share a single ink silhouette (none where the neck joins), and one cream
+  // area runs from the chin along the lower cheek to the jaw's angle, where it meets the throat. The lower jaw hinges
+  // open beneath it, its back tucked under the cheek.
   const hinge = [3.5, 4.2], ja = op * 0.5 + F.round * op * 0.1, jr = q => { const d = rot([q[0] - hinge[0], q[1] - hinge[1]], ja); return [hinge[0] + d[0], hinge[1] + d[1]]; };
-  if (op > 0.03) {                                    // open: interior, hinged cream jaw, then the upper snout
+  const open = op > 0.03, skull = ell(0, 0, 12, 10, 122, 0.3);
+  const sn = open ? rpoly([[4.5, -4.5], [23, -0.4], [22.6, 4.0], [4, 4.6]], [3, 2.6, 2, 3], { seed: 123, jit: 0.25 })
+    : rpoly([[4.5, -4.5], [23, -0.4], [22.2, 4.4], [13, 6.1], [4, 6.9]], [3, 2.6, 2.2, 3, 3], { seed: 123, jit: 0.25 });
+  if (open) {                                         // open: interior, then the cream lower jaw (its back under the cheek)
     const M = [hinge, [12, 4.4], [21, 3.8], jr([20.5, 4.6]), jr([10, 6.2])];
     fillP(T, M, '#5a1c24');
-    T.save(); T.beginPath(); M.forEach((q, i) => (i ? T.lineTo(q[0], q[1]) : T.moveTo(q[0], q[1]))); T.closePath(); T.clip();
-    fillP(T, ell(...jr([11, 6.4]), 6.5, 2, 127, 0.1), '#c96a72');
-    T.restore();
-    const Jw = rpoly([[3, 3.9], [20.6, 4.1], [19.4, 6.4], [9, 8], [2.4, 8.2]], [2, 1.5, 2, 3, 2], { seed: 124, jit: 0.2 }).map(jr);
-    cel(T, Jw, P.cream, SH * 0.4, 0.95, 124);
-    const sn = rpoly([[4.5, -4.5], [23, -0.4], [22.6, 4.0], [4, 4.6]], [3, 2.6, 2, 3], { seed: 123, jit: 0.25 });
-    cel(T, sn, P.coat, SH, 1.1, 123);
-    if (op > 0.35) for (const tx of [14, 18]) fillP(T, [[tx, 4.3], [tx + 1.5, 4.2], [tx + 0.8, 5.9]], '#fbf6ec');
-  } else {                                            // closed: the legacy one-piece snout, cream underneath
-    const sn = rpoly([[4.5, -4.5], [23, -0.4], [22, 4.5], [8, 7.6], [3, 7.4]], [3, 2.6, 2.2, 3, 3], { seed: 123, jit: 0.25 });
-    cel(T, sn, P.coat, SH, 0, 123);
-    T.save(); T.beginPath(); sn.forEach((q, i) => (i ? T.lineTo(q[0], q[1]) : T.moveTo(q[0], q[1]))); T.closePath(); T.clip();
-    fillP(T, rpoly([[2, 4.2], [24, 2.6], [24, 9], [2, 9]], 1, { seed: 124, jit: 0.3 }), P.cream); T.restore();
-    line(T, [...sn, sn[0]], 1.1, { seed: 123, taper: false });
+    T.save(); clipTo(T, M); fillP(T, ell(...jr([11, 6.4]), 6.5, 2, 127, 0.1), '#c96a72'); T.restore();
+    const Jw = rpoly([[-1, 3.6], [20.6, 4.1], [19.4, 6.4], [9, 8], [-1, 8.6]], [2, 1.5, 2, 3, 2], { seed: 124, jit: 0.2 }).map(jr);
+    T.save(); hideNear(T, jr([-1, 6]), 4.5); line(T, [...Jw, Jw[0]], 1.9, { seed: 124, taper: false }); T.restore();
+    form(T, Jw, P.cream, SH * 0.4, null);
+  }
+  T.save(); hideNear(T, [-5.5, 8.5], 6.5); line(T, [...skull, skull[0]], 2.3, { seed: 122, taper: false }); line(T, [...sn, sn[0]], 2.2, { seed: 123, taper: false }); T.restore();
+  // the cheek's edge: russet tufts swept back and down into the cream (fur flows toward the neck)
+  const tufts = [[3.6, 4.6], [0.2, 6.7], [-0.9, 4.3], [-4.1, 6.4], [-5.0, 3.8], [-8.3, 5.7], [-9.3, 2.8], [-12.4, 4.6], [-13.4, 1.6]];
+  const cheek = rpoly([...(open ? [[4.8, 4.4]] : [[24, 3.0], [12, 3.75], [6.4, 4.15]]), ...tufts, [-14, 14], [open ? 1.5 : 24, 14]], 0.7, { seed: 125, jit: 0.12, step: 0.6 });
+  const cream = () => { fillP(T, cheek, P.cream); for (let i = 1; i < 8; i += 2) { const q = tufts[i]; line(T, [[q[0] + 1.6, q[1] - 2], [q[0] + 0.5, q[1] - 0.6]], 0.4, { seed: 125 + i, color: rgba(darken(P.coat, 0.7), 0.45) }); } };
+  form(T, skull, P.coat, SH, cream);
+  form(T, sn, P.coat, SH, cream);
+  if (open) { if (op > 0.35) for (const tx of [14, 18]) fillP(T, [[tx, 4.3], [tx + 1.5, 4.2], [tx + 0.8, 5.9]], '#fbf6ec'); }
+  else {
     line(T, [[20.5, 3.0], [12, 3.7 + Math.max(0, -sm) * 0.5], [6.4, 4.1 - 0.3 * sm], [4.4, 4.2 - 1.8 * sm]], 0.8, { seed: 126 });
     if (F.round > 0.5) dot(T, 17, 5.6, 1.3, '#5a1c24');
   }
   dot(T, 22.4, 1.2, 2.2, '#1d1515'); dot(T, 22.9, 0.5, 0.6, 'rgba(255,255,255,.5)');
   if (sm > 0.5) fillP(T, ell(-1, 3.2, 3.2, 2, 128, 0.1), rgba('#e2735a', 0.3 * (sm - 0.4)));
-  eye(T, 2.8, -4.2, 2, 2.4, F.eye, P.eye, gaze(F, 0.7, 2.4), F.lid, F.tilt, { pupilCol: '#1a1010' });
+  eye(T, 2.8, -4.2, 2, 2.4, F.eye, P.eye, gaze(F, 0.7, 2.4), F.lid, F.tilt, { pupilCol: '#1a1010', cheek: F.cheek });
   brow(T, 2.6, -8.4, 6.2, F.browY * 0.8, F.browT * 0.75, darken(P.coat, 0.5), 1.25, 129);
   earAt(1, -8, ea); cel(T, [[-2, 0], [1, -19], [8, 1]], darken(P.coat, 0.88), SH, 1, 120); fillP(T, [[0, -2], [1.6, -14], [5.4, -1]], '#3a2a26'); T.restore();
   o.out.head = T.map(4, -1); o.out.mouth = T.map(14, 5 + op * 2.5);

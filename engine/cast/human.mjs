@@ -14,6 +14,18 @@
 // scarfLength (the ends are absolute units, so a child in an adult's scarf trails it in the grass; fringed ends);
 // st.tilt -1..1 head pitch (+1 up, the eyes follow); draw(null, …) returns anchors and bounds without drawing;
 // jump-for-joy sets pose.lift (units).
+// Round 3 (the painted look at every zoom): top 'shirt' | 'cardigan' (elders' default: an open knit cardigan in the
+// `shirt` colour, button bands, buttons, patch pocket, ribbed hem, worn over `under`, which defaults to the dress colour);
+// arms are shaped sleeves (deltoid, elbow, fuller knit / smock sleeves) with folds in the crook of the elbow, a ribbed
+// cuff, a bare wrist and a mitten with its own thumb, and they throw a shadow on the cloth behind them; clothes turn with
+// a broad lavender shadow side (CLOTH) instead of a thin rim; hair pulled into a bun is combed back into a coiled bun;
+// fringed scarf ends; skeleton() also returns each arm's shoulder / elbow / wrist; clothes() returns the garment outlines.
+// Round 4: `point` aims (pose.aim; GESTURES.point.at(u, base, { to })): with no `to` it follows the eyeline (st.tilt on the
+// film's scale, a lowered gaze resting on the ground), else 'up' | 'sky' | 'ahead' | 'down', an elevation (radians) or a
+// target point [x, y] (units from the contact point, facing right); the body leans into it and a child points up
+// elbow-first so the arm never crosses her face; 'point-up' / 'point-down' name the aims for storyboards. st.look is in
+// screen direction (multiplied by face, as the other rigs do). The bun is combed hair with a soft, bundled hairline,
+// an off-centre coil at the back of the crown with a hairpin, and loose wisps at the temple and nape.
 import { clamp, lerp, smooth, easeInOut, poly, path, shift, arcPts, quad, noise1, canvas, INK } from '../core/lib.mjs';
 
 // Same algorithms as lib.mjs wobble/ink/ell, with noise tables cached per seed (a rig draws hundreds of strokes a frame).
@@ -49,7 +61,7 @@ function ink(ctx, P, w, { closed = true, color = INK, seed = 1, taper = !closed 
 }
 
 // ───────────────────────── private style helpers (no import of style.mjs, by contract) ─────────────────────────
-const SHADE = '#c3b8dc';
+const SHADE = '#c3b8dc', CLOTH = '#ab9fcb';          // CLOTH: the deeper lavender of the broad shadow on clothes
 const NAMED = { red: '#c8443a', blue: '#3f6fb0', green: '#4f8a46', yellow: '#f2c94c', orange: '#e0703a', pink: '#e89ab0', purple: '#7a5a9a', brown: '#7a5236', black: '#2a2428', white: '#f4f1ea', grey: '#8a8a8e', gray: '#8a8a8e', blonde: '#e0b866', ginger: '#c0602e', navy: '#2f3f6a', teal: '#3a8a8a', cream: '#efe4c8',
   // materials (glasses frames, buckles) and storybook cloth colours
   brass: '#b08a3a', gold: '#c9a227', silver: '#a9adb3', copper: '#b8693a', bronze: '#8c6a3a', tortoiseshell: '#6a4026', steel: '#6e747c',
@@ -86,10 +98,10 @@ const stroke = (ctx, P, w, seed, color) => ink(ctx, P, w * LW, { closed: false, 
 const fillP = (ctx, P, col) => { ctx.fillStyle = col; path(ctx, P); ctx.fill(); };
 const dot = (ctx, x, y, r, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, Math.max(0.01, r), 0, 7); ctx.fill(); };
 // Cel shading: flat colour + one hard lavender multiply shadow (the shape shifted toward the light, inverted), inked.
-function cel(ctx, P, col, w = 1.1, seed = 1, sh = SH) {
+function cel(ctx, P, col, w = 1.1, seed = 1, sh = SH, shade = SHADE) {
   ctx.save(); path(ctx, P); ctx.clip();
   ctx.fillStyle = col; ctx.fillRect(-900, -900, 1800, 1800);
-  ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = SHADE;
+  ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = shade;
   ctx.beginPath(); ctx.rect(-900, -900, 1800, 1800); poly(ctx, shift(P, sh[0], sh[1])); ctx.fill('evenodd');
   ctx.restore();
   if (w > 0) ln(ctx, P, w, { seed });
@@ -118,6 +130,18 @@ function capsule(a, b, w1, w2, seed = 0, jit = 0.25) {
   cap(a, w1, -Math.PI / 2); side(P[P.length - 1], P[0]);
   return wobble(P, seed, jit);
 }
+// A capsule whose half-width follows a profile wf(u), u 0..1 from a to b: a deltoid, a forearm swell, a sleeve that
+// blouses before its cuff. prof([[u, w], …]) builds a smooth piecewise profile.
+function limb(a, b, wf, seed = 0, jit = 0.25) {
+  const d = sub(b, a), L = len(d) || 1e-3, t = mul(d, 1 / L), n = [-t[1], t[0]], m = Math.max(3, Math.round(L / 2.2)), P = [];
+  const cap = (c, w, q0) => { for (let i = 0; i <= 12; i++) { const q = q0 + (i / 12) * Math.PI; P.push(add(c, add(mul(t, -Math.cos(q) * w * 0.9), mul(n, Math.sin(q) * -w)))); } };
+  cap(b, wf(1), Math.PI / 2);
+  for (let i = m - 1; i >= 1; i--) P.push(add(mid(a, b, i / m), mul(n, wf(i / m))));
+  cap(a, wf(0), -Math.PI / 2);
+  for (let i = 1; i < m; i++) P.push(add(mid(a, b, i / m), mul(n, -wf(i / m))));
+  return wobble(P, seed, jit);
+}
+const prof = K => u => { let i = 1; while (i < K.length - 1 && K[i][0] < u) i++; return lerp(K[i - 1][1], K[i][1], smooth(K[i - 1][0], K[i][0], u)); };
 // Two-bone IK: joint position for a chain root→target with bone lengths a, b. bend = +1 bends forward (knees), -1 back (elbows).
 function ik2(root, tgt, a, b, bend = 1) {
   const d0 = sub(tgt, root), d = clamp(len(d0), Math.abs(a - b) + 1e-3, a + b - 1e-3);
@@ -133,7 +157,7 @@ export const DEFAULTS = {
   hairStyle: 'short', hair: '#4a3222', beard: 'none',
   shirt: '#e0703a', sleeves: 'long', bottom: 'trousers', pants: '#3d5a8a', dress: null, shoes: '#5a3a2a', socks: '#f2ede2',
   scarf: false, glasses: false, hat: false, apron: false, backpack: false,
-  tear: 0, hem: null, scarfLength: 1, dressStyle: null,
+  tear: 0, hem: null, scarfLength: 1, dressStyle: null, top: 'shirt', under: null,
 };
 const HAIR_STYLES = ['short', 'long', 'ponytail', 'bun', 'braids', 'curly', 'bald', 'cap'];
 const ACCESSORY = { scarf: '#c8443a', glasses: '#3a2e2a', hat: '#d8b04a', apron: '#f2ede2', backpack: '#b06a3a' };   // default colours
@@ -144,7 +168,7 @@ const AGE_LOOK = {
   child: { hairStyle: 'short', bottom: 'shorts', shirt: '#e0703a', pants: '#3d5a8a' },
   teen: { hairStyle: 'ponytail', bottom: 'trousers', shirt: '#5a8fc8', pants: '#3a3a4e', hair: '#5a3a22' },
   adult: { hairStyle: 'short', bottom: 'trousers', shirt: '#6f9a6a', pants: '#5a4a3e', hair: '#3a2a20', shoes: '#4a3428' },
-  elder: { hairStyle: 'short', bottom: 'trousers', shirt: '#b8a07a', pants: '#5e5a66', hair: '#dedad2', shoes: '#4a3a32', skin: '#ecc5a6' },
+  elder: { hairStyle: 'short', bottom: 'trousers', shirt: '#b8a07a', pants: '#5e5a66', hair: '#dedad2', shoes: '#4a3a32', skin: '#ecc5a6', top: 'cardigan' },
 };
 // Proportions as fractions of standing height H. head = chin-to-crown; leg = hip joint to sole.
 const AGES = {
@@ -178,6 +202,10 @@ export function look(params = {}) {
   p.scarfLength = clamp(+p.scarfLength || 1, 0.4, 2.5);
   p.hem = p.hem != null && Number.isFinite(+p.hem) ? clamp(+p.hem, 0.4, 1.95) : HEM[age][p.bottom === 'dress' ? 1 : 0];
   if (!['smock', 'fitted'].includes(p.dressStyle)) p.dressStyle = age === 'child' ? 'smock' : 'fitted';   // a smock hangs loose from a yoke
+  // top 'cardigan' (elders' default): an open knit cardigan in the `shirt` colour over `under` (default: the dress
+  // colour when one is given, else a pale blouse)
+  if (!['shirt', 'cardigan'].includes(p.top)) p.top = 'shirt';
+  p.under = p.under ? normHex(p.under, dress ?? '#efe6d2') : dress ?? mixC(p.shirt, '#f4efe2', 0.6);
   p.__look = true;
   return p;
 }
@@ -217,13 +245,21 @@ export function metrics(params = {}) {
 //    the contact point — pivoting on the toe when the heel is up; the legs reach it by IK
 //  bkFront: 1 = far arm drawn in front of the torso; lift: units off the ground; idle: weight-shift sway; gait: 0..1 walking weight
 //  laugh / gasp / sleep / joy: face hints for gestures and poses; hx: hip shift (units); hxL: hip shift (leg lengths)
+//  aim 0..1: weight of the near arm pointing, nearly straight, along an aim solved at draw time: the elevation aimE
+//    (radians above the horizontal), plus with aimG the eyeline's pitch (st.tilt × EYE_PITCH), or with aimT the target point
+//    (aimX, aimY) in units from the contact point, facing right, y down (see GESTURES.point)
 export const POSE0 = {
   lean: 0.02, stoop: 0, tilt: 0, turn: 0, shrug: 0, hx: 0, hxL: 0, anchor: 0,
   hipF: -0.04, kneeF: 0.05, fF: 0, hipB: 0.07, kneeB: 0.04, fB: 0,
-  shF: -0.07, elF: 0.24, hF: 0, shB: 0.1, elB: 0.25, hB: 0, bkFront: 0,
+  shF: -0.07, elF: 0.34, hF: 0, shB: 0.1, elB: 0.34, hB: 0, bkFront: 0,
   ik: 0, ikF: 0, ikB: 0, tFx: 0.06, tFy: 1, tBx: -0.05, tBy: 1, pvF: 0, pvB: 0, gF: 0, gB: 0, gy: 0, gyW: 0, liftL: 0, run: 0, plF: 1, plB: 1,
   seat: 0, seatH: 0, lift: 0, idle: 0, gait: 0, laugh: 0, gasp: 0, sleep: 0, joy: 0,
+  aim: 0, aimE: 0, aimG: 0, aimT: 0, aimX: 0, aimY: 0,
 };
+// Pointing elevations (radians above the horizontal) for named aims, and EYE_PITCH: the eyeline pitch of a full head
+// tilt (st.tilt ±1), the film's scale (a look at an actor sets st.tilt = the head-to-head line's pitch / 0.8 rad), so a
+// point that follows the gaze aims along the eyeline: at the sky, or down at the animal at her feet.
+const AIM = { up: 0.75, sky: 0.75, ahead: 0, down: -0.42 }, EYE_PITCH = 0.8;
 const BASE_YAW = 0.72;
 
 function headGeo(M, yaw) {
@@ -244,6 +280,15 @@ function headGeo(M, yaw) {
 
 function solve(p0, M, st = {}, lk = {}) {
   const p = { ...POSE0, ...p0 };
+  // a point's elevation (see the aimed arm below; a target's from a rough shoulder height), and the body leaning into
+  // it: forward over a point down at the ground (the arm clears the knees), a little back under one at the sky
+  const wA = clamp(p.aim);
+  let eA = p.aimE + clamp(p.aimG) * EYE_PITCH * clamp(st.tilt || 0, -1, 1);
+  if (wA > 0) {
+    const shY = -(M.torso * 0.9 + lerp(M.L * 0.95, M.buttR, clamp(p.seat)));
+    const e = p.aimT > 0 ? lerp(eA, Math.atan2(shY - p.aimY, Math.max(1, p.aimX)), clamp(p.aimT)) : eA;
+    p.lean += wA * (e < 0 ? 0.22 * clamp(-e / 0.6) : -0.06 * clamp(e / 0.8));
+  }
   const br = 0.5 - 0.5 * Math.cos(2 * Math.PI * (st.breath || 0));
   const lean = p.lean, a2 = lean + p.stoop + M.stoop * (1 - p.seat * 0.3), T = M.torso * (1 + 0.012 * br);
   const fwd = a => [Math.cos(a), Math.sin(a)];
@@ -331,6 +376,30 @@ function solve(p0, M, st = {}, lk = {}) {
     return mkLeg(l.hip, hipA, shinA, fa, l.ha);
   };
   lF = plant(lF, p.plF, 1); lB = plant(lB, p.plB, -1);
+  const lift = (p.lift || 0) + (p.liftL || 0) * M.L + (st.lift || 0);
+  // an aimed point (pose.aim): the near arm swings from where the pose holds it to point nearly straight along the aim,
+  // an absolute direction (pointing at the sky stays pointing at the sky whatever the body does), so the shoulder→hand
+  // line runs along the aim and the finger carries on along it
+  if (wA > 0) {
+    let D = Math.PI / 2 + eA;                                                      // from straight down, + forward
+    // a lowered gaze rests on something on the ground along the eyeline: the arm aims at that spot from the shoulder,
+    // which sits below the eyes, so its line is shallower (a gaze at the sky or level keeps the eyeline's direction)
+    if (eA < 0 && p.aimG > 0) {
+      const eye = HT(G.eyeN), d = Math.max(0, floor - M.ankle - eye[1]) / Math.sin(-eA);
+      D = lerp(D, angDown(sub([eye[0] + d * Math.cos(eA), floor - M.ankle], shN)), clamp(p.aimG));
+    }
+    if (p.aimT > 0) D = lerp(D, angDown(sub([p.aimX, p.aimY + g + lift], shN)), clamp(p.aimT));   // target: local → solve space
+    D = clamp(D, 0.25, 3.0);                                                       // never back across the body
+    // the upper arm passes under the face (clear of the jaw by the sleeve) and the elbow bends so the forearm and finger
+    // still carry the aim: a child's big head sits low over her shoulder, so she points up at the sky elbow-first
+    let cap = Infinity;
+    for (const i of [3, 4, 5]) {                                                  // cheek, jaw, chin front (not under the chin)
+      const v = sub(HT(G.CP[i]), shN), d = len(v);
+      if (v[0] > 0) cap = Math.min(cap, Math.PI / 2 + Math.atan2(-v[1], v[0]) - Math.asin(clamp((M.armW * 1.15) / d)));
+    }
+    const el = 0.14, Ua = Math.min(D - (el * M.foreArm) / (M.upArm + M.foreArm), cap), a = arm(shN, lerp(p.shF, Ua - ar, wA), lerp(p.elF, Math.max(el, D - Ua), wA));
+    a.hand = add(a.wr, mul(down(a.dir), M.hand * 0.75)); Object.assign(aF, a);
+  }
   // hands rest on the floor, never through it (a gy / seat ground can lie above a reaching hand): lift the wrist by IK
   for (const a of [aF, aB]) {
     const over = a.hand[1] + M.hand * 0.6 - floor;
@@ -338,7 +407,6 @@ function solve(p0, M, st = {}, lk = {}) {
     const wr = [a.wr[0], a.wr[1] - over], cr = (a.wr[0] - a.sh[0]) * (a.el[1] - a.sh[1]) - (a.wr[1] - a.sh[1]) * (a.el[0] - a.sh[0]);
     a.el = ik2(a.sh, wr, M.upArm, M.foreArm, cr > 0 ? -1 : 1); a.wr = wr; a.hand = [a.hand[0], a.hand[1] - over];
   }
-  const lift = (p.lift || 0) + (p.liftL || 0) * M.L + (st.lift || 0);
   const dy = -g - lift, mv = q => [q[0], q[1] + dy];
   const J = {
     p, M, G, yaw, th, k, lift, seat, w, seatH, br, lean, a2, T, tu,
@@ -360,9 +428,9 @@ function extent(J, lk) {
   const hv = { short: 0.12, long: 0.14, ponytail: 0.1, bun: 0.1, braids: 0.08, curly: 0.26, bald: 0.03, cap: 0.14 }[lk.hairStyle] ?? 0.12;
   J.headPts.forEach(q => put(q, hv * J.k));
   for (const l of [J.lF, J.lB]) { put(l.knee, M.kneeW); put(l.heel, 2); put(l.toe, 3); put(l.hip, M.thighW); }
-  for (const a of [J.aF, J.aB]) { put(a.el, M.elbowW); put(a.hand, M.hand * 0.75); put(a.sh, M.armW); }
+  for (const a of [J.aF, J.aB]) { put(a.el, M.elbowW * 1.5); put(mid(a.el, a.wr, 0.45), M.elbowW * 1.5); put(a.hand, M.hand * 0.75); put(a.sh, M.armW * 1.4); }   // full sleeves
   put(J.chest, M.chest * 0.55); put(J.hip, M.hipW * 0.55);
-  if (lk.hairStyle === 'bun') put(J.HT([-0.45, -1.05]), 0.3 * J.k);
+  if (lk.hairStyle === 'bun') put(J.HT(BUN.c), (BUN.rx + 0.04) * J.k);
   if (lk.hairStyle === 'ponytail') put(J.HT([-1.3, 0.2]), 0.35 * J.k);
   if (lk.hairStyle === 'long') { put(J.HT([-0.9, 1.6]), 0.2 * J.k); }
   if (lk.hairStyle === 'braids') for (const near of [true, false]) { const B = braidPath(J, lk, near).P; put(B[B.length - 1], 0.2 * J.k); put(B[Math.floor(B.length / 2)], 0.2 * J.k); }
@@ -371,6 +439,7 @@ function extent(J, lk) {
   if (lk.bottom === 'skirt' || lk.bottom === 'dress') { J.tor = J.tor || torsoShape(J); for (const q of skirtGeo(J, lk).P) put(q, 1.2); }   // the cloth flares past the legs
   if (lk.apron) { J.tor = J.tor || torsoShape(J); for (const q of skirtGeo(J, apronHem(lk)).P) put(q, 1.2); }
   if (lk.backpack) put(add(J.chest, [-M.chest * 0.85, 0]), 6);
+  if (lk.top === 'cardigan') for (const q of cardiganShape(J).P) put(q, 1.2);
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
@@ -378,8 +447,15 @@ function extent(J, lk) {
 // Union-inked group: every outline first (double width), then every fill, so internal joints carry no line.
 function group(ctx, parts, w = 1.1) {
   for (const q of parts) ln(ctx, q.P, w * 2, { seed: q.seed });
-  for (const q of parts) cel(ctx, q.P, q.col, 0, q.seed);
+  for (const q of parts) cel(ctx, q.P, q.col, 0, q.seed, q.sh, q.shade);
 }
+// The broad light offset for big cloth shapes (torso, skirt): a mostly sideways shift, so the far side of the body
+// turns into a band of shadow (it reads round) without a heavy band under every hem.
+const broad = (kx = 2.4, ky = 0.7) => [SH[0] * kx, SH[1] * ky];
+// The union of closed shapes as one path (each wound the same way, so nonzero filling and clipping unite them).
+const area2 = P => { let a = 0; for (let i = 0, n = P.length; i < n; i++) { const p = P[i], q = P[(i + 1) % n]; a += p[0] * q[1] - q[0] * p[1]; } return a; };
+const union = (ctx, Ps) => { ctx.beginPath(); for (const P of Ps) poly(ctx, area2(P) < 0 ? P.slice().reverse() : P); };
+const clipTo = (ctx, Ps) => { union(ctx, Ps); ctx.clip(); };
 const handFrame = (a, M) => { const v = down(a.dir), w = [v[1], -v[0]]; return q => add(a.wr, add(mul(v, q[0] * M.hand), mul(w, q[1] * M.hand))); };
 function handParts(a, M, kind, seed) {
   const T = handFrame(a, M), S = Q => wobble(spline(Q.map(T), 3), seed, 0.12), h = M.hand;
@@ -390,9 +466,11 @@ function handParts(a, M, kind, seed) {
       finger([0.55, -0.27], [1.0, -0.42], 0.1), finger([0.6, -0.1], [1.12, -0.16], 0.105), finger([0.6, 0.06], [1.1, 0.1], 0.1), finger([0.55, 0.2], [0.94, 0.32], 0.09),
       finger([0.25, 0.3], [0.5, 0.68], 0.1)];
   }
-  if (kind === 2) return [S([[0, -0.3], [0.25, -0.44], [0.62, -0.44], [0.8, -0.22], [0.8, 0.2], [0.62, 0.42], [0.3, 0.44], [0.05, 0.32]])];
-  if (kind === 3) return [S([[0, -0.3], [0.25, -0.44], [0.62, -0.44], [0.8, -0.22], [0.78, 0.08], [0.55, 0.36], [0.3, 0.42], [0.05, 0.32]]), finger([0.55, 0.12], [1.28, 0.2], 0.105)];
-  return [S([[0, -0.32], [0.35, -0.4], [0.78, -0.34], [1.0, -0.1], [0.97, 0.15], [0.8, 0.3], [0.62, 0.3], [0.52, 0.46], [0.36, 0.5], [0.2, 0.4], [0, 0.32]])];
+  if (kind === 2) return [S([[0, -0.3], [0.25, -0.44], [0.62, -0.44], [0.8, -0.22], [0.8, 0.2], [0.62, 0.42], [0.3, 0.44], [0.05, 0.32]]), finger([0.24, 0.36], [0.6, 0.2], 0.13)];
+  if (kind === 3) return [S([[0, -0.3], [0.25, -0.44], [0.62, -0.44], [0.8, -0.22], [0.78, 0.08], [0.55, 0.36], [0.3, 0.42], [0.05, 0.32]]), finger([0.55, 0.12], [1.24, 0.2], 0.15)];
+  // relaxed: a mitten whose fingers curl a little toward the palm, and a thumb of its own (the ink notches between them)
+  return [S([[0, -0.3], [0.3, -0.38], [0.66, -0.35], [0.92, -0.2], [1.02, 0.0], [0.96, 0.16], [0.8, 0.24], [0.56, 0.26], [0.3, 0.3], [0.08, 0.3], [0, 0.26]]),
+    finger([0.2, 0.22], [0.56, 0.46], 0.135)];
 }
 function handDetail(ctx, a, M, kind, seed, col) {
   const T = handFrame(a, M); kind = Math.round(clamp(kind, 0, 3));
@@ -401,29 +479,110 @@ function handDetail(ctx, a, M, kind, seed, col) {
   if (kind === 0) { stroke(ctx, [T([0.72, -0.1]), T([0.95, -0.05])], 0.45, seed, c); stroke(ctx, [T([0.7, 0.1]), T([0.92, 0.12])], 0.45, seed + 1, c); }
   if (kind === 2 || kind === 3) { stroke(ctx, [T([0.62, -0.3]), T([0.7, 0.05]), T([0.5, 0.28])], 0.5, seed, c); }
 }
+// A cloth band round a limb from a to b (a cuff): straight sides of half-width w, both ends bowed by e toward b (the
+// near half of each rim, seen a little from above), so it reads as a band, never as a ball.
+function band(a, b, w, e, seed) {
+  const d = sub(b, a), t = mul(d, 1 / (len(d) || 1)), n = [-t[1], t[0]];
+  const rim = (c, s) => [1, 0.55, 0, -0.55, -1].map(q => add(c, add(mul(n, q * s * w), mul(t, e * (1 - q * q)))));
+  return wobble(spline([...rim(a, 1), ...rim(b, -1)], 3), seed, 0.1);
+}
+// Cuff layout along a forearm of length Lf (absolute units, so a child's short forearm gets a short cuff): the cuff is
+// never wider than the hand, and ends a bare-wrist gap before the wrist; the sleeve ends inside it.
+function cuffLayout(M, Lf, fl) {
+  const h = M.hand, cw = Math.min(M.wristW * 1.3 * fl, h * 0.34), e = cw * 0.22, gap = h * 0.26, cl = cw * 1.25;
+  const cB = clamp((Lf - gap - e) / Lf, 0.5, 0.95), cA = clamp(cB - cl / Lf, 0.4, cB - 0.04);
+  return { cw, e, gap, cA, cB, wEnd: cw * 0.95, fEnd: cB * Lf - 0.9 * cw * 0.95 - 0.3 };   // fEnd: where the sleeve's own end sits (from the elbow)
+}
+// An arm: a shaped sleeve (or bare arm) from the shoulder to the elbow and on to the wrist, folds in the crook of the
+// elbow, a ribbed cuff the sleeve blouses over, a short bare wrist, and the hand. Long sleeves are the cardigan's when
+// one is worn (lk.top), else the shirt's / dress's; knit and smock sleeves hang fuller. Returns the shapes (and their
+// ink-wide outsets) that the shoulder overlay in draw() uses.
 function drawArm(ctx, J, a, far, lk, kind, seed) {
-  const M = J.M, f = far ? 0.86 : 1, skin = darken(lk.skin, f), top = darken(lk.bottom === 'dress' ? lk.dress : lk.shirt, f);
-  const long = lk.sleeves !== 'short';
-  const up = capsule(a.sh, a.el, M.armW * (long ? 1.12 : 1.04), M.elbowW * (long ? 1.1 : 1), seed);
-  const fo = capsule(a.el, a.wr, M.elbowW * (long ? 1.1 : 1), M.wristW * (long ? 1.15 : 1), seed + 1);
-  group(ctx, [{ P: up, col: long ? top : skin, seed }, { P: fo, col: long ? top : skin, seed: seed + 1 },
-    ...handParts(a, M, kind, seed + 2).map((P, i) => ({ P, col: skin, seed: seed + 3 + i }))]);
-  handDetail(ctx, a, M, kind, seed + 9, skin);
-  if (!far || J.p.bkFront >= 0.5) {                  // let the arm grow out of the shoulder: hide the inked cap inside the torso
-    const d = sub(a.el, a.sh), u = mul(d, 1 / (len(d) || 1)), n = [-u[1], u[0]], r = M.armW * (long ? 1.12 : 1.04) + 1.4 * LW;
-    const disc = [...Array.from({ length: 13 }, (_, i) => { const q = Math.PI * (i / 12); return add(a.sh, add(mul(n, Math.cos(q) * r), mul(u, -Math.sin(q) * r))); }), add(a.sh, mul(u, M.armW * 0.6))];
-    ctx.save(); path(ctx, J.tor.P); ctx.clip(); path(ctx, disc); ctx.clip();
-    const col = long ? top : skin;
-    ctx.fillStyle = col; ctx.fillRect(-900, -900, 1800, 1800);
+  const M = J.M, f = far ? 0.86 : 1, skin = darken(lk.skin, f), cloth = lk.top === 'cardigan' ? lk.shirt : lk.bottom === 'dress' ? lk.dress : lk.shirt, top = darken(cloth, f);
+  const long = lk.sleeves !== 'short', fl = lk.top === 'cardigan' || (lk.bottom === 'dress' && lk.dressStyle === 'smock') ? 1.1 : 1, det = !J.simple;
+  const W = M.armW, E = M.elbowW, R = M.wristW, u = sub(a.el, a.sh), v = sub(a.wr, a.el), cr = u[0] * v[1] - u[1] * v[0];
+  const bend = Math.atan2(cr, u[0] * v[0] + u[1] * v[1]), tu = mul(u, 1 / (len(u) || 1)), Lf = len(v) || 1, tv = mul(v, 1 / Lf);
+  const ni = mul([-tu[1], tu[0]], cr > 0 ? 1 : -1);    // toward the crook of the elbow (the side the forearm folds to)
+  const at = q => mid(a.el, a.wr, q), C = cuffLayout(M, Lf, fl), cuffA = C.cA, cuffB = C.cB, fe = C.fEnd / Lf;
+  const wU = long ? prof([[0, W * 1.02 * fl], [0.2, W * 1.24 * fl], [0.45, W * 1.2 * fl], [1, E * 1.3 * fl]]) : prof([[0, W * 1.14], [0.3, W * 1.06], [1, E]]);
+  // a long sleeve blouses out just above the cuff and gathers into it (its end is hidden inside the cuff)
+  const wF = long ? prof([[0, E * 1.3 * fl], [0.45, E * 1.34 * fl], [clamp((cuffA - 0.02) / fe, 0.6, 0.97), Math.max(R * 1.5 * fl, C.cw * 1.12)], [1, C.wEnd]]) : prof([[0, E * 1.02], [0.25, E * 1.14], [1, R * 0.92]]);
+  const foEnd = long ? at(fe) : a.wr, up = limb(a.sh, a.el, wU, seed), fo = limb(a.el, foEnd, wF, seed + 1);
+  const hand = [...(long ? [{ P: limb(at((cuffA + cuffB) / 2), add(a.wr, mul(tv, M.hand * 0.2)), () => Math.min(R * 0.84, C.cw * 0.82), seed + 13, 0.1), col: skin, seed: seed + 13 }] : []),
+    ...handParts(a, M, kind, seed + 2).map((P, i) => ({ P, col: skin, seed: seed + 3 + i }))];
+  const col = long ? top : skin, front = !far || J.p.bkFront >= 0.5; let disc = null;
+  // the arm throws a shadow on the cloth behind it: only on its lit part (shade doesn't darken shade) and only where
+  // no later cloth covers it, so it never doubles up. The arm hangs from the shoulder, so the shadow is sheared: none
+  // at the shoulder (no lobe above it), the full offset from about the elbow on.
+  if (front && J.castOn?.length) {
+    const d = mul(SH, -1.1), L0 = (len(u) || 1) * 0.85, sk = P => P.map(p => add(p, mul(d, smooth(0, L0, len(sub(p, a.sh))))));
+    const shadow = [sk(up), sk(fo)];
+    for (let i = 0; i < J.castOn.length; i++) {
+      const { P, sh } = J.castOn[i];
+      ctx.save(); path(ctx, P); ctx.clip(); path(ctx, shift(P, sh[0], sh[1])); ctx.clip();
+      if (i < J.castOn.length - 1) { ctx.beginPath(); ctx.rect(-900, -900, 1800, 1800); for (const q of J.castOn.slice(i + 1)) poly(ctx, q.P); ctx.clip('evenodd'); }
+      ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = 0.85; ctx.fillStyle = CLOTH;
+      union(ctx, shadow); ctx.fill(); ctx.restore();
+    }
+  }
+  const sl = long ? { sh: mul(SH, 1.3), shade: CLOTH } : {};   // a sleeve turns with a fuller shadow than skin
+  const parts = [{ P: up, col, seed, ...sl }, { P: fo, col, seed: seed + 1, ...sl }, ...(long ? [] : hand)];
+  // as group() (every outline, then every fill), except that the arm grows out of the shoulder: inside the body near
+  // the shoulder (a disc on the shoulder side of the joint) the upper arm's outline is not inked at all, so nothing
+  // flat is painted over it and the sleeve keeps its own light and shade, its shadow side running on round the deltoid
+  if (front) {
+    const n = [-tu[1], tu[0]], r = W * (long ? 1.1 * fl : 1.14) + 1.4 * LW, B = J.torOut || J.tor.P;
+    disc = [...Array.from({ length: 13 }, (_, i) => { const q = Math.PI * (i / 12); return add(a.sh, add(mul(n, Math.cos(q) * r), mul(tu, -Math.sin(q) * r))); }), add(a.sh, mul(tu, W * 0.6))];
+    const ccw = P => (area2(P) > 0 ? P.slice().reverse() : P);   // against the rects: winding 0 only inside both
+    ctx.save(); ctx.beginPath(); ctx.rect(-900, -900, 1800, 1800); poly(ctx, ccw(disc)); ctx.rect(-900, -900, 1800, 1800); poly(ctx, ccw(B)); ctx.clip();
+    ln(ctx, up, 2.2, { seed }); ctx.restore();
+  } else ln(ctx, up, 2.2, { seed });
+  for (const q of parts.slice(1)) ln(ctx, q.P, 2.2, { seed: q.seed });
+  for (const q of parts) cel(ctx, q.P, q.col, 0, q.seed, q.sh, q.shade);
+  if (det && long) {                                   // the cloth gathers in the crook of the elbow (more, the more it bends)
+    const k = clamp(Math.abs(bend) / 0.9, 0.3, 1), e = a.el, ie = add(e, mul(ni, E * 1.15 * fl)), bu = mul(tu, -1), fc = rgba(darken(cloth, 0.42), 0.6);
+    ctx.save(); clipTo(ctx, [up, fo]);
+    stroke(ctx, quad(add(ie, mul(bu, E * 0.35)), add(e, add(mul(bu, E * 1.1 * k), mul(ni, E * 0.45))), add(e, add(mul(bu, E * (1.1 + 1.3 * k)), mul(ni, -E * 0.45))), 8), 0.5, seed + 20, fc);
+    stroke(ctx, quad(add(ie, mul(tv, E * 0.35)), add(e, add(mul(tv, E * 1.1 * k), mul(ni, E * 0.45))), add(e, add(mul(tv, E * (1.2 + 1.4 * k)), mul(ni, -E * 0.35))), 8), 0.5, seed + 21, fc);
+    if (k > 0.55) stroke(ctx, quad(ie, add(e, mul(ni, E * 0.6)), add(e, add(mul(ni, -E * 0.05), mul(bu, E * 0.25))), 6), 0.42, seed + 22, fc);
+    // the sleeve's fullness hanging over the cuff, and the set-in shoulder seam on the near arm
+    const b0 = at(cuffA - 0.12), wb = Math.max(R * 1.45 * fl, C.cw * 1.1);
+    stroke(ctx, quad(add(b0, mul(ni, wb * 0.9)), add(at(cuffA - 0.05), mul(ni, wb * 0.1)), add(at(cuffA - 0.01), mul(ni, -wb * 0.5)), 6), 0.4, seed + 23, rgba(darken(cloth, 0.42), 0.45));
+    if (!far) { const s = mid(a.sh, a.el, 0.16), n = [-tu[1], tu[0]], w = W * 1.2 * fl; stroke(ctx, quad(add(s, mul(n, w)), add(s, mul(tu, -w * 0.55)), sub(s, mul(n, w)), 8), 0.45, seed + 24, rgba(darken(cloth, 0.45), 0.5)); }
+    // each sleeve segment: a dry-brush sheen down its lit side and one long drape fold down its shaded side, so a
+    // straight sleeve still reads as soft, round cloth in a close-up
+    for (const [A, B, wf, sd] of [[a.sh, a.el, wU, 25], [a.el, foEnd, wF, 27]]) {
+      const t = sub(B, A), Lg = len(t) || 1, n0 = [-t[1] / Lg, t[0] / Lg], lit = n0[0] * SH[0] + n0[1] * SH[1] > 0 ? n0 : mul(n0, -1);
+      const sheen = [0.14, 0.32, 0.5, 0.68, 0.86].map(q => add(mid(A, B, q), mul(lit, wf(q) * 0.52)));
+      ink(ctx, sheen, wf(0.5) * 0.36, { closed: false, seed: seed + sd, color: rgba(lighten(cloth, 0.42), 0.4) });
+      stroke(ctx, quad(add(mid(A, B, 0.2), mul(lit, -wf(0.2) * 0.62)), add(mid(A, B, 0.45), mul(lit, -wf(0.45) * 0.3)), add(mid(A, B, 0.7), mul(lit, -wf(0.7) * 0.05)), 8), 0.42, seed + sd + 1, rgba(darken(cloth, 0.42), 0.42));
+    }
     ctx.restore();
   }
-  if (long) {                                          // cuff
-    const v = sub(a.wr, a.el), n = mul([-v[1], v[0]], M.wristW * 1.15 / (len(v) || 1)), c = sub(a.wr, mul(v, 0.1 / 1));
-    stroke(ctx, [add(c, n), sub(c, n)], 0.7, seed + 11);
+  let sleeve = null;
+  if (long) {                                          // wrist and hand, then the ribbed cuff over the wrist
+    group(ctx, hand);
+    const cuff = band(at(cuffA), at(cuffB), C.cw, C.e, seed + 11);
+    cel(ctx, cuff, darken(top, 0.94), 0.9, seed + 11);
+    if (det && J.px * C.cw > 4) {                      // rib lines along the cuff
+      const n = [-tv[1], tv[0]], nr = Math.max(3, Math.round(C.cw * 2 / 1.1));
+      ctx.save(); path(ctx, cuff); ctx.clip();
+      for (let i = 1; i < nr; i++) { const q = (i / nr - 0.5) * 2, o = mul(n, q * C.cw), b = mul(tv, C.e * (1 - q * q)); stroke(ctx, [add(add(at(cuffA - 0.02), o), b), add(add(at(cuffB + 0.02), o), b)], 0.32, seed + 30 + i, rgba(darken(cloth, 0.45), 0.4)); }
+      ctx.restore();
+    }
   } else {                                             // short sleeve over the shoulder
     const m = mid(a.sh, a.el, 0.5);
-    cel(ctx, capsule(a.sh, m, M.armW * 1.3, M.armW * 1.25, seed + 12), top, 1.1, seed + 12);
+    sleeve = { a: a.sh, b: m, w: prof([[0, W * 1.32], [1, W * 1.26]]) };
+    cel(ctx, limb(sleeve.a, sleeve.b, sleeve.w, seed + 12), top, 1.1, seed + 12);
   }
+  handDetail(ctx, a, M, kind, seed + 9, skin);
+  // outsets by the ink's half-width (the union ink is stroked at twice the line weight, half of it outside the shape)
+  const d = 1.7 * LW + 0.4, h = M.hand, rh = h * 0.72 + d;
+  return {
+    up, disc,
+    upX: [limb(a.sh, a.el, q => wU(q) + d, seed), ...(sleeve ? [limb(sleeve.a, sleeve.b, q => sleeve.w(q) + d, seed + 12)] : [])],
+    keepX: [limb(a.el, foEnd, q => wF(q) + d, seed + 1), capsule(long ? at(cuffA) : at(0.6), add(a.wr, mul(tv, h * 0.75)), rh, rh, 0, 0)],
+  };
 }
 function shoeShape(l, M) {
   const f = M.foot, s = M.ankle;
@@ -471,14 +630,25 @@ function drawLeg(ctx, J, l, far, lk, seed) {
   }
 }
 // Torso outline along the curved spine, from s0 (fraction of the torso length; negative = below the hip joint) to the shoulders.
-function torsoShape(J, s0 = -0.12, grow = 1) {
+// flare > 0: a garment's straight hem (a cardigan) that widens by `flare` × hip width per torso length below the hips.
+function torsoShape(J, s0 = -0.12, grow = 1, flare = 0) {
   const { M, lean, a2, T } = J, b = M.belly;
-  const at = s => (s <= 0.5 ? add(J.hip, mul(upv(lean), T * s)) : add(J.chest, mul(upv(a2), T * (s - 0.5))));
-  const fr = s => { const a = lerp(lean, a2, clamp((s - 0.35) / 0.4)); return [Math.cos(a), Math.sin(a)]; };
+  // a garment's skirt below the waist (flare) hangs toward plumb when the body leans, instead of jutting out stiffly
+  // (lying down it simply lies along the body). The axis turns from the lean to the hang over a long stretch (SA → SB)
+  // and is integrated along s, so it is one smooth curve whose bend stays wider than the cloth: the offset edges
+  // (outline, the open front's panel edges) never fold over themselves on the inside of the bend.
+  const hang = flare ? lerp(lean, lean * 0.25, 1 - smooth(0.75, 1.25, Math.abs(lean))) : lean, SA = 0.24, SB = -0.16, ds = 0.01;
+  const bent = flare && Math.abs(hang - lean) > 1e-4, th = s => (bent && s < SA ? lerp(lean, hang, smooth(SA, SB, s)) : lean);
+  const tab = [add(J.hip, mul(upv(lean), T * SA))];   // the axis at s = SA, SA - ds, … (when bent)
+  if (bent) for (let i = 1, lo = s0 - 0.24; SA - (i - 1) * ds > lo; i++) tab.push(sub(tab[i - 1], mul(upv(th(SA - (i - 0.5) * ds)), T * ds)));
+  const axis = s => { const q = (SA - s) / ds, i = Math.min(Math.floor(q), tab.length - 2); return i < 0 ? tab[0] : add(tab[i], mul(sub(tab[i + 1], tab[i]), q - i)); };
+  const at = s => (bent && s < SA ? axis(s) : s <= 0.5 ? add(J.hip, mul(upv(lean), T * s)) : add(J.chest, mul(upv(a2), T * (s - 0.5))));
+  const fr = s => { const a = bent && s < SA ? th(s) : lerp(lean, a2, clamp((s - 0.35) / 0.4)); return [Math.cos(a), Math.sin(a)]; };
   const Wd = (s, front) => {
     const hw = M.hipW / 2, ww = (M.waist / 2) * (front ? 1 + 0.3 * b : 0.9), cw = (M.chest / 2) * (front ? 1.0 : 0.96);
     let w;
-    if (s < 0.08) w = lerp(hw * 0.35, hw, smooth(-0.14, 0.06, s));
+    if (s < 0.08 && flare) w = hw * (1 + flare * (0.08 - s));
+    else if (s < 0.08) w = lerp(hw * 0.35, hw, smooth(-0.14, 0.06, s));
     else if (s < 0.34) w = lerp(hw, ww, smooth(0.08, 0.34, s));
     else if (s < 0.72) w = lerp(ww, cw, smooth(0.34, 0.72, s));
     else if (s < 0.86) w = cw;
@@ -625,7 +795,8 @@ function hairCap(G, vol, fringe, lk) {
   let line;
   if (fringe === 'locks') line = [[xc + 0.44, -0.46], [xc + 0.34, -0.52], [xc + 0.24, -0.4], [xc + 0.14, -0.5], [xc + 0.02, -0.37], [xc - 0.08, -0.46], [xc - 0.18, -0.34], [xc - 0.32, -0.3]];
   else if (fringe === 'sweep') line = [[xc + 0.38, -0.5], [xc + 0.12, -0.42], [xc - 0.14, -0.4], [xc - 0.32, -0.28]];
-  else if (fringe === 'back') line = [[xc + 0.22, -0.74], [xc - 0.05, -0.62], [xc - 0.3, -0.42]];
+  // combed back: the hairline breaks into bundles (small dips between them), recedes at the temple, then comes forward
+  else if (fringe === 'back') line = [[xc + 0.26, -0.76], [xc + 0.165, -0.765], [xc + 0.09, -0.7], [xc + 0.0, -0.69], [xc - 0.07, -0.62], [xc - 0.14, -0.59], [xc - 0.17, -0.5], [xc - 0.14, -0.4], [xc - 0.24, -0.33]];
   else if (fringe === 'part') line = [[xc + 0.36, -0.62], [xc + 0.16, -0.6], [xc - 0.06, -0.52], [xc - 0.26, -0.36]];
   else line = [[xc + 0.36, -0.55], [xc + 0.05, -0.5], [xc - 0.3, -0.32]];
   line = [...line, [ear[0] + 0.14, ey - 0.28], [ear[0] + 0.16, ey + 0.02], [ear[0] + 0.06, ey - 0.18], [ear[0] - 0.14, ey - 0.12], [-0.6, 0.34]];
@@ -709,7 +880,97 @@ function drawBraid(ctx, J, lk, near) {
   if (!J.simple) stroke(ctx, [tie.c, add(end.c, mul(end.tn, w1 * 0.2))], 0.4, 499, rgba(darken(lk.hair, 0.5), 0.7));
   const band = lk.scarf || '#c8443a', bw = w1 * 1.2, bh = Math.max(0.9, k * 0.055);
   const B = [add(add(tie.c, mul(tie.nn, bw)), mul(tie.tn, -bh)), add(add(tie.c, mul(tie.nn, bw)), mul(tie.tn, bh)), add(add(tie.c, mul(tie.nn, -bw)), mul(tie.tn, bh)), add(add(tie.c, mul(tie.nn, -bw)), mul(tie.tn, -bh))];
-  cel(ctx, spline(B, 3), near ? band : darken(band, 0.88), 0.8, 500);
+  cel(ctx, spline(B, 3), near ? band : darken(band, 0.88), 0.8, 500, mul(SH, 0.3));   // a small offset: the tie is too small for the full one
+}
+// Hair pulled back into a bun (an old woman's knot): the combed hair hugs the skull (a small shadow offset, so no band
+// runs along the hairline like a knitted brim), its silhouette inked but its hairline soft (a fine line in the hair's
+// own dark, roots flicking across it), combed in a few uneven strand groups that sweep up and back into an off-centre
+// coil at the back of the crown, with loose wisps at the temple and the nape.
+const BUN = { c: [-0.98, -0.7], rx: 0.33, ry: 0.22, a: -1.03 };   // the coil: centre (head space), radii, tilt along the skull
+// strand groups: a root on the hairline (or the nape), a bend, and where it reaches the coil; o: each strand's offset
+// across the group (head units), so the groups are uneven bundles with gaps between them, not evenly spaced ribs
+const BUN_GROUPS = (xc, er) => [
+  { P: [[xc + 0.24, -0.75], [xc - 0.06, -0.97], [-0.62, -0.92]], o: [0, 0.03, 0.075] },
+  { P: [[xc + 0.03, -0.66], [-0.14, -0.86], [-0.66, -0.8]], o: [0, 0.045] },
+  { P: [[-0.12, -0.7], [-0.34, -0.8], [-0.7, -0.74]], o: [0.01] },              // a short one starting mid-crown
+  { P: [[xc - 0.15, -0.46], [-0.32, -0.62], [-0.74, -0.64]], o: [-0.02, 0.015, 0.06] },
+  { P: [[er[0] + 0.08, er[1] - 0.3], [-0.62, -0.42], [-0.8, -0.56]], o: [0, 0.05] },
+  { P: [[-0.64, 0.27], [-0.98, -0.12], [-0.9, -0.5]], o: [0, 0.035, 0.08] },
+];
+const BUN_CAP_SIL = 20, BUN_FRONT = 32;              // hairCap spline points: its silhouette (5 outer controls + front, × 4), its front hairline
+function drawBunHair(ctx, J, lk, P, sh) {
+  const { G, HT, k } = J, xc = G.xc, er = G.ear, hair = lk.hair, simple = J.simple, t = J.t;
+  const lx = Math.sign(SH[0]) || -1, dk = darken(hair, 0.6);
+  cel(ctx, P, hair, 0, 410, mul(SH, 0.35));          // a thin shade at the hairline (the hair's own thickness), no brim
+  // ink: the silhouette at full weight (its tapered ends run a little way onto the hairline), the hairline fine and soft
+  ln(ctx, [...P.slice(-3), ...P.slice(0, BUN_CAP_SIL + 4)], 1.1, { closed: false, seed: 410 });
+  stroke(ctx, P.slice(BUN_CAP_SIL + 1).concat([P[0]]), simple ? 0.8 : 0.6, 409, rgba(dk, simple ? 0.9 : 0.75));
+  if (!simple) {
+    ctx.save(); path(ctx, P); ctx.clip();
+    for (const [i, g] of BUN_GROUPS(xc, er).entries()) {         // combed strand groups
+      const [a, b, c] = g.P, d = sub(c, a), n = mul([-d[1], d[0]], 1 / (len(d) || 1));
+      g.o.forEach((o, j) => {
+        const q = [a, b, c].map(v => add(v, mul(n, o))), end = j === g.o.length - 1 ? 0.8 : 1;
+        stroke(ctx, quad(q[0], q[1], mid(q[1], q[2], end), 10).map(HT), j ? 0.42 : 0.6, 411 + i * 5 + j, rgba(dk, j ? 0.55 : 0.75));
+      });
+    }
+    const hc = rgba(lighten(hair, 0.55), 0.55), cx = -0.32 - 0.12 * lx;   // a broken sheen on the crown, on the lit side
+    stroke(ctx, quad([cx - 0.24, -0.84], [cx - 0.08, -0.97], [cx + 0.1, -0.98], 8).map(HT), 1.6, 440, hc);
+    stroke(ctx, quad([cx + 0.18, -0.97], [cx + 0.26, -0.95], [cx + 0.34, -0.9], 5).map(HT), 1.1, 441, hc);
+    ctx.restore();
+    // roots: short flicks across the front hairline, combed back toward the coil
+    const front = P.slice(BUN_CAP_SIL + 2, BUN_CAP_SIL + BUN_FRONT);
+    for (let i = 1; i < front.length - 1; i += 3) {
+      const q = front[i], to = HT(BUN.c), d = sub(to, q), u = mul(d, 1 / (len(d) || 1)), L = k * (0.1 + 0.05 * ((i * 7) % 3));
+      stroke(ctx, [add(q, mul(u, -0.025 * k)), add(q, mul(u, L * 0.5)), add(q, mul(u, L))], 0.4, 450 + i, rgba(dk, 0.6));
+    }
+  }
+  ctx.save(); path(ctx, P); ctx.clip();               // the coil's soft shadow on the combed hair
+  ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = 0.3; fillP(ctx, shift(bunBody(J), -SH[0] * 0.8, -SH[1] * 0.8), CLOTH); ctx.restore();
+  drawBun(ctx, J, lk, sh);
+  // loose wisps that escaped the pins: at the temple in front of the ear, and at the nape
+  const sw = 0.02 * Math.sin(t * 1.7), W = [
+    [[er[0] + 0.16, er[1] - 0.26], [er[0] + 0.27 + sw, er[1] - 0.06], [er[0] + 0.19 + sw, er[1] + 0.16]],
+    [[xc - 0.2, -0.36], [xc - 0.13 + sw, -0.24], [xc - 0.19 + sw, -0.14]],
+    [[-0.62, 0.28], [-0.8 + sw, 0.42], [-0.68 + sw, 0.58]],
+    [[-0.56, 0.3], [-0.6 + sw, 0.44], [-0.52 + sw, 0.52]],
+  ];
+  for (const [i, w] of (simple ? W.slice(0, 1) : W).entries()) {
+    const Q = quad(...w, 8).map(HT);
+    stroke(ctx, Q, simple ? 0.8 : 0.75, 460 + i, rgba(dk, 0.85));
+    if (!simple) stroke(ctx, Q, 0.38, 470 + i, rgba(lighten(hair, 0.15), 0.9));
+  }
+}
+// The coil: a slightly lumpy body and the last turn of the hank lying on it (inked as one silhouette, each turning with
+// its own shadow), wrapped by overlapping turns of uneven strand groups that wind in to a tucked tail, a sheen on the
+// lit side, a flyaway or two and one hairpin. Coil space: u along the skull, v into it (the coil stands out toward -v).
+const bunBody = J => { const P = []; for (let i = 0; i < 40; i++) { const q = (i / 40) * Math.PI * 2, r = 1 + 0.05 * Math.sin(3 * q + 0.7) + 0.03 * Math.sin(5 * q + 1.3); P.push(J.HT(add(BUN.c, rot([BUN.rx * r * Math.cos(q), BUN.ry * r * Math.sin(q)], BUN.a)))); } return P; };
+function drawBun(ctx, J, lk, sh) {
+  const { HT, k } = J, hair = lk.hair, { c, rx, ry, a } = BUN, B = q => HT(add(c, rot(q, a))), dk = darken(hair, 0.55);
+  const body = bunBody(J), lap = ell(-rx * 0.18, -ry * 0.5, rx * 0.62, ry * 0.6, 0, 0, -0.25).map(B);
+  group(ctx, [{ P: body, col: hair, seed: 405, sh }, { P: lap, col: lighten(hair, 0.05), seed: 406, sh: mul(sh, 0.7) }], 1.1);
+  const turn = (cu, cv, r, q0, q1) => arcPts(0, 0, 1, 1, q0, q1, 0.08).map(([x, y]) => B([rx * (cu + r * x), ry * (cv + r * y)]));
+  if (J.simple) { stroke(ctx, turn(-0.08, -0.12, 0.56, 3.1, 6.6), 0.8, 407, rgba(dk, 0.8)); return; }
+  ctx.save(); union(ctx, [body, lap]); ctx.clip();
+  // the turns: each a strand group (a main strand, a fainter one inside it, a short one outside), winding inward
+  const T = [[0.02, 0.04, 0.84, 2.3, 5.3], [-0.08, -0.12, 0.56, 3.0, 6.8], [-0.17, -0.27, 0.3, 3.7, 7.5]];
+  T.forEach(([cu, cv, r, q0, q1], i) => {
+    stroke(ctx, turn(cu, cv, r, q0, q1), 0.6, 407 + i * 3, rgba(dk, 0.75));
+    stroke(ctx, turn(cu, cv, r - 0.08, q0 + 0.3, q1 - 0.2), 0.4, 408 + i * 3, rgba(dk, 0.45));
+    stroke(ctx, turn(cu, cv, r + 0.07, q0 + 0.6, lerp(q0, q1, 0.55)), 0.38, 409 + i * 3, rgba(dk, 0.4));
+  });
+  const lx = Math.sign(SH[0]) || -1;                  // sheen along the lit side of the outer turns
+  stroke(ctx, turn(0.02, 0.04, 0.7, lx < 0 ? 3.4 : 5.0, lx < 0 ? 4.3 : 5.9), 1.3, 420, rgba(lighten(hair, 0.6), 0.6));
+  stroke(ctx, turn(-0.08, -0.12, 0.42, lx < 0 ? 3.6 : 5.3, lx < 0 ? 4.3 : 6.0), 0.9, 421, rgba(lighten(hair, 0.6), 0.5));
+  ctx.restore();
+  // flyaways off the outer turn
+  for (const [i, q] of [3.9, 4.9].entries()) {
+    const e = [rx * 1.0 * Math.cos(q), ry * 1.0 * Math.sin(q)], o = [rx * 1.22 * Math.cos(q + 0.25), ry * 1.3 * Math.sin(q + 0.25)];
+    stroke(ctx, quad(e, mid(e, o, 0.7), o, 6).map(B), 0.4, 425 + i, rgba(dk, 0.7));
+  }
+  // a hairpin through the coil: a dark wire with a small bead, its far end hidden in the hair
+  const pin = [[-rx * 0.95, ry * 0.45], [rx * 0.55, -ry * 0.75]].map(B), pc = '#4a3f44';
+  stroke(ctx, pin, 0.55, 428, pc); dot(ctx, pin[0][0], pin[0][1], 0.035 * k, pc);
 }
 function hairStrands(ctx, J, P, lk, seed) {
   if (J.simple) return;
@@ -729,9 +990,8 @@ function drawHead(ctx, J, lk, ex, st) {
   const skin = lk.skin, talk = clamp(st.talk || 0), o = Math.max(ex.mouth.open || 0, talk);
   const CP = G.CP.map((q, i) => (i >= 4 && i <= 6 ? [q[0], q[1] + o * (i === 4 ? 0.03 : 0.07)] : q));
   const head = wobble(spline(CP, 5).map(HT), 41, 0.2);
-  const vol = HAIR_VOL[style] ?? 0.1, sh = mul(SH, 0.8);
+  const vol = HAIR_VOL[style] ?? 0.1, sh = mul(SH, 0.8), hsh = [SH[0] * 2, SH[1] * 1.5];   // hsh: hair masses turn more
   // hair mass behind the skull (gives curly / long / bun their volume)
-  if (style === 'bun') { const B = ell(-0.42, -1.0, 0.34, 0.3, 405, 0).map(HT); cel(ctx, B, hair, 1.1, 405, sh); if (!simple) stroke(ctx, arcPts(-0.42, -1.0, 0.2, 0.16, 3.6, 5.9, 0.04).map(HT), 0.5, 406, rgba(darken(hair, 0.5), 0.7)); }
   if (style === 'curly' || style === 'long') { const Bk = hairBack(G, vol + 0.06); const P = (style === 'curly' ? scallop(Bk, 0.07) : Bk).map(HT); cel(ctx, P, darken(hair, 0.92), 1.1, 407, sh); }
   // skin
   cel(ctx, head, skin, 1.15, 41, sh);
@@ -796,8 +1056,8 @@ function drawHead(ctx, J, lk, ex, st) {
     let C = hairCap(G, vol, fr, lk);
     if (style === 'curly') C = scallop(C, 0.06);
     const P = C.map(HT);
-    cel(ctx, P, hair, 1.1, 410, sh);
-    hairStrands(ctx, J, P, lk, 411);
+    if (style === 'bun') drawBunHair(ctx, J, lk, P, sh);
+    else { cel(ctx, P, hair, 1.1, 410, hsh); hairStrands(ctx, J, P, lk, 411); }
     if (style === 'braids' && !simple) stroke(ctx, quad([xc + 0.2, -0.64], [xc - 0.02, -0.86], [-0.2, -1.02], 8).map(HT), 0.7, 418, rgba(lighten(lk.skin, 0.1), 0.85));
     if (style === 'long') {                          // side curtain over the ear
       const t = J.t, sw = 0.04 * Math.sin(t * 1.9 + 0.5) + 0.08 * J.p.gait * Math.sin(t * 7.3);
@@ -877,8 +1137,11 @@ function hull(P) {
 // the hull of the waist, hips, knees and hem points: an A-line standing, a tent over the knees sitting or crouching.
 function skirtGeo(J, lk) {
   const { at, fr, Wd } = J.tor, M = J.M, hem = lk.hem, wy = 0.3;
-  const side = (s, k) => [add(at(s), mul(fr(s), -Wd(s, 0) * k)), add(at(s), mul(fr(s), Wd(s, 1) * k))];
-  const smock = lk.bottom === 'dress' && lk.dressStyle === 'smock', pts = [...side(wy, 0.99), ...side(0.08, 1.12), ...side(-0.06, 1.0), ...(smock ? side(0.58, 1.02) : [])];
+  const side = (s, k, F = J.tor) => [add(F.at(s), mul(F.fr(s), -F.Wd(s, 0) * k)), add(F.at(s), mul(F.fr(s), F.Wd(s, 1) * k))];
+  // under a cardigan the waist and hips are placed in its (hanging) frame, just inside it, so the skirt never bulges
+  // out past its back when she bends
+  const C = lk.top === 'cardigan' ? cardiganShape(J) : null, waist = C ? [...side(wy, 0.92, C), ...side(0.08, 0.95, C), ...side(-0.06, 0.88, C)] : [...side(wy, 0.99), ...side(0.08, 1.12), ...side(-0.06, 1.0)];
+  const smock = lk.bottom === 'dress' && lk.dressStyle === 'smock', pts = [...waist, ...(smock ? side(0.58, 1.02) : [])];
   const along = (l, u) => (u <= 1 ? mid(l.hip, l.knee, u) : mid(l.knee, l.ank, u - 1));
   const dirAt = (l, u) => { const d = u <= 1 ? sub(l.knee, l.hip) : sub(l.ank, l.knee), L = len(d) || 1; return mul(d, 1 / L); };
   const hems = [];
@@ -894,12 +1157,20 @@ function skirtGeo(J, lk) {
   const dd = add(hems[0].d, hems[1].d), dl = len(dd) || 1, hc = mid(hems[0].c, hems[1].c), hn = [-dd[1] / dl, dd[0] / dl], hw = M.hipW * (0.32 + 0.2 * lk.hem);
   for (const [o, b] of [[0, 0.1], [0.55, 0.075], [-0.55, 0.075]]) pts.push(add(add(hc, mul(hn, o * hw)), mul(dd, (M.hipW * b) / dl)));   // a bowed hem
   const floorY = -J.lift - 0.4;                       // the cloth rests on the ground, never under it
-  return { P: wobble(spline(hull(pts.map(q => [q[0], Math.min(q[1], floorY + J.w * J.seatH)])), 3), 161, 0.35), hems, at };
+  // the hull's corners eased by bounded fillets (a curve inside each corner), not splined through: a spline through
+  // unevenly spaced corners overshoots far outside the hull (a lump of skirt bulging out behind a cardigan)
+  const Hl = hull(pts.map(q => [q[0], Math.min(q[1], floorY + J.w * J.seatH)])), n = Hl.length, rc = M.hipW * 0.22, E = [];
+  Hl.forEach((c, i) => {
+    const a = Hl[(i + n - 1) % n], b = Hl[(i + 1) % n], la = len(sub(a, c)) || 1, lb = len(sub(b, c)) || 1;
+    E.push(...quad(add(c, mul(sub(a, c), Math.min(rc, la * 0.45) / la)), c, add(c, mul(sub(b, c), Math.min(rc, lb * 0.45) / lb)), 6));
+  });
+  return { P: wobble(E, 161, 0.35), hems, at };
 }
 function drawSkirt(ctx, J, lk) {
   const dress = lk.bottom === 'dress', col = dress ? lk.dress : lk.skirt, { P, hems, at } = skirtGeo(J, lk);
-  if (dress) group(ctx, [{ P: J.tor.P, col, seed: 31 }, { P, col, seed: 160 }], 1.15);   // one garment: no seam line
-  else cel(ctx, P, col, 1.15, 160);
+  if (dress) group(ctx, [{ P: J.tor.P, col, seed: 31, sh: broad(), shade: CLOTH }, { P, col, seed: 160, sh: broad(), shade: CLOTH }], 1.15);   // one garment: no seam line
+  else cel(ctx, P, col, 1.15, 160, broad(), CLOTH);
+  J.castOn.push({ P, sh: broad() }); if (dress) J.castOn.push({ P: J.tor.P, sh: broad() });
   if (J.simple) return;
   if (dress && lk.dressStyle === 'smock') {           // the yoke seam across the chest, gathers falling from it
     const { fr, Wd } = J.tor, ys = 0.64, sc = rgba(darken(col, 0.5), 0.6), Y = (v, o = 0) => add(J.tor.at(ys + o), mul(fr(ys), v));
@@ -913,11 +1184,75 @@ function drawSkirt(ctx, J, lk) {
   for (const [u, sd] of [[0.3, 162], [0.68, 163]]) { const h = mid(hems[1].c, hems[0].c, u); stroke(ctx, [mid(top, h, 0.3), mid(top, h, 0.75), mid(top, h, 1.02)], 0.5, sd, fc); }
   ctx.restore();
 }
+// An open knit cardigan (lk.top = 'cardigan') over the dress / blouse (lk.under): two front panels with button bands,
+// the under layer showing between them (shadowed where the panel on the light side overhangs it), a patch pocket, a
+// ribbed hem, faint knit ribs at close range, and a broad shadow down the side away from the light, so it reads as
+// soft round cloth at every size, never as a flat slab.
+const CARDIGAN_S0 = -0.17, cardiganShape = J => (J.cdg ??= torsoShape(J, CARDIGAN_S0, 1.07, 0.5));   // hip length, loose, a flared hem
+// The cardigan's layout in its own frame: front edges (vn near panel, vf far panel, as fractions of the half-width),
+// button band width, buttons (s along the body, radius) and the patch pocket, whose front edge keeps clear of the
+// button band and the buttons in absolute units, so in no pose does a button sit on the pocket.
+const CARDIGAN_BUTTONS = [0.6, 0.42, 0.24, 0.06];
+function cardiganLayout(J) {
+  const M = J.M, s0 = CARDIGAN_S0, { at, fr, Wd } = cardiganShape(J);
+  const V = (s, v) => add(at(s), mul(fr(s), v * Wd(s, v >= 0 ? 1 : 0)));
+  const vn = s => (s > 0.6 ? lerp(0.3, -0.15, smooth(0.6, 1.02, s)) : 0.3 + 0.08 * (0.6 - s));    // near panel's front edge
+  const vf = s => (s > 0.6 ? lerp(0.72, 0.95, smooth(0.6, 1.02, s)) : 0.72 + 0.12 * (0.6 - s));   // far panel's edge
+  const bw = Math.max(1.5, M.chest * 0.075), br = Math.max(0.75, M.chest * 0.036);
+  const buttons = CARDIGAN_BUTTONS.map(s => ({ s, c: sub(V(s, vn(s)), mul(fr(s), bw * 0.5)), r: br }));
+  const ps0 = s0 + 0.1, ps1 = s0 + 0.34, pv0 = -0.6, clear = Math.max(bw, bw * 0.5 + br) + 0.45 * LW + Math.max(1, M.chest * 0.035);
+  const pv1 = Math.min(...[ps0, ps0 + 0.03, (ps0 + ps1) / 2, ps1].map(s => { const x = vn(s) * Wd(s, 1) - clear; return x / Wd(s, x >= 0 ? 1 : 0); }));
+  const pm = (ps0 + ps1) / 2, pocket = spline([V(ps1, pv0), V(ps1, pv1), V(pm, pv1), V(ps0 + 0.03, pv1), V(ps0, pv1 - 0.07), V(ps0, pv0 + 0.07), V(ps0 + 0.03, pv0), V(pm, pv0)], 3);   // mid points: its sides follow the body when she bends
+  return { V, vn, vf, bw, buttons, pocket, ps1, pv0, pv1 };
+}
+function drawCardigan(ctx, J, lk) {
+  const M = J.M, col = lk.shirt, s0 = CARDIGAN_S0, { at, fr, Wd, P } = cardiganShape(J), det = !J.simple;
+  const { V, vn, vf, bw, buttons, pocket: PK, ps1, pv0, pv1 } = cardiganLayout(J);
+  const S = []; for (let s = s0 - 0.08; s < 1.12; s += 0.04) S.push(s);
+  const cast = Math.max(1.2, M.chest * 0.065), fromBack = SH[0] < 0;
+  const edgeN = S.map(s => V(s, vn(s))), edgeF = S.map(s => V(s, vf(s))), off = (E, d) => E.map((q, i) => add(q, mul(fr(S[i]), d)));
+  const line = rgba(darken(col, 0.42), 0.75), faint = rgba(darken(col, 0.45), 0.4);
+  ctx.save(); path(ctx, P); ctx.clip();
+  ctx.fillStyle = col; ctx.fillRect(-900, -900, 1800, 1800);
+  fillP(ctx, [...edgeN, ...edgeF.slice().reverse()], lk.under);
+  ctx.globalCompositeOperation = 'multiply';          // the panel on the light side throws a shadow across the dress
+  fillP(ctx, fromBack ? [...edgeN, ...off(edgeN, cast).reverse()] : [...edgeF, ...off(edgeF, -cast).reverse()], SHADE);
+  ctx.globalCompositeOperation = 'source-over';
+  fillP(ctx, [...off(edgeN, -bw), ...edgeN.slice().reverse()], darken(col, 0.95));          // button bands
+  fillP(ctx, [...edgeF, ...off(edgeF, bw * 0.6).reverse()], darken(col, 0.95));
+  if (det) {                                           // patch pocket on the near panel
+    cel(ctx, PK, darken(col, 0.97), 0.6, 36, mul(SH, 0.5));
+    stroke(ctx, [V(ps1 - 0.045, pv0 + 0.02), V(ps1 - 0.045, pv1 - 0.02)], 0.4, 37, faint);
+    if (J.px * 2.6 > 9) for (let v = -0.92; v < 0.92; v += 2.6 / Wd(0.4, v >= 0 ? 1 : 0)) {   // knit ribs, very faint
+      if (v > vn(0.4) - 0.25 && v < vf(0.4) + 0.12) continue;
+      stroke(ctx, [s0 + 0.09, 0.3, 0.6, 0.86].map(s => V(s, v)), 0.32, 38 + Math.round(v * 20), rgba(darken(col, 0.5), 0.14));
+    }
+    if (J.px * 1.1 > 3.5) for (let v = -1; v < 1; v += 1.1 / Wd(s0, v >= 0 ? 1 : 0)) {          // the ribbed hem
+      if (v > vn(s0) - 0.02 && v < vf(s0) + 0.02) continue;
+      stroke(ctx, [V(s0 - 0.03, v), V(s0 + 0.075, v)], 0.3, 60 + Math.round(v * 40), faint);
+    }
+  }
+  stroke(ctx, [V(s0 + 0.075, -1.1), V(s0 + 0.075, vn(s0 + 0.075))], 0.5, 39, line);
+  stroke(ctx, [V(s0 + 0.075, vf(s0 + 0.075)), V(s0 + 0.075, 1.1)], 0.5, 40, line);
+  ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = CLOTH;     // the broad side shadow, over everything
+  ctx.beginPath(); ctx.rect(-900, -900, 1800, 1800); poly(ctx, shift(P, ...broad(2.6, 0.8))); ctx.fill('evenodd');
+  ctx.globalCompositeOperation = 'source-over';
+  stroke(ctx, edgeN, 0.85, 41); stroke(ctx, edgeF, 0.7, 42);
+  if (det) { stroke(ctx, off(edgeN, -bw), 0.4, 43, faint); stroke(ctx, off(edgeF, bw * 0.6), 0.35, 44, faint); }
+  ctx.restore();
+  ln(ctx, P, 1.15, { seed: 33 }); J.castOn.push({ P, sh: broad(2.6, 0.8) }); J.torOut = P;
+  const btn = mixC(col, '#4a3226', 0.72);
+  for (const { c, r: br } of buttons) {
+    dot(ctx, c[0], c[1], br + 0.45 * LW, INK); dot(ctx, c[0], c[1], br, btn);
+    if (det) dot(ctx, c[0] - br * 0.3, c[1] - br * 0.32, br * 0.32, rgba(lighten(btn, 0.6), 0.85));
+  }
+}
 function drawTorso(ctx, J, lk) {
   const M = J.M, top = lk.bottom === 'dress' ? lk.dress : lk.shirt, tor = J.tor;
+  if (lk.top === 'cardigan') { drawCardigan(ctx, J, lk); return; }
   if (lk.bottom !== 'dress') {
     const sh = torsoShape(J, lk.bottom === 'skirt' ? 0.03 : 0.0, 1.05);      // a top hangs over a skirt's waistband
-    cel(ctx, sh.P, top, 1.15, 33);
+    cel(ctx, sh.P, top, 1.15, 33, broad(), CLOTH); J.castOn.push({ P: sh.P, sh: broad() }); J.torOut = sh.P;
     if (!J.simple) {
       const { at, fr, Wd } = sh, s = 0.2;
       stroke(ctx, [add(at(s + 0.05), mul(fr(s), -Wd(s, 0) * 0.3)), add(at(s - 0.02), mul(fr(s), Wd(s, 1) * 0.5))], 0.45, 34, rgba(darken(top, 0.5), 0.45));
@@ -933,7 +1268,7 @@ function drawNeck(ctx, J, lk) {
   cel(ctx, capsule(a, J.nTop, w, w * 0.92, 36), darken(lk.skin, 0.92), 1, 36);
 }
 function drawCollar(ctx, J, lk) {
-  const M = J.M, k = J.k, w = k * (M.child ? 0.3 : 0.34), top = lk.bottom === 'dress' ? lk.dress : lk.shirt;
+  const M = J.M, k = J.k, w = k * (M.child ? 0.3 : 0.34), top = lk.top === 'cardigan' ? lk.under : lk.bottom === 'dress' ? lk.dress : lk.shirt;
   const { at, fr } = J.tor, f = fr(1), u = upv(J.a2), c = add(at(1.0), mul(f, w * 0.15));
   const Q = (fx, uy) => add(c, add(mul(f, w * fx), mul(u, w * uy)));
   const P = spline([Q(-1.45, 0.25), Q(-0.2, -0.55), Q(1.45, 0.05), Q(1.25, 0.5), Q(-0.1, 0.0), Q(-1.25, 0.6)], 4);
@@ -955,9 +1290,12 @@ function scarfEnd(ctx, J, lk, P, col, seed) {
   const { at, T } = chainFrame(P), w = SCARF_W, L = [], R = [];
   for (let s = 0; s <= T + 1e-6; s += Math.max(0.8, T / 24)) { const F = at(Math.min(s, T)), ww = w * (1 + 0.06 * Math.sin(s * 0.4 + seed)); L.push(add(F.c, mul(F.nn, ww))); R.push(sub(F.c, mul(F.nn, ww))); }
   const band = wobble([...L, ...R.reverse()], seed, 0.15);
-  if (!J.simple) {                                     // fringe beyond the end
-    const E = at(T), fc = darken(col, 0.8);
-    for (let i = 0; i < 6; i++) { const o = lerp(-w * 0.85, w * 0.85, i / 5), b0 = add(E.c, mul(E.nn, o)), sw = 0.25 * Math.sin(J.t * 3 + i * 1.7); stroke(ctx, [b0, add(b0, add(mul(E.tn, w * 0.95), mul(E.nn, sw)))], 0.55, seed + 10 + i, fc); }
+  if (!J.simple) {                                     // fringe beyond the end: inked tassels of yarn that swing a little
+    const E = at(T), n = 5, tz = [];
+    for (let i = 0; i < n; i++) { const o = lerp(-w * 0.78, w * 0.78, i / (n - 1)), b0 = add(E.c, add(mul(E.nn, o), mul(E.tn, -w * 0.2))), sw = 0.3 * Math.sin(J.t * 3 + i * 1.7), Lt = w * (1.05 + 0.12 * Math.sin(i * 2.3 + seed));
+      tz.push([b0, add(b0, add(mul(E.tn, Lt * 0.55), mul(E.nn, sw * 0.4))), add(b0, add(mul(E.tn, Lt), mul(E.nn, sw)))]); }
+    for (const [i, P] of tz.entries()) ln(ctx, P, 1.45, { closed: false, taper: false, seed: seed + 10 + i });
+    for (const [i, P] of tz.entries()) ln(ctx, P.slice(0, 2).concat([mid(P[1], P[2], 0.85)]), 0.7, { closed: false, taper: false, seed: seed + 10 + i, color: lighten(col, 0.1) });
   }
   cel(ctx, band, col, 1.0, seed);
   if (!J.simple) for (const v of [T - w * 2.4, T - w * 1.6]) { const F = at(Math.max(0, v)); stroke(ctx, [add(F.c, mul(F.nn, w * 0.9)), sub(F.c, mul(F.nn, w * 0.9))], 0.9, seed + 20 + v, lighten(col, 0.45)); }
@@ -969,7 +1307,7 @@ function drawScarf(ctx, J, lk, part) {
     add(c, add(mul(f, cw * 0.7), mul(u, M.torso * 0.16))), add(c, add(mul(f, -cw * 0.1), mul(u, M.torso * 0.12))), add(c, add(mul(f, -cw * 0.72), mul(u, M.torso * 0.15)))], 4);
   cel(ctx, ring, col, 1.05, 471);
   if (!J.simple) stroke(ctx, quad(add(c, add(mul(f, -cw * 0.55), mul(u, M.torso * 0.06))), add(c, add(mul(f, cw * 0.1), mul(u, -M.torso * 0.02))), add(c, add(mul(f, cw * 0.62), mul(u, M.torso * 0.08))), 8), 0.5, 474, rgba(darken(col, 0.5), 0.55));
-  scarfEnd(ctx, J, lk, front, col, 472);
+  if (part !== 'ring') scarfEnd(ctx, J, lk, front, col, 472);
 }
 const apronHem = lk => ({ hem: lk.bottom === 'skirt' || lk.bottom === 'dress' ? lk.hem * 0.92 : 0.95 });
 function drawApron(ctx, J, lk) {
@@ -1021,17 +1359,19 @@ function exprOf(st, p) {
 }
 // ctx = null: solve only and return the anchors and bounds (the film core and sheets probe this way).
 function draw(ctx, x, y, s, face, st = {}) {
-  const lk = look(st.params || {}), M = metrics(lk), p = resolvePose(st), f = face < 0 ? -1 : 1;
+  const f = face < 0 ? -1 : 1;
+  if (st.look) st = { ...st, look: clamp(st.look * f, -1, 1) };   // st.look is in screen direction; the rig works facing right
+  const lk = look(st.params || {}), M = metrics(lk), p = resolvePose(st);
   const m = ctx ? ctx.getTransform() : null, eff = Math.max(1e-3, s * (m ? Math.hypot(m.a, m.b) : 1));
   LW = eff > 2 ? Math.sqrt(2 / eff) : Math.pow(2 / eff, 0.35);
   SH = [-M.sh * f, -M.sh];
   const J = solve(p, M, st, lk);
-  J.simple = M.headH * eff < 46;
+  J.simple = M.headH * eff < 46; J.px = eff;        // px: screen pixels per unit (detail thresholds)
   const box = extent(J, lk), W = q => [x + q[0] * s * f, y + q[1] * s];
   const b = [x + (f > 0 ? box[0] : -box[2]) * s, y + box[1] * s, x + (f > 0 ? box[2] : -box[0]) * s, y + box[3] * s];
   const out = { head: W(J.hc), mouth: W(J.HT(J.G.mouth)), eye: W(J.HT(J.G.eyeN)), hands: { front: W(J.aF.hand), back: W(J.aB.hand) }, hand: W(J.aF.hand), bounds: b };
   if (!ctx) return out;
-  J.tor = J.tor || torsoShape(J);
+  J.tor = J.tor || torsoShape(J); J.castOn = [];      // cloth the arms throw their shadow on: { P, sh } in drawing order
   const ex = exprOf(st, p), shA = 0.26 * (J.seatH > 1 ? 1 - J.w : 1);   // no ground shadow while sitting up on a seat
   if (st.shadow !== false && shA > 0.01) {
     const cx = x + ((box[0] + box[2]) / 2) * s * f * 0.6, w = Math.max(M.width * 0.75, (box[2] - box[0]) * 0.5) * s;
@@ -1055,19 +1395,56 @@ function draw(ctx, x, y, s, face, st = {}) {
   if (lk.apron) drawApron(ctx, J, lk);
   if (lk.backpack) drawBackpack(ctx, J, lk, 'strap');
   if (lk.scarf) drawScarf(ctx, J, lk, 'front');
-  if (lk.hairStyle === 'braids') drawBraid(ctx, J, lk, false);
+  const braids = lk.hairStyle === 'braids';
+  if (braids) drawBraid(ctx, J, lk, false);
   drawHead(ctx, J, lk, ex, st);
-  if (lk.hairStyle === 'braids') drawBraid(ctx, J, lk, true);
-  if (bk) drawArm(ctx, J, J.aB, true, lk, hB, 100);
-  drawArm(ctx, J, J.aF, false, lk, hF, 180);
+  if (braids) drawBraid(ctx, J, lk, true);
+  // What lies over the top of a sleeve drawn in front of the body (the scarf round the shoulders, the hair, the chin)
+  // is drawn again over it, masked to that upper sleeve and its shoulder disc, outset by the sleeve's ink so none of
+  // its outline survives, and never over the arm's own forearm and hand. The mask follows the sleeve and the redrawn
+  // shapes keep their own ink, so there is no hard cut. They are drawn into a small offscreen layer that is masked and
+  // composited once: redrawing cel-shaded shapes under a clip would blend twice along its soft edge and leave a seam.
+  const over = (A, a, layers) => {
+    const R = [...A.upX, ...(A.disc ? [A.disc.map(q => add(a.sh, mul(sub(q, a.sh), 1.08)))] : [])], m = ctx.getTransform();
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const P of R) for (const [px, py] of P) { const X = m.a * px + m.c * py + m.e, Y = m.b * px + m.d * py + m.f; x0 = Math.min(x0, X); y0 = Math.min(y0, Y); x1 = Math.max(x1, X); y1 = Math.max(y1, Y); }
+    x0 = Math.floor(x0) - 2; y0 = Math.floor(y0) - 2;
+    const w = Math.ceil(x1) + 2 - x0, h = Math.ceil(y1) + 2 - y0;
+    if (!(w > 0 && h > 0 && w * h < 16e6)) return;
+    const [cv, g] = canvas(w, h); g.setTransform(m.a, m.b, m.c, m.d, m.e - x0, m.f - y0);
+    layers(g);
+    g.globalAlpha = 1; g.fillStyle = '#000';            // an opaque mask (the layers leave a translucent fill behind)
+    g.globalCompositeOperation = 'destination-in'; union(g, R); g.fill();
+    g.globalCompositeOperation = 'destination-out'; for (const P of A.keepX) { path(g, P); g.fill(); }
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(cv, x0, y0); ctx.restore();
+  };
+  if (bk) {                                           // the far arm in front: the scarf, the far braid and the head lie over its shoulder
+    const A = drawArm(ctx, J, J.aB, true, lk, hB, 100);
+    over(A, J.aB, g => { if (lk.scarf) drawScarf(g, J, lk, 'ring'); if (braids) drawBraid(g, J, lk, false); drawHead(g, J, lk, ex, st); });
+  }
+  const A = drawArm(ctx, J, J.aF, false, lk, hF, 180);
+  if (lk.scarf || braids) over(A, J.aF, g => { if (lk.scarf) drawScarf(g, J, lk, 'ring'); if (braids) drawBraid(g, J, lk, true); });
   ctx.restore();
   return out;
 }
 // Solved joints in local units (contact at the origin, facing right), for tests, props and lint.
 export function skeleton(pose = POSES.stand, params = {}, st = {}) {
   const lk = look(params), M = metrics(lk), J = solve(resolvePose({ ...st, pose }), M, st, lk);
-  const leg = l => ({ hip: l.hip, knee: l.knee, ankle: l.ank, heel: l.heel, toe: l.toe });
-  return { hip: J.hip, neck: J.neck, head: J.hc, mouth: J.HT(J.G.mouth), front: { leg: leg(J.lF), hand: J.aF.hand }, back: { leg: leg(J.lB), hand: J.aB.hand }, lift: J.lift, seat: J.seat, seatHeight: J.seatH, metrics: M };
+  const leg = l => ({ hip: l.hip, knee: l.knee, ankle: l.ank, heel: l.heel, toe: l.toe }), arm = a => ({ shoulder: a.sh, elbow: a.el, wrist: a.wr });
+  return { hip: J.hip, neck: J.neck, head: J.hc, mouth: J.HT(J.G.mouth), front: { leg: leg(J.lF), hand: J.aF.hand, arm: arm(J.aF) }, back: { leg: leg(J.lB), hand: J.aB.hand, arm: arm(J.aB) }, lift: J.lift, seat: J.seat, seatHeight: J.seatH, metrics: M };
+}
+// Garment outlines in local units (contact at the origin, facing right), for tests and lint: the cardigan when one is
+// worn (outline, its open front's two edges from the hem to the chest, buttons, pocket, hem corners [back, front]) and
+// the skirt / dress outline when one is worn.
+export function clothes(pose = POSES.stand, params = {}, st = {}) {
+  const lk = look(params), M = metrics(lk), J = solve(resolvePose({ ...st, pose }), M, st, lk), out = {};
+  J.tor = torsoShape(J); LW = 1;
+  if (lk.top === 'cardigan') {
+    const L = cardiganLayout(J), S = []; for (let s = CARDIGAN_S0; s <= 0.9; s += 0.04) S.push(s);
+    out.cardigan = { outline: cardiganShape(J).P, edgeNear: S.map(s => L.V(s, L.vn(s))), edgeFar: S.map(s => L.V(s, L.vf(s))), buttons: L.buttons, pocket: L.pocket, hem: [L.V(CARDIGAN_S0, -1), L.V(CARDIGAN_S0, 1)] };
+  }
+  if (lk.bottom === 'skirt' || lk.bottom === 'dress') out.skirt = skirtGeo(J, lk).P;
+  return out;
 }
 function bbox(pose = {}, face = 1, params = {}) {
   const lk = look(params), M = metrics(lk), J = solve(resolvePose({ pose, t: 0 }), M, {}, lk), b = extent(J, lk);
@@ -1115,7 +1492,7 @@ export const POSES = {
   kneel: P({ lean: 0.04, tilt: 0.04, hipB: -0.06, kneeB: 1.64, fB: 1.38, ikF: 1, gF: 1, tFx: 0.62, shF: 0.45, elF: 0.4, shB: 0.08, elB: 0.32, plB: 0 }),
   lie: P({ plF: 0, plB: 0, lean: -1.57, tilt: -0.05, hipF: 1.52, kneeF: 0.12, fF: -1.35, hipB: 1.46, kneeB: 0.3, fB: -1.2, shF: 0.36, elF: -0.48, shB: 0.05, elB: 0.1 }),
   sleep: P({ plF: 0, plB: 0, lean: -1.57, tilt: 0.05, hipF: 2.35, kneeF: 2.1, fF: -0.15, hipB: 1.5, kneeB: 0.25, fB: -1.2, shF: 0.5, elF: -0.42, shB: 0.32, elB: -0.3, sleep: 1 }),
-  'look-up': P({ lean: -0.12, stoop: -0.04, tilt: -0.42, shF: -0.12, elF: 0.15, shB: 0.15, elB: 0.18 }),
+  'look-up': P({ lean: -0.12, stoop: -0.04, tilt: -0.42, shF: -0.12, elF: 0.3, shB: 0.15, elB: 0.3 }),
   'hands-on-hips': P({ lean: -0.04, hipF: -0.12, hipB: 0.16, kneeB: 0.04, shF: -0.72, elF: 1.4, hF: 2, shB: 0.72, elB: -1.42, hB: 2 }),
   'arms-crossed': P({ lean: -0.03, tilt: -0.04, shF: -0.25, elF: 1.86, hF: 2, shB: 0.38, elB: -1.75, hB: 2 }),
   'reach-up': P({ lean: -0.04, tilt: -0.42, ik: 1, tFx: 0.04, tFy: 1, tBx: -0.06, tBy: 1, fF: 0.45, fB: 0.42, pvF: 1, pvB: 1, shF: 2.85, elF: 0.12, hF: 1, shB: 2.6, elB: 0.2, hB: 1 }),
@@ -1165,6 +1542,19 @@ export const GAITS = { walk, run };
 // ───────────────────────── gestures ─────────────────────────
 const env = (u, a = 0.18, b = 0.2) => smooth(0, a, u) * (1 - smooth(1 - b, 1, u));
 const over = (base, key, e) => { const p = { ...POSE0, ...base }; for (const k in key) p[k] = lerp(p[k] ?? 0, key[k], e); return p; };
+// Point: the near arm rises to point along an aim (pose.aim, solved at draw time). The optional third argument picks
+// it: { to: 'up' | 'sky' | 'ahead' | 'down' | an elevation (radians above the horizontal) | [x, y] (a target point
+// in units from the contact point, facing right, y down) }. Without one the point follows the eyeline (st.tilt): up at
+// the sky when she looks up, down at the tortoise when she looks at him, level when her gaze is. A named aim
+// also lifts or drops the chin a little; the aim itself is set outright (only the arm's weight ramps), so the arm
+// travels straight to it rather than sweeping through other angles.
+function point(u, b = POSES.stand, o) {
+  const to = o?.to, e = typeof to === 'number' ? to : AIM[to], tgt = Array.isArray(to) && to.length === 2 && to.every(Number.isFinite);
+  const E = Number.isFinite(e) ? clamp(e, -1.3, 1.45) : null;
+  const w = env(u, 0.2, 0.22), p = over(b, { aim: 1, lean: 0.05, tilt: -0.05 - (E === null ? 0 : 0.3 * clamp(E, -0.8, 1)) }, w);
+  p.hF = w > 0.3 ? 3 : b.hF ?? POSE0.hF;              // the hand goes straight to pointing (no open palm or fist on the way)
+  return Object.assign(p, tgt ? { aimT: 1, aimX: to[0], aimY: to[1], aimG: 0, aimE: 0 } : E !== null ? { aimE: E, aimG: 0, aimT: 0 } : { aimE: 0, aimG: 1, aimT: 0 });
+}
 const JUMP = {
   crouch: { hipF: 0.85, kneeF: 1.5, hipB: 0.8, kneeB: 1.45, lean: 0.38, tilt: -0.15, shF: -0.35, elF: 0.4, shB: -0.25, elB: 0.4 },
   air: { plF: 0, plB: 0, hipF: 0.75, kneeF: 1.35, hipB: 0.35, kneeB: 1.15, fF: 0.6, fB: 0.6, lean: -0.05, tilt: -0.22, shF: 2.7, elF: 0.15, hF: 1, shB: 2.55, elB: 0.2, hB: 1, joy: 1 },
@@ -1183,7 +1573,10 @@ export const GESTURES = {
     p.lift = (p.lift || 0) + 34 * Math.sin(Math.PI * clamp((u - 0.22) / 0.52));
     return p;
   } },
-  point: { dur: 1.3, at: (u, b = POSES.stand) => over(b, { shF: 1.52, elF: 0.04, hF: 3, lean: 0.05, tilt: -0.05 }, env(u, 0.2, 0.22)) },
+  point: { dur: 1.3, at: point },
+  // shorthands for storyboards (a gesture beat passes only its name): at the sky, and down at something on the ground
+  'point-up': { dur: 1.3, at: (u, b = POSES.stand) => point(u, b, { to: 'up' }) },
+  'point-down': { dur: 1.3, at: (u, b = POSES.stand) => point(u, b, { to: 'down' }) },
   bow: { dur: 1.7, at: (u, b = POSES.stand) => over(b, { lean: 0.85, stoop: 0.12, tilt: 0.28, hipF: 0.2, hipB: 0.12, shF: 1.0, elF: 0.15, shB: 1.08, elB: 0.15 }, env(u, 0.32, 0.35)) },
   gasp: { dur: 1.1, at: (u, b = POSES.stand) => over(b, { lean: -0.1, tilt: -0.14, shrug: 0.6, shF: 0.62, elF: 2.28, hF: 1, shB: 0.52, elB: 2.2, hB: 1, bkFront: 1, gasp: 1 }, env(u, 0.12, 0.3)) },
   beckon: { dur: 1.7, at: (u, b = POSES.stand) => { const e = env(u, 0.15, 0.15), p = over(b, { shF: 0.95, elF: 0.3, hF: 1, tilt: 0.12, joy: 1, lean: 0.03 }, e); p.elF += 0.95 * (0.5 - 0.5 * Math.cos(TAU * 3 * u)) * e; return p; } },

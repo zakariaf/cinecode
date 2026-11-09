@@ -1,6 +1,6 @@
 // Gouache nature: foliage masses, trunks, branches (painted and queried from the same data), grass,
 // flowers, ferns, rocks, rolling hills, reeds, mushrooms.
-import { lerp, pick, poly, path, ell, rpoly, quad, ink, blob, clump, noise1 } from '../core/lib.mjs';
+import { canvas, lerp, pick, poly, path, ell, rpoly, quad, ink, blob, clump, noise1 } from '../core/lib.mjs';
 import { celShade, contactShadow } from './brush.mjs';
 
 // Rich foliage: a dark mass, mid-tone dabs, small lit dabs toward the light, a few sky holes.
@@ -178,6 +178,60 @@ export function pebbles(x, r, x0, x1, yAt, n, { pal = ['#a39d8c', '#8f8a7c', '#b
     x.fillStyle = 'rgba(40,40,40,.25)'; blob(x, px + 1, py + 1.2, s, s * 0.55, 0, r, 6);
     x.fillStyle = pick(r, pal); blob(x, px, py, s, s * 0.6, 0, r, 6);
   }
+}
+
+// One grass blade: wide at the root, curving to a point (tip offset dx, height h, bend sideways at mid-height).
+export function grassBlade(x, bx, by, dx, h, w, bend, col) {
+  const tx = bx + dx, ty = by - h, mx = bx + dx * 0.35 + bend, my = by - h * 0.55;
+  x.fillStyle = col; x.beginPath(); x.moveTo(bx - w / 2, by);
+  x.quadraticCurveTo(mx - w * 0.35, my, tx, ty); x.quadraticCurveTo(mx + w * 0.35, my, bx + w / 2, by); x.closePath(); x.fill();
+}
+
+// A skirt of grass round the foot of a trunk (or a post, a stone): a low ground-green mound that hides where
+// the object meets the ground, then clumps of blades fanning from their roots (dark ones behind, lit ones in
+// front, some with sunlit tips), taller where the clumps are thick and dying away at both ends, so the tips
+// make a ragged, organic top edge. The foot fades out along a wavy line, so the prop's sprite ends softly in
+// the grass; pair it with the prop's inkFloor (≈ base − h × 0.55) so no ink line runs along it.
+// `gaps: [[x0, x1]…]` keep the grass short there (a hollow at the foot of a trunk stays open).
+export function grassSkirt(x, r, cx, base, w, h, { back = ['#355f2e', '#3f6b34', '#4a7a3a'], front = ['#5f9046', '#6f9e4f', '#80ad58', '#74a64e'], tips = ['#a6c96c', '#b8d47a', '#92bc62'], ground = ['#5c8a40', '#4f7d38'], fade = 12, density = 1, seed = 1, gaps = [] } = {}) {
+  const m = x.getTransform(), k = Math.hypot(m.a, m.b) || 1, X0 = cx - w / 2 - h, Y0 = base - h * 1.8, X1 = cx + w / 2 + h, Y1 = base + fade + 8;
+  const [c, lx] = canvas(Math.ceil((X1 - X0) * k), Math.ceil((Y1 - Y0) * k));
+  lx.setTransform(k, 0, 0, k, -X0 * k, -Y0 * k);
+  const nz = noise1(seed + 431), gap = px => (gaps.some(([a, b]) => px > a && px < b) ? 0.2 : 1);
+  const env = u => Math.pow(Math.max(0, Math.sin(Math.PI * u)), 0.5) * (0.35 + 0.85 * nz(u * 9 + 3)) * gap(cx + (u - 0.5) * w);
+  // the mound the object stands in (low: it only has to cover the very foot). It swells under the middle and sinks
+  // into the ground toward both ends, and the ends dissolve sideways, so it never stops at a vertical edge.
+  const top = [], mn = noise1(seed + 613), ends = 0.2, sw = u => { const t = Math.min(1, Math.min(u, 1 - u) / ends); return t * t * (3 - 2 * t); };
+  for (let i = 0; i <= 90; i++) { const u = i / 90, px = cx + (u - 0.5) * w; top.push([px, base + 4 - (4 + (5 + 8 * mn(px / 14) * env(u)) * Math.min(1, h / 30)) * sw(u)]); }
+  const g = lx.createLinearGradient(0, base - 8, 0, Y1); g.addColorStop(0, ground[0]); g.addColorStop(1, ground[1]);
+  lx.fillStyle = g; path(lx, [...top, [cx + w / 2, Y1], [cx - w / 2, Y1]]); lx.fill();
+  lx.globalCompositeOperation = 'destination-out';
+  for (const s of [-1, 1]) { const e = lx.createLinearGradient(cx + s * w / 2, 0, cx + s * w * (0.5 - ends), 0); e.addColorStop(0, 'rgba(0,0,0,1)'); e.addColorStop(1, 'rgba(0,0,0,0)'); lx.fillStyle = e; lx.fillRect(X0, Y0, X1 - X0, Y1 - Y0); }
+  lx.globalCompositeOperation = 'source-over';
+  // stubble: short blades all along
+  for (let i = 0; i < (w / 2.5) * density; i++) { const u = r(), e = env(u); if (e < 0.05) continue; const H = h * (0.12 + 0.22 * r()) * (0.5 + e * 0.5); grassBlade(lx, cx + (u - 0.5) * w, base + 1 + r() * 6, (r() - 0.5) * H * 0.8, H, 1.8 + r() * 1.6, 0, pick(r, r() < 0.5 ? back : front)); }
+  // clumps: blades fanning out from one root, back (dark) half first, then the front (lit) half
+  const clumps = [];
+  for (let px = cx - w / 2 + r() * 10; px < cx + w / 2; px += (9 + r() * 20) / density) { const u = (px - cx) / w + 0.5, e = env(u); if (e > 0.12) clumps.push({ px, py: base + 1 + r() * 6, H: h * e * (0.55 + 0.75 * r()), n: 4 + Math.floor(r() * 5 * Math.min(1.4, e + 0.3)), lean: (r() - 0.5) * 0.5 + (u - 0.5) * 0.5 }); }
+  for (const pass of [0, 1]) for (const C of clumps) {
+    for (let j = 0; j < C.n; j++) {
+      if ((j % 2) !== pass) continue;
+      const f = C.n > 1 ? j / (C.n - 1) - 0.5 : 0, H = C.H * (0.55 + 0.45 * Math.cos(f * 2.2)) * (0.8 + r() * 0.35), dx = (f * 1.5 + C.lean) * H * 0.55;
+      const bw = 2.2 + r() * 2.2, bx = C.px + f * 6 + (r() - 0.5) * 3, by = C.py + r() * 2, bend = (r() - 0.5) * H * 0.2;
+      grassBlade(lx, bx, by, dx, H, bw, bend, pick(r, pass ? front : back));
+      if (pass && r() < 0.45) { const t0 = 0.55 + r() * 0.15; grassBlade(lx, bx + dx * t0 * 0.75, by - H * t0, dx * (1 - t0), H * (1 - t0), bw * 0.55, 0, pick(r, tips)); }
+    }
+  }
+  // a few stragglers beyond the ends
+  for (let i = 0; i < 6 * density; i++) { const s = r() < 0.5 ? -1 : 1, bx = cx + s * (w / 2 + r() * h * 0.8), H = h * (0.2 + r() * 0.3); grassBlade(lx, bx, base + 3 + r() * 4, s * H * 0.3, H, 2 + r() * 1.6, 0, pick(r, front)); }
+  // fade the foot into the ground along a wavy, soft line
+  const wav = [], wn = noise1(seed + 977);
+  for (let px = X0 - 10; px <= X1 + 10; px += 6) wav.push([px, base + 3 + fade * 0.35 * wn(px / 23) + 3 * Math.sin(px / 9 + seed)]);
+  lx.globalCompositeOperation = 'destination-out'; lx.filter = `blur(${(2.5 * k).toFixed(1)}px)`;
+  const fg = lx.createLinearGradient(0, base + 2, 0, base + fade + 4); fg.addColorStop(0, 'rgba(0,0,0,.55)'); fg.addColorStop(1, 'rgba(0,0,0,1)');
+  lx.fillStyle = fg; path(lx, [...wav, [X1 + 10, Y1 + 20], [X0 - 10, Y1 + 20]]); lx.fill();
+  lx.filter = 'none'; lx.globalCompositeOperation = 'source-over';
+  x.drawImage(c, X0, Y0, X1 - X0, Y1 - Y0);
 }
 
 // A tuft of grass blades on the ground (for prop bases, path edges).

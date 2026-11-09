@@ -38,7 +38,9 @@ export function celShadeSprite(x, cx, cy, rx, ry, { light = [-0.6, -0.75], amoun
 }
 
 // Ink line round a sprite's silhouette: the alpha mask dilated, heavier on the side away from the light.
-export function inkSilhouette(src, w = 2.4, { color = INK, light = [-0.6, -0.75], alpha = 1, heavy = 0.7 } = {}) {
+// `fade: [y0, y1]` (canvas px) fades the ink out downward: full above y0, none below y1 — so a prop standing
+// in grass has no hard line where it meets the ground.
+export function inkSilhouette(src, w = 2.4, { color = INK, light = [-0.6, -0.75], alpha = 1, heavy = 0.7, fade = null } = {}) {
   const [m, mx] = canvas(src.width, src.height);
   mx.drawImage(src, 0, 0); mx.globalCompositeOperation = 'source-in'; mx.fillStyle = color; mx.fillRect(0, 0, src.width, src.height);
   const [o, ox] = canvas(src.width, src.height), d = unit(light);
@@ -47,7 +49,13 @@ export function inkSilhouette(src, w = 2.4, { color = INK, light = [-0.6, -0.75]
     const a = (i / 16) * Math.PI * 2, k = 1 + heavy * Math.max(0, -(Math.cos(a) * d[0] + Math.sin(a) * d[1]));
     ox.drawImage(m, Math.cos(a) * w * k, Math.sin(a) * w * k);
   }
-  ox.globalAlpha = 1; ox.drawImage(src, 0, 0);
+  ox.globalAlpha = 1;
+  if (fade) {
+    const g = ox.createLinearGradient(0, fade[0], 0, Math.max(fade[0] + 1, fade[1]));
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,1)');
+    ox.globalCompositeOperation = 'destination-out'; ox.fillStyle = g; ox.fillRect(0, 0, src.width, src.height); ox.globalCompositeOperation = 'source-over';
+  }
+  ox.drawImage(src, 0, 0);
   return o;
 }
 // In place: outline everything already painted on context x.

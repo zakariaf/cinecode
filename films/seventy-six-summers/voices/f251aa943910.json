@@ -1,0 +1,34 @@
+{
+ "id": "f251aa943910",
+ "who": "fidget",
+ "text": "Easy! Big step!",
+ "voice": "Puck",
+ "tone": "quick, bright, cheeky, brisk, cheerful",
+ "prompt": "[cheeky, brisk, cheerful] Easy! Big step!",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.23,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0.763,0.856,0.992,1,0.987,0.868,0.826,0.885,0.801,0.722,0.749,0.736,0.671,0.369,0.147,0.853,0.991,0.88,0.555,0.186,0.305,1,1,1,0.874,0.505,0.184,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Easy. Big step.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "cheeky, brisk, cheerful",
+    "wer": 0,
+    "transcript": "Easy. Big step.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.23
+   }
+  ]
+ }
+}

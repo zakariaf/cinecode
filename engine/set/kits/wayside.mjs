@@ -1,7 +1,7 @@
 // The wayside: a great old tree beside the course path, a long low branch reaching left over a shady nap
 // spot among its roots, a signpost at the fork, open meadow and soft hills beyond.
 import { makeSet } from '../set.mjs';
-import { paper, blades, fern, contactShadow, LEFT, meadowFloor, dirtPath, pathBand, farHills, bigTree, boulder, signpost, smallTree, crown } from '../../paint/paint.mjs';
+import { paper, blades, fern, contactShadow, LEFT, meadowFloor, dirtPath, pathBand, farHills, bigTree, treeSkirt, boulder, signpost, smallTree, crown } from '../../paint/paint.mjs';
 
 export const WAY_TREE = { x: 1560, base: 985, w: 175, top: 260 };
 export const WAY_BRANCH = { pts: [[1515, 648], [1470, 640], [1330, 612], [1180, 600], [1060, 608]], w0: 34, w1: 10, leaves: 0.62 };
@@ -44,7 +44,7 @@ export default function wayside(params = {}) {
       } },
     ],
     props: [
-      { id: 'way_tree', x: WAY_TREE.x, y: 975, base: WAY_TREE.base, solid: { rx: 112, ry: 26 }, bounds: [WAY_TREE.x - 1000, -600, WAY_TREE.x + 900, 1030],
+      { id: 'way_tree', x: WAY_TREE.x, y: 975, base: WAY_TREE.base, inkFloor: treeSkirt(WAY_TREE).inkFloor, solid: { rx: 112, ry: 26 }, bounds: [WAY_TREE.x - 1000, -600, WAY_TREE.x + 900, 1030],
         paint: (x, r) => bigTree(x, r, { ...WAY_TREE, light: L, branches: [WAY_BRANCH], roots: 5,
           back: [[WAY_TREE.x - 60, -60, 1300, 560]],
           canopy: [[WAY_TREE.x - 40, 40, 1300, 520], [WAY_TREE.x - 520, 250, 560, 300], [WAY_TREE.x + 420, 230, 600, 320], [WAY_TREE.x + 60, 330, 520, 220], [WAY_TREE.x + 330, 420, 520, 220], [WAY_TREE.x + 620, 380, 380, 240]],

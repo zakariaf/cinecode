@@ -8,27 +8,49 @@
 //                        place in the prologue and the finale. memory = full, muted by the shot's story grade (its
 //                        saturation and sepia are applied to the comet's colours); faint = a low dawn smudge;
 //                        dim = a smudge upper left that warms the mist; bloom = dim until plan.marks[mark], then one
-//                        eased rise (1.5 s) into full: brighter, longer tails, glow on the mist and clouds, more stars.
+//                        eased rise (1.5 s) into full: brighter, longer tails, a broader silver-gold lining on the
+//                        clouds, the parted mist glowing gold, the starfield brightening and stars coming out one by one.
+//                        Its light lines the clouds' edges facing it at full resolution (a crisp line falling off into
+//                        the cloud, a faint glow past it, fading near the land; cloudLight).
+//                        Its key light falls on the land's own paint (added in proportion to it, more to the lit paint),
+//                        so the lit land gains contrast and the night's darks stay dark; the standing stone catches it:
+//                        its face toward the comet turns gold and brightens, with a gold line along that edge, rising
+//                        with the bloom (drawStoneKey). In a shot with depth of field the comet and its
+//                        occlusion masks are as soft as the frame (the same blur rule as engine/film/frame.mjs), and a
+//                        head half hidden by the out-of-focus land rises into the clear sky just above (cometLift).
 //                        During a time-lapse beat in the same scene the memory comet dims and slides to the faint place.
-//   overlay hill-mist    layer 'front'. Height fog: a world-space density field (height above the slope, an extent along
-//                        the slope, drifting value noise) laid over everything already drawn, so layers, props and
-//                        actors fog by where they are on the slope and figures walk into it and out of it; plus a band
-//                        of painted wisps along its top. params: from / to (world x where the mist begins / ends, soft;
-//                        default 1500 / 2000 = the upper slope, crest clear; 4000 = over the crest, only the stone's tip
-//                        above it, the default when `part` is given), top (height of the mist above the ground, world
-//                        px), part (a mark: from it the field is displaced radially outward from the standing stone and
-//                        clears). Close up it thins into drifting wisps so faces stay readable.
+//   overlay hill-mist    layer 'front'. Ground fog: a world-space density field laid over everything already drawn. It has
+//                        no top: densest on the ground, it thins smoothly with height (a thin skin where it begins; over
+//                        the crest a near-opaque body with a soft shoulder, so only the stone's tip stands clear),
+//                        streaked into drifting horizontal strata, with level bands of painted wisps over the crest; a
+//                        pale stone in it fades as one shape (its ink line is veiled with its fill, not left as a hollow
+//                        outline). A figure is veiled by only part of the local
+//                        mist (params.through, default 0.5: the ground behind it is further away), so figures walk into
+//                        it and step out of it readably. params: from / to (world x where the mist begins / ends, soft;
+//                        default 1500 / 2000 = the upper slope, crest clear; 4000 = over the crest, the default when
+//                        `part` is given), top (how high it can reach, world px), rise (how far up the slope it takes to
+//                        reach full depth), part (a mark: on it the field is still the one before it; from it the mist
+//                        slides outward along the ground from the standing stone into a widening ring of torn strands
+//                        that keeps ahead of the 9.5 pull-back and comes to rest on the slope below, clear round the
+//                        stone; lit by the bloom it glows gold but stays a thin veil, so the night's land shows
+//                        through, PART). Close up it thins into drifting wisps so faces stay readable (not in a close-up
+//                        that frames no figure: the stone's tip above the mist). A figure fading in or out where the mist
+//                        lies does it inside a drift of mist that gathers before it appears (emergeVeils).
 //   overlay stone-light  layer 'grade'. The gold sliver of the last sunlight on the standing stone (prop standing_stone,
 //                        anchor stone_top): the stone's own paint lit gold above a shadow line that climbs as
 //                        params.dayT goes from its first to its second value across the scene; params.out = a mark:
 //                        the light reaches exactly 0 on that mark and never before. Hidden by actors and mist in front.
 //   custom timelapse     layer 'grade' (shot 1.6). Days and nights over the land and sky, slow at first, then averaged
-//                        into a smooth drifting colour (at most 3 full-frame brightness changes a second); season tints
-//                        on the grass about once a second; eight ghosts of Nell in her green scarf at the stone.
-// Heavy fields (comet body, mist, masks) are painted at half resolution and scaled up. Everything is seeded.
+//                        into a smooth drifting colour (at most 3 full-frame brightness changes a second): the land is
+//                        graded for the time of day its sky shows (dark under the nights, lit under the days); season
+//                        tints on the grass about once a second; eight ghosts of Nell in her green scarf at the stone,
+//                        timed to the beat's length (the old woman's 8 frames end on its last frame).
+// Heavy fields (comet body, mist, masks) are painted at half resolution and scaled up (the clouds' lining, a thin line,
+// at full resolution over the clouds' box only). Everything is seeded.
 import { rng, clamp, lerp, smooth, easeInOut, canvas, blob } from '../../../engine/core/lib.mjs';
 import { paper } from '../../../engine/paint/atmos.mjs';
 import { getRig } from '../../../engine/cast/index.mjs';
+import { grade, mixGrade } from '../../../engine/film/grade.mjs';
 
 const TAU = Math.PI * 2;
 const easeOut = u => 1 - (1 - clamp(u)) ** 3;
@@ -99,29 +121,71 @@ function drawActor(x, a, api) {
 }
 const worldT = (x, api, k) => { const { cam, W, H } = api, z = cam.zoom; x.setTransform(z * k, 0, 0, z * k, (W / 2 - cam.cx * z) * k, (H / 2 - cam.cy * z) * k); };
 
-// What stands in front of the sky at this frame, as alpha, at resolution k: back layers, props, actors, front layers.
-// One per frame (overlays on the same frame share it).
-const COVER = { key: null };
-export function coverMask(api, k = 0.5) {
-  const key = `${api.shot?.id}|${api.t}|${api.W}x${api.H}|${k}`;
-  if (COVER.key === key) return COVER.c;
-  const w = Math.ceil(api.W * k), h = Math.ceil(api.H * k), [c, x] = scratch('cover', w, h), S = api.set;
-  worldT(x, api, k);
-  S.drawBack(x, api.cam, { t: api.t });
-  for (const p of S.propsSorted()) p.draw(x);
-  x.setTransform(k, 0, 0, k, 0, 0);
-  for (const a of actorsOf(api)) drawActor(x, a, api);
-  worldT(x, api, k);
-  S.drawFront(x, api.cam, { t: api.t });
-  COVER.key = key; COVER.c = c;
+// The frame's depth-of-field blur radius (screen px) for this shot and camera: the same rule as engine/film/frame.mjs
+// (which blurs everything behind the framed subjects when the painted set is enlarged), so light drawn after it (the
+// comet, its masks) is as soft as the sky and the far hills it sits among. 0 when the frame has no blur.
+export function dofOf(api) {
+  const shot = api.shot, z = api.cam.zoom, kH = api.H / 1080;
+  if (!shot || shot.dof === false || shot.dof === 0) return 0;
+  const auto = clamp((z - 2.2) * 1.6, 0, 14);
+  const r = (typeof shot.dof === 'number' ? Math.max(shot.dof * 1.6, auto) : shot.dof === true ? Math.max(5, auto) : auto) * kH;
+  if (!(r > 0.5)) return 0;
+  // the frame blurs only when one of the framed subjects is on stage
+  const on = shot.on || [];
+  return actorsOf(api).some(a => on.includes(a.id)) ? r : 0;
+}
+
+// Whether the shot frames a figure that is on stage (its `on` names one; true when there is no plan to ask).
+const framesFigure = api => { const on = api.shot?.on || []; return !api.plan?.actorsAt || actorsOf(api).some(a => on.includes(a.id)); };
+
+// The actors' silhouettes (alpha) at resolution k, one per frame; `solid`: only the actors not fading in or out.
+const ACTORS = new Map();
+function actorMask(api, k = 0.5, solid = false) {
+  const all = actorsOf(api), list = solid ? all.filter(a => a.alpha >= 0.98) : all;
+  if (solid && list.length === all.length) return actorMask(api, k);
+  const key = `${api.shot?.id}|${api.t}|${api.W}x${api.H}`, name = `${k}|${solid}`, hit = ACTORS.get(name);
+  if (hit?.key === key) return hit.c;
+  let c = null;
+  if (list.length) { const [mc, x] = scratch(`actor-mask@${name}`, Math.ceil(api.W * k), Math.ceil(api.H * k)); x.setTransform(k, 0, 0, k, 0, 0); for (const a of list) drawActor(x, a, api); c = mc; }
+  ACTORS.set(name, { key, c });
   return c;
 }
-// The set's cloud layer at this frame (as set.drawSky draws it), as alpha at resolution k.
-const CLOUD = { key: null };
+
+// What stands in front of the sky at this frame, as alpha, at resolution k: back layers, props, actors, front layers.
+// In a shot with depth of field the back layers and props are as soft as the frame draws them (actors and front layers
+// stay sharp). One per frame and name (overlays on the same frame share it; another name is another canvas).
+const COVER = new Map();
+export function coverMask(api, k = 0.5, name = 'cover') {
+  const blur = dofOf(api) * k, key = `${api.shot?.id}|${api.t}|${api.W}x${api.H}|${blur}`, id = `${name}@${k}`, hit = COVER.get(id);
+  if (hit?.key === key) return hit.c;
+  const w = Math.ceil(api.W * k), h = Math.ceil(api.H * k), [c, x] = scratch(id, w, h), S = api.set;
+  if (blur > 0.3) {
+    // painted with a margin so the blur doesn't thin the mask along the frame's edges
+    const pad = Math.ceil(blur * 2.5) + 2, [bc, bx] = scratch(`${id}-back`, w + 2 * pad, h + 2 * pad), [fc, fx] = scratch(`${id}-blur`, w + 2 * pad, h + 2 * pad);
+    worldT(bx, api, k); const m = bx.getTransform(); bx.setTransform(m.a, m.b, m.c, m.d, m.e + pad, m.f + pad);
+    S.drawBack(bx, api.cam, { t: api.t, dof: 2 });                    // the far layers' own blur, as the frame asks for it
+    for (const p of S.propsSorted()) p.draw(bx);
+    fx.filter = `blur(${blur.toFixed(2)}px)`; fx.drawImage(bc, 0, 0); fx.filter = 'none';
+    x.drawImage(fc, -pad, -pad);
+  } else {
+    worldT(x, api, k);
+    S.drawBack(x, api.cam, { t: api.t });
+    for (const p of S.propsSorted()) p.draw(x);
+  }
+  x.setTransform(1, 0, 0, 1, 0, 0);
+  const am = actorMask(api, k); if (am) x.drawImage(am, 0, 0);
+  worldT(x, api, k);
+  S.drawFront(x, api.cam, { t: api.t });
+  COVER.set(id, { key, c });
+  return c;
+}
+// The set's cloud layer at this frame (as set.drawSky draws it), as alpha at resolution k; as soft as the frame's sky
+// in a shot with depth of field.
+const CLOUD = new Map();
 function cloudMask(api, k = 0.5) {
-  const key = `${api.shot?.id}|${api.t}|${api.W}x${api.H}|${k}`;
-  if (CLOUD.key === key) return CLOUD.c;
-  const w = Math.ceil(api.W * k), h = Math.ceil(api.H * k), [c, x] = scratch('clouds', w, h), S = api.set;
+  const blur = dofOf(api) * k, key = `${api.shot?.id}|${api.t}|${api.W}x${api.H}|${k}|${blur}`, hit = CLOUD.get(k);
+  if (hit?.key === key) return hit.c;
+  const w = Math.ceil(api.W * k), h = Math.ceil(api.H * k), [c, x] = scratch(`clouds@${k}`, w, h), S = api.set;
   const sky = api.shot.skyAt ? api.shot.skyAt(api.t) : null, list = !sky ? [[S.defaultSky, 1]] : typeof sky === 'string' ? [[sky, 1]] : sky;
   const F = skyFrame(api), drift = ((((api.t * (S.def?.cloudSpeed ?? 5) + (api.cam.cx - S.refX) * 0.07) * F.s) % F.w) + F.w) % F.w;
   x.setTransform(k, 0, 0, k, 0, 0);
@@ -131,19 +195,67 @@ function cloudMask(api, k = 0.5) {
     const cl = S.skyCanvases(name).clouds; x.globalAlpha = a / acc;
     x.drawImage(cl, F.x0 - drift, F.y0, F.w, F.h); x.drawImage(cl, F.x0 - drift + F.w, F.y0, F.w, F.h);
   }
-  CLOUD.key = key; CLOUD.c = c;
+  if (blur > 0.3) {
+    const [bc, bx] = scratch(`clouds-blur@${k}`, w, h); bx.filter = `blur(${blur.toFixed(2)}px)`; bx.drawImage(c, 0, 0); bx.filter = 'none';
+    x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.clearRect(0, 0, w, h); x.drawImage(bc, 0, 0);
+  }
+  CLOUD.set(k, { key, c });
   return c;
 }
 
 // ───────────── the mist ─────────────
-export const MIST = { from: 1500, to: 2000, top: 250, edge: 260, drift: 7, color: [236, 238, 247], thin: [196, 204, 228], alpha: 0.84, veil: 0.2 };
-const PART = { R: 1700, dur: 3, push: 0.4, fade: [0.3, 3.4], keep: 0.2 };
-// The mist's parameters for a scene: its hill-mist overlay params with the defaults, and the parting time.
+// top: how high the mist can reach (world px; the field is 0 above top × 1.45); rise: how far up the slope from `from` it
+// takes to reach its full depth; through: how much of the local mist stands in front of an actor (the ground behind a
+// figure is further away, so more mist lies between it and the camera than between the figure and the camera).
+// alpha: the drawn opacity of the mist at full density; core: of its dense body over the crest (it hides the stone).
+export const MIST = { from: 1500, to: 2000, top: 250, edge: 260, rise: 900, drift: 7, color: [222, 230, 236], thin: [196, 206, 226], alpha: 0.8, core: 0.95, veil: 0.16, through: 0.5 };
+// The parting at the bloom: the opening's radius grows as R (1 − e^−(t/tau)^grow) + creep·t, slow at first so the
+// close-up on the stone sees the wisps below its tip begin to move, then fast enough to stay ahead of the 9.5 pull-back,
+// coming to rest round the extreme wide (then creeping on). It clears inside `clear` × the radius; the mist that lay there
+// is pushed into a ring out to the radius, densest (`pile`) near its front, just inside the widening frame. The mist
+// slides outward along the ground (it keeps its height above the ground: it never climbs the stone or stands up as a wall
+// down the slope) and flattens as it goes (twice as shallow after `settle` × top of travel); where the ring has passed
+// it thins (fade, s after the mark) to `keep` of itself: a lit veil that stays on the slope, and tears into drifting
+// strands (`tear` of it, over the first `tearIn` s): lit wisps with the land showing between them, not a filled sheet.
+// On the mark the field is the one before it.
+export const PART = { R: 1500, tau: 2.6, grow: 2, creep: 14, settle: 2.6, clear: 0.6, pile: 0.3, fade: [0.6, 6], keep: 0.6, tear: 0.85, tearIn: [0.2, 1.4] };
+export const partRadius = tp => (tp > 0 ? PART.R * (1 - Math.exp(-((tp / PART.tau) ** PART.grow))) + PART.creep * tp : 0);
+// Level wisp strata over the crest: [height above the crest, half-thickness (both × top), strength, drift speed, seed]:
+// one along the dense body's shoulder, one thin wisp just under the stone's tip.
+const BANDS = [[0.74, 0.08, 0.4, 1.5, 3], [0.86, 0.065, 0.3, 2.3, 8]];
+// The mist once the bloomed comet lights it: its colour (before the grade) and how much of it takes that colour, how
+// much of the mist's veil is left (lit mist glows rather than hides: the land shows through), the gain of the gold
+// glow screened onto it, how far its light turns it toward gold (a hue shift at its own value), and how much less of it veils a
+// figure (× through; all at the full bloom).
+export const MIST_LIT = { col: [255, 234, 196], tint: 0.6, veil: 0.45, glow: 0.42, warm: 0.7, through: 0.6 };
+// The mist's parameters for a scene: its hill-mist overlay params with the defaults, the parting time, and the drifts
+// round any figure fading in or out in it (emergeVeils).
 export function mistParams(api, params) {
   // mist that parts from the stone must reach it: with `part` and no `to`, the bank lies over the crest
   const p = { ...MIST, ...(params?.part != null && params.to == null ? { to: 4000 } : {}), ...(params || {}) };
   p.partT = typeof p.part === 'string' ? api.marks?.[p.part] ?? null : Number.isFinite(p.part) ? api.scene.t0 + p.part : null;
+  p.veils = emergeVeils(api, p);
   return p;
+}
+// A figure that fades in or out where the mist lies does it inside a drift of mist (a fade in open air reads as a
+// see-through ghost): the mist gathers round it `ahead` s before it appears and thins as it becomes solid, as
+// (1 - alpha)^pow, so the audience sees it step out of the mist. → [{ x, feet, h, w, k }] (world; k 0..1)
+export const EMERGE = { ahead: 0.9, pow: 0.5, width: 0.42 };
+export function emergeVeils(api, p) {
+  const at = api.plan?.actorsAt, sc = sceneOf(api), out = [];
+  if (!at || !api.actor) return out;
+  let soon = null;
+  for (const a of at(api.t, sc)) {
+    if (!a.visible || a.mode === 'off' || !(a.alpha < 0.98)) continue;
+    soon ??= at(api.t + EMERGE.ahead, sc);
+    const al = clamp(a.alpha), next = clamp(soon.find(q => q.id === a.id)?.alpha ?? 0);
+    const where = smooth(p.from - p.edge * 2, p.from, a.x) * (1 - smooth(p.to, p.to + p.edge, a.x));
+    const k = (1 - al) ** EMERGE.pow * smooth(0.02, 0.5, Math.max(al, next)) * where, g = api.actor(a.id)?.box;
+    if (k < 0.01 || !g) continue;
+    const h = g[3] - g[1];
+    out.push({ x: (g[0] + g[2]) / 2, feet: g[3], h, w: Math.max((g[2] - g[0]) / 2, EMERGE.width * h), k });
+  }
+  return out;
 }
 const mistOverlay = api => (api.plan.overlays || []).find(o => o.scene === sceneOf(api) && o.name === 'hill-mist');
 // The stone the mist parts from (world): the standing stone's middle, or the set's centre.
@@ -152,54 +264,96 @@ function stoneCentre(S) {
   if (p?.bounds) return [(p.bounds[0] + p.bounds[2]) / 2, (p.bounds[1] + p.bounds[3]) / 2];
   return [S.refX, S.refY];
 }
-// Soft steps: the mist is painted in three washes (like the cel-shaded clouds), not airbrushed.
+// Soft steps: three washes (like the cel-shaded clouds). 0 where there is no mist, whatever the softness.
 const step = (v, th, e = 0.06) => smooth(th - e, th + e, v);
-export const washes = (v, e = 0.06) => 0.42 * step(v, 0.1, e) + 0.32 * step(v, 0.4, e) + 0.26 * step(v, 0.7, e);
+export const washes = (v, e = 0.06) => v <= 0 ? 0 : (0.42 * step(v, 0.1, e) + 0.32 * step(v, 0.4, e) + 0.26 * step(v, 0.7, e)) * smooth(0, 0.1, v);
+// The mist's opacity for a density: the density itself (its bands are already shaped like washes) with a little of the
+// stepped washes laid over it for a painted layering, but no step at its thin end (that would draw it a hard top).
+export const glaze = (v, e = 0.06) => v <= 0 ? 0 : clamp(0.8 * v + 0.2 * washes(v, Math.max(e, 0.1)));
 // Close up, the washes soften (the mist is near the lens and out of focus) and less of it stands between the camera and
-// what it looks at: its opacity falls with the zoom.
-export const mistLens = z => ({ e: clamp(0.06 * Math.max(1, z / 1.4) ** 0.8, 0.06, 0.2), a: clamp(1.15 - 0.08 * z, 0.32, 1), wisp: clamp((z - 1.8) / 4, 0, 0.6) });
+// what it looks at: its opacity falls with the zoom. That is for faces: a close-up that frames no figure (the stone's
+// tip above the mist) keeps most of it (`faces` false).
+export const mistLens = (z, faces = true) => {
+  const a = clamp(1.15 - 0.08 * z, 0.32, 1), wisp = clamp((z - 1.8) / 4, 0, 0.6);
+  return { e: clamp(0.06 * Math.max(1, z / 1.4) ** 0.8, 0.06, 0.2), a: faces ? a : Math.max(a, 0.85), wisp: faces ? wisp : Math.min(wisp, 0.3) };
+};
 /**
- * Mist density (0..1, before the washes) at world (x, y) and film time t: a bank lying on the slope from p.from to
- * p.to, `top` world px deep with a billowing top, thinning on the near face of the slope, drifting; plus a faint veil
- * further down the slope. After p.partT the field is pushed radially out from the stone (the opening grows, eased)
- * and thins. → { bank, veil }
+ * Mist density (0..1, before the washes) at world (x, y) and film time t: ground fog lying on the slope from p.from to
+ * p.to. It has no top: it is densest on the ground and thins smoothly with height (its depth grows up the slope, so it
+ * is a thin skin where it begins; over the crest it is a dense body with a soft shoulder that hides the stone up to its
+ * tip), streaked into horizontal strata in its upper part, with two level bands of drifting wisps over the crest;
+ * thinner on the near face of the slope; plus a faint veil on the ground further down. After p.partT the field is
+ * pushed out from the stone along the ground (a widening ring, partRadius, see PART), flattens and thins. → { bank, veil }
  */
 const NONE = Object.freeze({ bank: 0, veil: 0 });
 export function mistDensity(S, p, t, seed = 7) {
-  const n = fbm(seed), m = fbm(seed + 11), O = stoneCentre(S), g = x => S.groundAt(x) ?? S.laneY ?? 1000;
-  const tp = p.partT != null ? t - p.partT : -1, R = tp > 0 ? PART.R * easeInOut(tp / PART.dur) : 0;
+  const n = fbm(seed), m = fbm(seed + 11), b = fbm(seed + 29), tw = fbm(seed + 41), O = stoneCentre(S), g = x => S.groundAt(x) ?? S.laneY ?? 1000, Yc = g(O[0]);
+  const tp = p.partT != null ? t - p.partT : -1, R = partRadius(tp);
   // the pushed mist thins as it spreads, down to a faint remnant at the edges
   const thin = tp > 0 ? 1 - (1 - PART.keep) * smooth(PART.fade[0], PART.fade[1], tp) : 1, drift = t * p.drift;
-  return (wx, wy) => {
-    let x = wx, y = wy, k = thin;
+  const rise = p.rise ?? MIST.rise;
+  const field = (wx, wy) => {
+    let x = wx, y = wy, k = 1;
     if (R > 0) {
-      const dx = wx - O[0], dy = (wy - O[1]) * 1.6, d = Math.hypot(dx, dy) || 1e-6;
-      // the field that was at d - push now shows at d: the opening grows from the stone and its mist moves outward
-      const src = Math.max(0, d - R * PART.push), f = src / d;
-      x = O[0] + dx * f; y = O[1] + (dy * f) / 1.6;
-      k *= smooth(R * 0.7, R * 1.0, d) * (1 + 0.15 * Math.exp(-(((d - R) / (R * 0.15)) ** 2)));
+      const dx = wx - O[0], dy = (wy - O[1]) * 1.6, d = Math.hypot(dx, dy) || 1e-6, c = PART.clear;
+      // the ring from c·R to R holds the mist that lay between the stone and R, pushed outward (the mist at src now shows
+      // at d): it slides along the ground, keeping its height above it, and flattens the further it travelled; inside
+      // c·R it is gone, beyond R the bank is still whole (on the mark R = 0: the field is the one before it)
+      const src = d >= R ? d : Math.max(0, (d - c * R) / (1 - c)), mv = d - src, hh = g(wx) - wy;
+      x = wx - (dx / d) * mv; y = g(x) - hh * (1 + mv / (p.top * PART.settle));
+      k *= smooth(c * R, c * R + 0.12 * R, d) * (1 + PART.pile * Math.exp(-(((d - R * 0.88) / (R * 0.1)) ** 2)));
+      // where the ring has passed, the mist is torn into strands carried outward with it (the pattern is in the pushed
+      // field's own coordinates) and thins
+      const hit = smooth(R * 1.05, R * 0.8, d), tear = PART.tear * smooth(PART.tearIn[0], PART.tearIn[1], tp) * hit;
+      k *= lerp(1, thin, hit);
+      if (tear > 0) k *= 1 - tear * (1 - smooth(0.36, 0.62, tw(x / 430 + drift / 260, y / 44)));
     }
     if (k <= 0.001) return NONE;
     const gy = g(x), hag = gy - y;
     if (hag > p.top * 1.45) return NONE;                               // well above any mist
-    const nn = n((x + drift) / 230, y / 70);
-    // pushed mist still hugs the ground where it lands
-    if (R > 0) { const h2 = g(wx) - wy; k *= 1 - smooth(p.top * 0.6, p.top * 1.1, h2); if (k <= 0.001) return NONE; }
-    const face = hag >= -40 ? 1 : Math.exp((hag + 40) / 70);          // the slope's near face: thinner toward us
+    const face = hag >= -20 ? 1 : Math.exp((hag + 20) / 45);          // the slope's near face: thinner toward us
     const along = smooth(p.from - p.edge, p.from + p.edge, x) * (1 - smooth(p.to - p.edge * 0.6, p.to + p.edge * 0.6, x));
+    const h = Math.max(0, hag), fade = 1 - smooth(p.top * 0.9, p.top * 1.45, h);
     let bank = 0;
     if (along > 0.001) {
-      // a billowing top: the bank is shallow where it begins down the slope, deep over the crest, lumpy and drifting
-      // the ends of the bank break up into separate puffs instead of tapering to a straight wedge
-      const xm = x + drift * 1.6, top = p.top * (0.3 + 0.7 * along ** 1.1) * (0.78 + 0.3 * m(xm / 260, 3.7) + 0.14 * n(xm / 95, 7.1) + 0.12 * n(xm / 34, y / 40 + 2.3));
-      const v = hag >= 0 ? 1 - smooth(top * 0.72, top * 1.0, hag + (nn - 0.5) * top * 0.3) : 1;
-      const puffs = smooth(0.12, 0.42, along + 0.55 * (m(xm / 120 + 5, y / 55) - 0.5));
-      bank = clamp(v * face * puffs * k * (0.3 + 0.95 * nn));
+      // deeper and denser up the slope; the depth breathes slowly along the slope and with the drift (less over the
+      // crest, where the stone's tip must keep clear)
+      const xm = x + drift * 1.6, thick = smooth(p.from - p.edge, p.from + rise, x), crest = smooth(0.6, 1, thick);
+      const Hs = p.top * (lerp(0.1, 0.62, thick) + 0.26 * crest) * (1 + lerp(0.16, 0.06, crest) * (2 * m(xm / 340, 3.7) - 1));
+      // the ground mist: full on the ground, then a soft shoulder (no edge), flatter-topped over the crest (a dense body),
+      // streaked into drifting horizontal strata in its upper part
+      const q = h / Hs, strata = smooth(0.32, 0.68, n((x + drift) / 560, h / (Hs * 0.42) + 1.3));
+      let clear = 1 - Math.exp(-(q ** lerp(2.2, 8, crest))) * (1 - lerp(0.4, 0.3, crest) * (1 - strata) * smooth(lerp(0.35, 0.65, crest), 0.95, q));
+      // level strata of wisps over the crest (fog lies in level layers, it does not climb the slope): flat-cored bands
+      // with soft edges, broken along their length, each drifting at its own speed, fading out down the slope
+      const lvl = smooth(p.from + rise * 0.15, p.from + rise * 0.75, x);
+      if (lvl > 0.001) for (const [hb, wb, ab, sp, sd] of BANDS) {
+        const c = Yc - p.top * hb * (0.95 + 0.1 * m(xm / 700 + sd, sd)), half = p.top * wb * (0.7 + 0.6 * b(x / 380 + sd, sd * 2));
+        clear *= 1 - ab * lvl * Math.exp(-(Math.abs((y - c) / half) ** 2.6)) * smooth(0.38, 0.64, b((x + drift * sp) / 340 + sd * 3, sd)) * smooth(-10, 30, hag);
+      }
+      bank = clamp((1 - clear) * lerp(0.6, 1, thick) * along * face * k * fade);
     }
     const low = smooth(p.from - p.edge * 4, p.from, x) * (1 - smooth(p.to - p.edge * 0.6, p.to + p.edge * 0.6, x));
-    const veil = low > 0.001 ? p.veil * low * face * k * (1 - smooth(0, p.top, hag)) * (0.6 + 0.8 * m(x / 500 + 9, y / 200)) : 0;
+    const veil = low > 0.001 ? p.veil * low * face * k * Math.exp(-h / (p.top * 0.16)) * (0.6 + 0.8 * m(x / 500 + 9, y / 200)) : 0;
     return { bank, veil };
   };
+  if (!p.veils?.length) return field;
+  // the drifts round figures fading in or out (emergeVeils): a drift, not a pillar: wide and ragged on the ground,
+  // narrowing to a torn, domed top a little above the head, made of level strands that reach out sideways and never
+  // open enough to show the figure through them
+  const veil = (wx, wy) => {
+    let q = 0;
+    for (const v of p.veils) {
+      const u = (v.feet - wy) / v.h; if (u < -0.3 || u > 1.6) continue;
+      const row = b(wy / 32 + 3, drift / 70 + 5), width = v.w * (1.9 - 0.9 * clamp(u, 0, 1)) * (0.7 + 0.8 * row);
+      const dx = (wx - v.x) / width; if (Math.abs(dx) > 3) continue;
+      const top = 1 - smooth(0.75, 1.3, u + 0.3 * dx * dx + 0.25 * (m(wx / 80, 5 + drift / 120) - 0.5));
+      const strands = lerp(0.8, 1, smooth(0.35, 0.65, n((wx + drift * 3) / 150, wy / 24 + 11)));
+      q = 1 - (1 - q) * (1 - v.k * Math.exp(-dx * dx * 1.2) * smooth(-0.3, 0.05, u) * top * strands * lerp(1, 0.85, clamp(u)));
+    }
+    return q;
+  };
+  return (wx, wy) => { const d = field(wx, wy), q = veil(wx, wy); return q > 0.001 ? { bank: 1 - (1 - d.bank) * (1 - q), veil: d.veil } : d; };
 }
 // The mist over the frame (screen space) at 1/cell resolution: `grid` = drawn opacity / alpha (0..1, after the
 // washes), and an RGBA canvas of it. One per frame and parameter set.
@@ -210,17 +364,18 @@ export function fogField(api, params, seed = 7, cell = 6) {
   const p = mistParams(api, params), D = mistDensity(api.set, p, api.t, seed % 9973);
   const gw = Math.ceil(api.W / cell) + 1, gh = Math.ceil(api.H / cell) + 1, grid = new Float32Array(gw * gh);
   const [c, x] = scratch('fog', gw, gh), img = x.createImageData(gw, gh), C = p.color, T = p.thin;
-  const { cam, W, H } = api, z = cam.zoom, lens = mistLens(z), wn = fbm(seed + 23), dr = api.t * p.drift * 2.2;
+  const { cam, W, H } = api, z = cam.zoom, lens = mistLens(z, framesFigure(api)), wn = fbm(seed + 23), dr = api.t * p.drift * 2.2;
   let any = 0;
   for (let j = 0; j < gh; j++) {
     const wy = (j * cell - H / 2) / z + cam.cy;
     for (let i = 0; i < gw; i++) {
-      const wx = (i * cell - W / 2) / z + cam.cx, d = D(wx, wy), wb = washes(d.bank, lens.e), o = (j * gw + i) * 4;
+      const wx = (i * cell - W / 2) / z + cam.cx, d = D(wx, wy), wb = glaze(d.bank, lens.e), o = (j * gw + i) * 4;
       // close up, the mist reads as drifting horizontal wisps with clear gaps rather than a milky sheet
       let v = clamp(wb + d.veil * (1 - wb)) * lens.a;
       if (lens.wisp > 0 && v > 0) v *= 1 - lens.wisp * (1 - smooth(0.3, 0.68, wn((wx + dr) / 95, wy / 16)));
       grid[j * gw + i] = v; any = Math.max(any, v);
-      img.data[o] = lerp(T[0], C[0], wb); img.data[o + 1] = lerp(T[1], C[1], wb); img.data[o + 2] = lerp(T[2], C[2], wb); img.data[o + 3] = Math.round(255 * v * p.alpha);
+      // (the dense body over the crest is near opaque: it hides what stands in it, the stone below its tip)
+      img.data[o] = lerp(T[0], C[0], wb); img.data[o + 1] = lerp(T[1], C[1], wb); img.data[o + 2] = lerp(T[2], C[2], wb); img.data[o + 3] = Math.round(255 * v * lerp(p.alpha, p.core ?? p.alpha, smooth(0.6, 0.95, wb)));
     }
   }
   x.putImageData(img, 0, 0);
@@ -235,11 +390,32 @@ function drawMist(ctx, api) {
   if (F.any < 0.004) return;
   const { W, H } = api, k = 0.5, [mc, mx] = scratch('mist', Math.ceil(W * k), Math.ceil(H * k));
   mx.setTransform(k, 0, 0, k, 0, 0); stretch(mx, F, W, H); mx.setTransform(1, 0, 0, 1, 0, 0);
+  // once the comet blooms its light, not the moon's, is in the mist: a warm cream (the night grade would turn the
+  // moonlit silver into lilac, which no light screened on afterwards can make gold)
+  const co = (api.plan.overlays || []).find(o => o.scene === sceneOf(api) && o.name === 'comet'), rise = co ? cometState({ ...api, params: co.params }).rise : 0;
+  // a figure stands in front of most of the mist behind it: only part of the local mist veils it, so it stays readable
+  // (less still of the lit mist, which glows round it); a figure fading in or out stays inside its drift
+  const am = actorMask(api, k, true), through = (F.p.through ?? MIST.through) * lerp(1, MIST_LIT.through, rise);
+  if (am && through < 1) { mx.globalCompositeOperation = 'destination-out'; mx.globalAlpha = 1 - through; mx.drawImage(am, 0, 0); mx.globalAlpha = 1; mx.globalCompositeOperation = 'source-over'; }
+  if (rise > 0.01) { mx.globalCompositeOperation = 'source-atop'; mx.globalAlpha = MIST_LIT.tint * rise; mx.fillStyle = rgbStr(MIST_LIT.col); mx.fillRect(0, 0, mc.width, mc.height); mx.globalAlpha = 1; mx.globalCompositeOperation = 'source-over'; }
   paper(mx, 0.16);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingQuality = 'low';
+  ctx.globalAlpha = lerp(1, MIST_LIT.veil, rise);
+  // a pale stone in the mist has a fill much like the veiled mist round it, so its ink line alone would read (a hollow
+  // outline): over the stones the mist first lifts the darks toward itself ('lighten': the line, not the pale fill), so
+  // the stone fades into it as one shape
+  const stones = api.set.propsSorted().filter(q => STONES.test(q.id));
+  if (stones.length) {
+    const [pc, px] = scratch('mist-stones', mc.width, mc.height);
+    worldT(px, api, k); for (const q of stones) q.draw(px); px.setTransform(1, 0, 0, 1, 0, 0);
+    const all = actorMask(api, k); if (all) { px.globalCompositeOperation = 'destination-out'; px.drawImage(all, 0, 0); }
+    px.globalCompositeOperation = 'source-in'; px.drawImage(mc, 0, 0);
+    ctx.globalCompositeOperation = 'lighten'; ctx.drawImage(pc, 0, 0, W, H); ctx.globalCompositeOperation = 'source-over';
+  }
   ctx.drawImage(mc, 0, 0, W, H);
   ctx.restore();
 }
+export const STONES = /rock|stone/;                                // the props the mist veils as stones (by id)
 
 // ───────────── the comet ─────────────
 // Sky-space placement (sky canvas units, 2400 × 1500): the head upper left, the tails sweeping right over the stone.
@@ -253,6 +429,9 @@ const MODES = {
   dim: { B: 0.34, L: 0.3, glow: 0.42, stars: 0, key: 0.12 }, faint: { B: 0.42, L: 0.24, glow: 0.2, stars: 0, key: 0 },
 };
 export const BLOOM_RISE = 1.5;
+// The comet's key light at full, on the land toward it: + v (a + b v) × gain for a paint value v (0..1): the lit paint
+// gains more than the dark (the night keeps its darks), about +50% on the lit land.
+const KEY = { gain: 0.62, a: 0.5, b: 1.2 };
 /**
  * The comet's state at this frame: brightness B (0..1), tail length L (0..1), mist/cloud glow, sky position (sky units),
  * and `rise` (0..1 progress of the bloom). Pure (no drawing): the brightness curve is tested.
@@ -368,6 +547,32 @@ function cometBox(P, W, H) {
   return [clamp(b[0], 0, W), clamp(b[1], 0, H), clamp(b[2], 0, W), clamp(b[3], 0, H)];
 }
 
+// A head half hidden by the out-of-focus land in a shot with depth of field reads as a smudge round a dark core (the
+// blurred bush in front of it): when the land covers the head's centre (more than LIFT.hid) with open sky beside it
+// (somewhere in a disc of LIFT.r px less than LIFT.open covered), the comet rises into the clear sky just above, by the
+// least lift that clears the disc (at most LIFT.clear covered) within LIFT.max × H, worked out once per shot from the land
+// at the shot's middle so it holds still. Wide shots, heads in clear sky and heads deep behind the land (no sky near
+// them) keep the locked sky position. → screen px to move the comet up.
+export const LIFT = { r: 40, hid: 0.35, clear: 0.12, open: 0.3, max: 0.3 };
+const LIFTS = new WeakMap();
+export function cometLift(api) {
+  const shot = api.shot, key = `${api.W}x${api.H}`, seen = LIFTS.get(shot) ?? new Map();
+  LIFTS.set(shot, seen);
+  if (seen.has(key)) return seen.get(key);
+  let lift = 0;
+  const t = (shot.t0 + shot.t1) / 2, at = { ...api, t, cam: shot.cameraAt?.(t) ?? api.cam };
+  if (shot.cameraAt && dofOf(at) > 0) {
+    const F = skyFrame(at), pos = cometState(at).pos, k = 0.25, m = coverMask(at, k, 'lift'), d = m.getContext('2d').getImageData(0, 0, m.width, m.height).data;
+    const R = Math.max(2, Math.round(LIFT.r * (api.H / 1080) * k)), X = Math.round((F.x0 + pos[0] * F.s) * k), Y = Math.round((F.y0 + pos[1] * F.s) * k);
+    // the land's coverage in the disc round (X, y): its least and its most (outside the frame counts as covered)
+    const disc = y => { let lo = 255, hi = 0; for (let j = -R; j <= R; j++) for (let i = -R; i <= R; i++) { if (i * i + j * j > R * R) continue; const x = X + i, yy = y + j, a = x < 0 || yy < 0 || x >= m.width || yy >= m.height ? 255 : d[(yy * m.width + x) * 4 + 3]; if (a < lo) lo = a; if (a > hi) hi = a; } return [lo, hi]; };
+    const [lo] = disc(Y), at0 = X >= 0 && Y >= 0 && X < m.width && Y < m.height ? d[(Y * m.width + X) * 4 + 3] : 255;
+    if (at0 > 255 * LIFT.hid && lo < 255 * LIFT.open) for (let y = Y - 1; y >= Y - LIFT.max * api.H * k; y--) if (disc(y)[1] <= 255 * LIFT.clear) { lift = (Y - y) / k; break; }
+  }
+  seen.set(key, lift);
+  return lift;
+}
+
 // Extra stars that come out when the comet blooms (sky space, deterministic; drawn into the half-res comet layer).
 let STARS = null;
 function starfield() {
@@ -385,16 +590,76 @@ function starfield() {
 // half-res comet layer (which is composited at brightness B, hence the 1 / B).
 export const STARS_ON = { n: 240, from: 0.05, to: 0.85, fade: 0.4 };
 export function starOnTime(i, scene) { const r = rng(7001 + i), u = (i + r()) / STARS_ON.n; return scene.t0 + (scene.t1 - scene.t0) * lerp(STARS_ON.from, STARS_ON.to, u); }
-function drawStarsOn(x, api, F, k, B) {
+// At the bloom the same stars come out over its rise instead, brightest first, from just after the mark.
+export const BLOOM_STARS = { after: 0.2, span: 2.6 };
+export function bloomStarTime(i, tm) { const r = rng(7001 + i), u = (i + r()) / STARS_ON.n; return tm + BLOOM_STARS.after + BLOOM_STARS.span * u; }
+function drawStarsOn(x, api, F, k, B, on = i => starOnTime(i, api.scene)) {
   x.save(); x.globalCompositeOperation = 'lighter';
   for (let i = 0; i < STARS_ON.n; i++) {
-    const a = smooth(0, STARS_ON.fade, api.t - starOnTime(i, api.scene)); if (a <= 0) continue;
+    const a = smooth(0, STARS_ON.fade, api.t - on(i)); if (a <= 0) continue;
     const r = rng(9100 + i), u = r() * 2400, v = r() ** 1.3 * 900, big = i < 24, al = a * (big ? 0.95 : 0.4 + r() * 0.5) / Math.max(0.2, B);
     const X = (F.x0 + u * F.s) * k, Y = (F.y0 + v * F.s) * k, rad = (big ? 1.5 : 0.55 + r() * 0.5) * k * 1.6;
     x.fillStyle = `rgba(255,250,232,${Math.min(1, al).toFixed(3)})`; x.beginPath(); x.arc(X, Y, rad, 0, TAU); x.fill();
     if (big) { const gr = x.createRadialGradient(X, Y, 0, X, Y, rad * 5); gr.addColorStop(0, `rgba(255,248,226,${(al * 0.35).toFixed(3)})`); gr.addColorStop(1, 'rgba(255,248,226,0)'); x.fillStyle = gr; x.fillRect(X - rad * 5, Y - rad * 5, rad * 10, rad * 10); }
   }
   x.restore();
+}
+
+// The comet's light on the clouds, at full resolution (a thin bright line on a dark cloud shows a half-res mask's pixels
+// as steps): along each cloud's outline facing the comet, a crisp line of light and a softer band falling off into the
+// cloud (each = the cloud minus a blurred copy of itself moved away from the comet), a little light on its body, and, as
+// the comet comes into full, a faint glow just past the lit edge. Hidden behind the land; times the light's falloff
+// around the comet (half-res, `falloff`, within the screen box `reach`); coloured `col`. → { c, x, y } (a canvas over the
+// clouds' box and its place on the frame) or null. LINING (screen px at 1080p; dim → full): line = [shift, blur],
+// soft = [shift, blur] pairs and its share, the body's share, the outer glow's radius and strength, the light's gain,
+// and how far from the land it fades (a lobe just peeking over a ridge, rimmed, would read as a lit bump on the hill).
+export const LINING = { line: [2, 1.2], soft: { d: [2.5, 5], r: [2.5, 6], a: 0.7 }, body: 0.14, halo: [8, 0.55], gain: 1.45, near: 12 };
+export function cloudLight(api, st, P, falloff, col, reach = null) {
+  const { W, H } = api, u = H / 1080, full = clamp(st.key), hk = 0.5;
+  // only round the clouds (their box in the half-res mask), within the light's reach: a full frame costs ~3x more
+  const pad = Math.ceil(24 * u), hm = cloudMask(api, hk), mw = hm.width, mh = hm.height, hd = hm.getContext('2d').getImageData(0, 0, mw, mh).data;
+  let bx0 = Infinity, by0 = Infinity, bx1 = -1, by1 = -1;
+  for (let j = 0; j < mh; j++) for (let i = 0, o = j * mw * 4 + 3; i < mw; i++, o += 4) if (hd[o] > 6) { if (i < bx0) bx0 = i; if (i > bx1) bx1 = i; if (j < by0) by0 = j; if (j > by1) by1 = j; }
+  if (bx1 < 0) return null;
+  let X0 = Math.max(0, Math.floor(bx0 / hk) - pad), Y0 = Math.max(0, Math.floor(by0 / hk) - pad), X1 = Math.min(W, Math.ceil((bx1 + 1) / hk) + pad), Y1 = Math.min(H, Math.ceil((by1 + 1) / hk) + pad);
+  if (reach) { X0 = Math.max(X0, Math.floor(reach[0])); Y0 = Math.max(Y0, Math.floor(reach[1])); X1 = Math.min(X1, Math.ceil(reach[2])); Y1 = Math.min(Y1, Math.ceil(reach[3])); }
+  const bw = X1 - X0, bh = Y1 - Y0;
+  if (bw < 2 || bh < 2) return null;
+  // (from the whole cloud: cut by the land first, the cut would light up as an edge too)
+  const [ac, ax] = scratch('lining-a', bw, bh);
+  ax.drawImage(cloudMask(api, 1), -X0, -Y0);
+  // the cloud minus its copy moved d away from the comet and blurred by r, at resolution q: the band it lights
+  const dx = W / 2 - P.hx, dy = H / 2 - P.hy, dl = Math.hypot(dx, dy) || 1, nx = dx / dl, ny = dy / dl;
+  const band = (name, d, r, q) => {
+    const [bc, bx] = scratch(`${name}-copy`, Math.ceil(bw * q), Math.ceil(bh * q));
+    if (r * q < 1.6) {
+      // a small blur: four copies a sub-pixel apart, averaged (a blur filter on a full frame costs far more)
+      bx.globalCompositeOperation = 'lighter'; bx.globalAlpha = 0.25;
+      for (const [ox, oy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) bx.drawImage(ac, (nx * d + ox * r * 0.6) * q, (ny * d + oy * r * 0.6) * q, bw * q, bh * q);
+      bx.globalAlpha = 1; bx.globalCompositeOperation = 'source-over';
+    } else { bx.filter = `blur(${(r * q).toFixed(2)}px)`; bx.drawImage(ac, nx * d * q, ny * d * q, bw * q, bh * q); bx.filter = 'none'; }
+    const [ec, ex] = scratch(name, bw, bh);
+    ex.drawImage(ac, 0, 0); ex.globalCompositeOperation = 'destination-out'; ex.drawImage(bc, 0, 0, bw, bh); ex.globalCompositeOperation = 'source-over';
+    return [ec, ex];
+  };
+  const S = LINING.soft, [sc] = band('lining-soft', lerp(S.d[0], S.d[1], full) * u, lerp(S.r[0], S.r[1], full) * u, hk);
+  const [ec, ex] = band('lining', LINING.line[0] * u, LINING.line[1] * u, 1);
+  ex.globalCompositeOperation = 'lighter';
+  ex.globalAlpha = S.a; ex.drawImage(sc, 0, 0);
+  ex.globalAlpha = LINING.body; ex.drawImage(ac, 0, 0); ex.globalAlpha = 1;
+  if (full > 0.05) {
+    // the glow past the edge (outside the cloud only)
+    const hw = Math.ceil(bw * hk), hh = Math.ceil(bh * hk), [hc, hx] = scratch('lining-halo', hw, hh);
+    hx.filter = `blur(${(LINING.halo[0] * u * hk * (0.6 + 0.4 * full)).toFixed(2)}px)`; hx.drawImage(ec, 0, 0, hw, hh); hx.filter = 'none';
+    hx.globalCompositeOperation = 'destination-out'; hx.drawImage(ac, 0, 0, hw, hh);
+    ex.globalAlpha = LINING.halo[1] * full; ex.drawImage(hc, 0, 0, bw, bh); ex.globalAlpha = 1;
+  }
+  const cm = coverMask(api, hk), [nc, ncx] = scratch('lining-near', cm.width, cm.height);
+  ncx.filter = `blur(${(LINING.near * u * hk).toFixed(2)}px)`; ncx.drawImage(cm, 0, 0); ncx.filter = 'none';
+  ex.globalCompositeOperation = 'destination-out'; ex.drawImage(cm, -X0, -Y0, W, H); ex.drawImage(nc, -X0, -Y0, W, H); ex.drawImage(nc, -X0, -Y0, W, H);
+  ex.globalCompositeOperation = 'destination-in'; ex.drawImage(falloff, -X0, -Y0, W, H);
+  ex.globalCompositeOperation = 'source-in'; ex.fillStyle = rgbStr(col); ex.fillRect(0, 0, bw, bh);
+  return { c: ec, x: X0, y: Y0 };
 }
 
 // The comet's light on the clouds (their edges facing it, and a little of their body) and on the mist (thin parts
@@ -407,43 +672,66 @@ function cometLight(ctx, api, st, P, k, tone) {
   // light falloff around the head and along the dust tail
   const [lc, lf] = scratch('comet-falloff', w, h);
   lf.globalCompositeOperation = 'lighter';
-  const ca = Math.cos(COMET.ang), sa = Math.sin(COMET.ang), spot = (u, R, a) => {
-    const lx = u * COMET.dust.len * P.L, ly = COMET.dust.curve[0] * 2.5 * lx * lx, X = (P.hx + (lx * ca - ly * sa) * P.s) * k, Y = (P.hy + (lx * sa + ly * ca) * P.s) * k, RR = R * P.s * k;
-    const g = lf.createRadialGradient(X, Y, 0, X, Y, RR); g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(0.45, `rgba(255,255,255,${a * 0.35})`); g.addColorStop(1, 'rgba(255,255,255,0)');
-    lf.fillStyle = g; lf.fillRect(X - RR, Y - RR, 2 * RR, 2 * RR);
+  // (screen px: [x, y, radius] of the light's pool at u along the dust tail)
+  const ca = Math.cos(COMET.ang), sa = Math.sin(COMET.ang), spotAt = (u, R) => {
+    const lx = u * COMET.dust.len * P.L, ly = COMET.dust.curve[0] * 2.5 * lx * lx;
+    return [P.hx + (lx * ca - ly * sa) * P.s, P.hy + (lx * sa + ly * ca) * P.s, R * P.s];
+  };
+  const reach = [Infinity, Infinity, -Infinity, -Infinity], spot = (u, R, a) => {
+    const [X, Y, RR] = spotAt(u, R); reach[0] = Math.min(reach[0], X - RR); reach[1] = Math.min(reach[1], Y - RR); reach[2] = Math.max(reach[2], X + RR); reach[3] = Math.max(reach[3], Y + RR);
+    const g = lf.createRadialGradient(X * k, Y * k, 0, X * k, Y * k, RR * k); g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(0.45, `rgba(255,255,255,${a * 0.35})`); g.addColorStop(1, 'rgba(255,255,255,0)');
+    lf.fillStyle = g; lf.fillRect((X - RR) * k, (Y - RR) * k, 2 * RR * k, 2 * RR * k);
   };
   spot(0, 760, 0.9); for (const u of [0.25, 0.5, 0.75]) spot(u, 420, 0.4 * (1 - u * 0.7));
-  // clouds: the rim toward the comet plus a little of the body, hidden behind the land
-  const cover = coverMask(api, k), [cc, cx] = scratch('cloud-lit', w, h), [sc, sx] = scratch('cloud-shift', w, h), cm = cloudMask(api, k);
-  cx.drawImage(cm, 0, 0); cx.globalCompositeOperation = 'destination-out'; cx.drawImage(cover, 0, 0);
-  sx.drawImage(cc, 0, 0);
-  const dx = W / 2 - P.hx, dy = H / 2 - P.hy, dl = Math.hypot(dx, dy) || 1, d = 5;
-  cx.globalAlpha = 0.85; cx.drawImage(sc, (dx / dl) * d, (dy / dl) * d);
-  cx.globalAlpha = 1; cx.globalCompositeOperation = 'destination-in'; cx.drawImage(lc, 0, 0);
-  cx.globalCompositeOperation = 'source-in'; cx.fillStyle = rgbStr(WARM); cx.fillRect(0, 0, w, h);
-  Lx.globalAlpha = clamp(st.glow * st.B * 1.1); Lx.drawImage(cc, 0, 0);
-  // the comet as key light: a warm wash on the land, strongest toward it
+  // clouds: a line of light along their edges facing the comet, at full resolution (cloudLight)
+  const cover = coverMask(api, k), lining = cloudLight(api, st, P, lc, WARM, reach);
+  // the comet as key light on the land, strongest toward it: light falls on the paint (the frame's own colours times a
+  // warm light, added, more on the lit paint than on the dark: KEY), so lit grass, stone and figures brighten while the
+  // night's darks stay dark. A wash screened over the land would grey the shadows and flatten the night.
   if (st.key > 0.01) {
     const [kc, kx] = scratch('comet-key', w, h), R = Math.hypot(W, H) * 1.1 * k, X = P.hx * k, Y = P.hy * k;
-    kx.drawImage(cover, 0, 0); kx.globalCompositeOperation = 'source-in';
-    const g = kx.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, rgbStr(WARM, 1)); g.addColorStop(0.5, rgbStr(WARM, 0.45)); g.addColorStop(1, rgbStr(WARM, 0.12));
+    kx.drawImage(ctx.canvas, 0, 0, W, H, 0, 0, w, h);
+    // its value, not its night-blue hue, takes the light (else the lit stone would only turn a brighter blue)
+    kx.globalCompositeOperation = 'saturation'; kx.fillStyle = '#808080'; kx.fillRect(0, 0, w, h);
+    // v (a + b v): the value times a + b × itself
+    const [vc, vx] = scratch('comet-key-v', w, h);
+    vx.fillStyle = rgbStr([255 * KEY.a, 255 * KEY.a, 255 * KEY.a]); vx.fillRect(0, 0, w, h); vx.globalCompositeOperation = 'lighter';
+    for (let b = KEY.b; b > 0.001; b -= 1) { vx.globalAlpha = Math.min(1, b); vx.drawImage(kc, 0, 0); }
+    kx.globalCompositeOperation = 'multiply'; kx.drawImage(vc, 0, 0);
+    const g = kx.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, rgbStr(WARM)); g.addColorStop(0.5, rgbStr(WARM.map(v => v * 0.5))); g.addColorStop(1, rgbStr(WARM.map(v => v * 0.16)));
     kx.fillStyle = g; kx.fillRect(0, 0, w, h);
-    Lx.globalAlpha = clamp(0.12 * st.key); Lx.drawImage(kc, 0, 0);
+    kx.globalCompositeOperation = 'destination-in'; kx.drawImage(cover, 0, 0);
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = clamp(KEY.gain * st.key * st.B);
+    ctx.drawImage(kc, 0, 0, W, H); ctx.restore();
   }
   // mist: glows where it is thin, more toward the comet
   const mo = mistOverlay(api), Fm = mo && fogField(api, mo.params, mo.seed);
+  let warmMist = null;
+  // at the bloom the mist that is pushed out from the stone catches the comet: deeper gold toward it
   if (Fm && Fm.any > 0.004) {
-    const [gc, gx] = scratch('mist-glow', Fm.gw, Fm.gh), img = gx.createImageData(Fm.gw, Fm.gh), R = 1300 * P.s;
+    const [gc, gx] = scratch('mist-glow', Fm.gw, Fm.gh), img = gx.createImageData(Fm.gw, Fm.gh), R = 1300 * P.s, GOLD = tone([255, 188, 110]), rise = st.rise ?? 0;
     for (let j = 0; j < Fm.gh; j++) for (let i = 0; i < Fm.gw; i++) {
       const v = Fm.grid[j * Fm.gw + i]; if (v < 0.003) continue;
       const px = i * Fm.cell, py = j * Fm.cell, near = Math.exp(-Math.hypot(px - P.hx, (py - P.hy) * 0.8) / R);
-      const g = v ** 0.75 * (1.15 - 0.55 * v) * (0.45 + 0.75 * near), o = (j * Fm.gw + i) * 4;
-      img.data[o] = WARM[0]; img.data[o + 1] = WARM[1] * (0.96 + 0.04 * near); img.data[o + 2] = WARM[2] * (0.9 + 0.1 * near); img.data[o + 3] = Math.round(255 * clamp(g));
+      const g = v ** 0.75 * (1.15 - 0.55 * v) * (0.45 + 0.75 * near), o = (j * Fm.gw + i) * 4, c = mixRGB(WARM, GOLD, rise * (0.85 + 0.15 * near));
+      img.data[o] = c[0]; img.data[o + 1] = c[1] * (0.96 + 0.04 * near); img.data[o + 2] = c[2] * (0.9 + 0.1 * near); img.data[o + 3] = Math.round(255 * clamp(g));
     }
     gx.putImageData(img, 0, 0);
-    Lx.globalAlpha = clamp(st.glow * 0.62); Lx.setTransform(k, 0, 0, k, 0, 0); stretch(Lx, { ...Fm, c: gc }, W, H); Lx.setTransform(1, 0, 0, 1, 0, 0);
+    // as thin over the figures as the mist itself is
+    const [mg, mgx] = scratch('mist-glow-k', w, h), am = actorMask(api, k, true), through = (Fm.p.through ?? MIST.through) * lerp(1, MIST_LIT.through, rise);
+    mgx.setTransform(k, 0, 0, k, 0, 0); stretch(mgx, { ...Fm, c: gc }, W, H); mgx.setTransform(1, 0, 0, 1, 0, 0);
+    if (am && through < 1) { mgx.globalCompositeOperation = 'destination-out'; mgx.globalAlpha = 1 - through; mgx.drawImage(am, 0, 0); }
+    Lx.globalAlpha = clamp(st.glow * lerp(0.62, MIST_LIT.glow, rise)); Lx.drawImage(mg, 0, 0);
+    // the light screened onto the night-blue mist alone would only turn it pale lilac: the comet first turns the mist it
+    // lights toward its own gold (a hue shift at the frame's own value: a multiply would darken the land under thin
+    // mist), so the glow reads gold
+    if (rise > 0.01) warmMist = { c: mg, a: clamp(MIST_LIT.warm * rise * st.glow / MODES.full.glow) };
   }
-  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'screen'; ctx.drawImage(Lc, 0, 0, W, H); ctx.restore();
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (warmMist) { ctx.globalCompositeOperation = 'color'; ctx.globalAlpha = warmMist.a; ctx.drawImage(warmMist.c, 0, 0, W, H); ctx.globalAlpha = 1; }
+  ctx.globalCompositeOperation = 'screen'; ctx.drawImage(Lc, 0, 0, W, H);
+  if (lining) { ctx.globalAlpha = clamp(st.glow * st.B * LINING.gain); ctx.drawImage(lining.c, lining.x, lining.y); }
+  ctx.restore();
 }
 
 function drawComet(ctx, api) {
@@ -451,7 +739,7 @@ function drawComet(ctx, api) {
   if (st.B < 0.005) return;
   const { W, H, t } = api, F = skyFrame(api), k = 0.5, w = Math.ceil(W * k), h = Math.ceil(H * k);
   const story = api.shot.gradeAt ? api.shot.gradeAt(t)?.story : null, tone = toner(story, story ? 0.86 : 1);
-  const P = { hx: F.x0 + st.pos[0] * F.s, hy: F.y0 + st.pos[1] * F.s, s: F.s, L: st.L, B: st.B, t, seed: 4242 };
+  const P = { hx: F.x0 + st.pos[0] * F.s, hy: F.y0 + st.pos[1] * F.s - cometLift(api), s: F.s, L: st.L, B: st.B, t, seed: 4242 };
   let box = cometBox(P, W, H);
   if (box[2] - box[0] < 2 || box[3] - box[1] < 2) box = [0, 0, 0, 0];
   const [cc, cx] = scratch('comet', w, h);
@@ -476,10 +764,21 @@ function drawComet(ctx, api) {
   // at twilight the stars come out one by one (params.stars: 'on' | false; default on in a twilight scene)
   const starsOn = api.params?.stars ?? (JSON.stringify(api.scene?.time ?? '').includes('twilight') ? 'on' : false);
   if (starsOn === 'on') { drawStarsOn(cx, api, F, k, st.B); box = [0, 0, W, H]; }
-  // hidden by what stands in front: land, props, actors (fully), clouds (mostly), mist (by its density)
+  else if (st.rise > 0) { const tm = api.marks[api.params.mark || 'bloom']; drawStarsOn(cx, api, F, k, st.B, i => bloomStarTime(i, tm)); box = [0, 0, W, H]; }
+  // in a shot with depth of field the comet is as out of focus as the sky behind the subjects
+  const dof = dofOf(api) * k;
+  if (dof > 0.3 && box[2] - box[0] >= 2 && box[3] - box[1] >= 2) {
+    const pad = Math.ceil(dof * 2.5), b0 = [Math.max(0, Math.floor(box[0] * k) - pad), Math.max(0, Math.floor(box[1] * k) - pad)], b1 = [Math.min(w, Math.ceil(box[2] * k) + pad), Math.min(h, Math.ceil(box[3] * k) + pad)];
+    const bw = b1[0] - b0[0], bh = b1[1] - b0[1], [dc, dx] = scratch('comet-dof', bw, bh);
+    dx.filter = `blur(${dof.toFixed(2)}px)`; dx.drawImage(cc, b0[0], b0[1], bw, bh, 0, 0, bw, bh); dx.filter = 'none';
+    cx.save(); cx.setTransform(1, 0, 0, 1, 0, 0); cx.globalAlpha = 1; cx.globalCompositeOperation = 'source-over'; cx.clearRect(b0[0], b0[1], bw, bh); cx.drawImage(dc, b0[0], b0[1]); cx.restore();
+    box = [b0[0] / k, b0[1] / k, b1[0] / k, b1[1] / k].map((v, i) => clamp(v, 0, i % 2 ? H : W));
+  }
+  // hidden by what stands in front: land, props, actors (fully), clouds (mostly, with a feathered edge so the bright
+  // coma never shows the cloud's outline as a cut), mist (by its density)
   cx.globalCompositeOperation = 'destination-out';
   cx.globalAlpha = 1; cx.drawImage(coverMask(api, k), 0, 0);
-  cx.globalAlpha = 0.72; cx.drawImage(cloudMask(api, k), 0, 0);
+  cx.globalAlpha = 0.8; cx.filter = `blur(${(1.5 * W / 1920).toFixed(2)}px)`; cx.drawImage(cloudMask(api, k), 0, 0); cx.filter = 'none';
   const mo = mistOverlay(api);
   if (mo) { const Fm = fogField(api, mo.params, mo.seed); if (Fm.any > 0.004) { cx.globalAlpha = 0.85; cx.setTransform(k, 0, 0, k, 0, 0); stretch(cx, Fm, W, H); cx.setTransform(1, 0, 0, 1, 0, 0); } }
   cx.globalAlpha = 1; cx.globalCompositeOperation = 'source-over';
@@ -490,6 +789,55 @@ function drawComet(ctx, api) {
     ctx.restore();
   }
   cometLight(ctx, api, st, P, k, tone);
+  drawStoneKey(ctx, api, st, P, tone);
+}
+
+// The standing stone catches the comet's light: its own paint turned toward gold and lit, strongest on the face toward
+// the comet (its far side keeps the night), and a gold line along its edge facing it, all rising with the comet's key
+// (none for the dim smudge, all of it once it has bloomed); hidden by the figures and the mist in front of it.
+// STONE_KEY: how far the lit face turns gold (a hue shift at its own value), the light's gain on it, the line's width
+// (screen px at 1080p, a little wider close up) and strength.
+export const STONE_KEY = { hue: 0.45, face: 0.5, line: 3, edge: 0.8 };
+export const stoneKeyAt = st => clamp((st.key - MODES.dim.key) / (MODES.full.key - MODES.dim.key)) * clamp(st.B);
+function drawStoneKey(ctx, api, st, P, tone) {
+  const a = stoneKeyAt(st), p = api.set.props?.find(q => q.id === 'standing_stone');
+  if (a < 0.01 || !p?.sprite) return;
+  const { W, H, cam } = api, z = cam.zoom, lw = STONE_KEY.line * (H / 1080) * Math.max(1, Math.sqrt(z / 2));
+  const pad = Math.ceil(lw + 2), X0 = Math.max(0, Math.floor((p.sx - cam.cx) * z + W / 2) - pad), Y0 = Math.max(0, Math.floor((p.sy - cam.cy) * z + H / 2) - pad);
+  const X1 = Math.min(W, Math.ceil((p.sx + p.sw - cam.cx) * z + W / 2) + pad), Y1 = Math.min(H, Math.ceil((p.sy + p.sh - cam.cy) * z + H / 2) + pad);
+  if (X1 - X0 < 2 || Y1 - Y0 < 2) return;
+  const ow = X1 - X0, oh = Y1 - Y0, sprite = (x, dx = 0, dy = 0) => { x.setTransform(z, 0, 0, z, W / 2 - cam.cx * z - X0 + dx, H / 2 - cam.cy * z - Y0 + dy); x.drawImage(p.sprite, p.sx, p.sy, p.sw, p.sh); x.setTransform(1, 0, 0, 1, 0, 0); };
+  // toward the comet on screen, from the stone's middle
+  const mx = (p.sx + p.sw / 2 - cam.cx) * z + W / 2, my = (p.sy + p.sh / 2 - cam.cy) * z + H / 2, dl = Math.hypot(P.hx - mx, P.hy - my) || 1, nx = (P.hx - mx) / dl, ny = (P.hy - my) / dl;
+  const WARM = tone([255, 214, 156]), LINE = tone([255, 206, 128]), HUE = tone([255, 192, 112]);
+  // the face: the frame's own paint (its value) times the warm light, full on the side toward the comet, little beyond
+  const [fc, fx] = scratch('stone-key', ow, oh);
+  fx.drawImage(ctx.canvas, X0, Y0, ow, oh, 0, 0, ow, oh);
+  fx.globalCompositeOperation = 'saturation'; fx.fillStyle = '#808080'; fx.fillRect(0, 0, ow, oh);
+  const r = Math.hypot(ow, oh) / 2, g = fx.createLinearGradient(ow / 2 + nx * r, oh / 2 + ny * r, ow / 2 - nx * r, oh / 2 - ny * r);
+  g.addColorStop(0, rgbStr(WARM)); g.addColorStop(0.5, rgbStr(WARM.map(v => v * 0.45))); g.addColorStop(1, rgbStr(WARM.map(v => v * 0.08)));
+  fx.globalCompositeOperation = 'multiply'; fx.fillStyle = g; fx.fillRect(0, 0, ow, oh);
+  fx.globalCompositeOperation = 'destination-in'; sprite(fx);
+  // its hue on the lit face (the night grade left it blue: light added alone would only whiten it)
+  const [hc, hx] = scratch('stone-key-hue', ow, oh), gh = hx.createLinearGradient(ow / 2 + nx * r, oh / 2 + ny * r, ow / 2 - nx * r, oh / 2 - ny * r);
+  gh.addColorStop(0, rgbStr(HUE, 1)); gh.addColorStop(0.55, rgbStr(HUE, 0.4)); gh.addColorStop(1, rgbStr(HUE, 0));
+  hx.fillStyle = gh; hx.fillRect(0, 0, ow, oh); hx.globalCompositeOperation = 'destination-in'; sprite(hx);
+  // the edge facing the comet: the stone minus itself moved away from it
+  const [ec, ex] = scratch('stone-key-edge', ow, oh);
+  sprite(ex); ex.globalCompositeOperation = 'destination-out'; sprite(ex, -nx * lw, -ny * lw);
+  ex.globalCompositeOperation = 'source-in'; ex.fillStyle = rgbStr(LINE); ex.fillRect(0, 0, ow, oh);
+  // hidden by the figures and the mist in front of the stone
+  const mo = mistOverlay(api), F = mo && fogField(api, mo.params, mo.seed);
+  for (const x of [fx, hx, ex]) {
+    x.globalCompositeOperation = 'source-over';
+    eraseActors(x, api, p.y, [X0, Y0, ow, oh]);
+    if (F && F.any > 0.004) { x.globalCompositeOperation = 'destination-out'; x.globalAlpha = 0.92; x.translate(-X0, -Y0); stretch(x, F, W, H); x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; }
+  }
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'color'; ctx.globalAlpha = clamp(STONE_KEY.hue * a); ctx.drawImage(hc, X0, Y0);
+  ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = clamp(STONE_KEY.face * a); ctx.drawImage(fc, X0, Y0);
+  ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = clamp(STONE_KEY.edge * a); ctx.drawImage(ec, X0, Y0);
+  ctx.restore();
 }
 
 // ───────────── the last light on the stone ─────────────
@@ -550,11 +898,13 @@ function drawStoneLight(ctx, api) {
   if (X1 - X0 < 2 || Y1 - Y0 < 2) return;
   const ow = X1 - X0, oh = Y1 - Y0, local = x => x.setTransform(z, 0, 0, z, W / 2 - cam.cx * z - X0, H / 2 - cam.cy * z - Y0);
   const [c, x] = scratch('stone-lit', ow, oh), col = mixRGB(GOLD, EMBER, clamp(1 - L.lit / 0.17));
-  // the stone's own paint, lit gold: multiplied by the light and lifted a little
+  // the stone's own paint, lit gold: multiplied by the light and lifted a little; the last thread lies on the stone's
+  // inked edge, which multiplied alone would stay dark, so the light is laid over the ink more as it thins
+  const thread = clamp(1 - L.lit / 0.08);
   local(x);
   x.drawImage(p.sprite, p.sx, p.sy, p.sw, p.sh);
   x.globalCompositeOperation = 'multiply'; x.fillStyle = rgbStr(col); x.fillRect(p.sx, top - 4, p.sw, base - top + 8);
-  x.globalCompositeOperation = 'screen'; x.fillStyle = rgbStr(col, 0.3); x.fillRect(p.sx, top - 4, p.sw, base - top + 8);
+  x.globalCompositeOperation = 'screen'; x.fillStyle = rgbStr(col, 0.3 + 0.4 * thread); x.fillRect(p.sx, top - 4, p.sw, base - top + 8);
   x.globalCompositeOperation = 'destination-in'; x.drawImage(p.sprite, p.sx, p.sy, p.sw, p.sh);
   // only above the shadow line (soft, a little uneven), and more on the sunward (left) face
   const feather = Math.max(1.6 / z, 2.5), seg = 24, nz = vnoise(31);
@@ -577,7 +927,7 @@ function drawStoneLight(ctx, api) {
   bx.filter = `blur(${Math.max(3, 6 * Math.sqrt(z)).toFixed(1)}px)`; bx.drawImage(c, 0, 0); bx.filter = 'none';
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 0.95; ctx.drawImage(c, X0, Y0);
-  ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = 0.55; ctx.drawImage(bc, X0, Y0);
+  ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = 0.55 + 0.35 * thread; ctx.drawImage(bc, X0, Y0);
   ctx.restore();
 }
 
@@ -590,6 +940,8 @@ function drawStoneLight(ctx, api) {
 //          frame changes brightness at most twice a second (the film's limit is 3);
 //   season { col, k } the tint on the grass (summer, autumn gold, winter pale, spring green), about once a second;
 //   ghost  the Nell drawn on this frame (index into GHOSTS) or -1.
+// GHOSTS: the frame each one appears on (at 24 fps in a 4 s beat: a shorter or longer beat moves them with it, so the
+// last, held 8 frames, always ends on the beat's last frame) and how many frames she stays.
 export const GHOSTS = [
   { f: 22, n: 5, age: 'child' }, { f: 30, n: 5, age: 'child' }, { f: 44, n: 5, age: 'teen' }, { f: 52, n: 5, age: 'teen' },
   { f: 64, n: 5, age: 'adult' }, { f: 71, n: 5, age: 'adult' }, { f: 80, n: 5, age: 'elder' }, { f: 87, n: 8, age: 'elder' },
@@ -619,7 +971,7 @@ export function timelapseAt(bt, dur = 4, fps = 24) {
   const alpha = 0.86 * smooth(0.25, 0.75, bt) * (1 - smooth(end - 1.05, end - 0.1, bt));
   const ph = dayPhase(bt), day = 0.5 - 0.5 * Math.cos(TAU * ph), amp = 1 - smooth(1.95, 2.65, bt);
   const S = seasonAt(f), sk = smooth(0.7, 1.3, bt) * (1 - smooth(end - 0.6, end - 0.05, bt));
-  const ghost = GHOSTS.findIndex(G => f >= G.f && f < G.f + G.n);
+  const last = Math.round(dur * fps), ghost = GHOSTS.findIndex(G => { const n = Math.round(G.n * fps / 24), g0 = Math.min(Math.round(G.f * (dur / 4) * (fps / 24)), last - n); return f >= g0 && f < g0 + n; });
   return { f, alpha, day, amp, phase: ph, season: { col: S.col, k: S.k * sk, q: S.q }, ghost };
 }
 // The full-frame light of the time-lapse sky and land at a state (0..1): what the photosensitivity test counts.
@@ -646,18 +998,15 @@ function drawTimelapse(ctx, u, api) {
     const [sc, sx] = scratch('tl-sky', w, h), g = sx.createLinearGradient(0, 0, 0, h * 0.75);
     g.addColorStop(0, rgbStr(top)); g.addColorStop(1, rgbStr(hor)); sx.fillStyle = g; sx.fillRect(0, 0, w, h);
     sx.globalCompositeOperation = 'destination-out'; sx.drawImage(cover, 0, 0);
-    // the land takes the same light: by day it shows its own paint (ungraded, only the story grade's muting)
+    // the land takes the same light as the sky: its own paint graded for the time of day the sky shows (night to noon,
+    // with the shot's story grade), over the frame's own grade as much as the sky is (else the land keeps the shot's
+    // night-to-dawn light while the sky turns, and shines under a night sky)
     const lit = s.amp * s.day + (1 - s.amp) * 0.5, land = coverMask(api, 1), [lc, lx] = scratch('tl-land', W, H);
     lx.drawImage(land, 0, 0);
-    const story = api.shot.gradeAt ? api.shot.gradeAt(api.t)?.story : null;
-    if (story) {
-      if (story.sat < 1) { lx.globalCompositeOperation = 'saturation'; lx.fillStyle = `rgba(128,128,128,${(1 - story.sat).toFixed(3)})`; lx.fillRect(0, 0, W, H); }
-      if (story.sepia) { lx.globalCompositeOperation = 'color'; lx.fillStyle = `rgba(176,136,92,${(story.sepia * 0.6).toFixed(3)})`; lx.fillRect(0, 0, W, H); }
-      lx.globalCompositeOperation = 'destination-in'; lx.drawImage(land, 0, 0);
-    }
+    grade(lx, mixGrade([['night', 1 - lit], ['noon', lit]]), api.t, W, H, api.shot.gradeAt ? api.shot.gradeAt(api.t)?.story : null);
+    lx.globalCompositeOperation = 'destination-in'; lx.drawImage(land, 0, 0);
     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = s.alpha;
-    ctx.drawImage(sc, 0, 0, W, H);
-    ctx.globalAlpha = s.alpha * lit * 0.8; ctx.drawImage(lc, 0, 0);
+    ctx.drawImage(sc, 0, 0, W, H); ctx.drawImage(lc, 0, 0);
     ctx.restore();
   }
   // seasons on the grass (not on the stone)

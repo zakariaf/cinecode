@@ -7,6 +7,13 @@
 // Look "to": "up" | "sky" | "down" tilts the head. Shots may override "time" and "grade" (with "gradeTo"); a shot's
 // "music" is a cue at its start. Scene "overlays" (built-in fields or custom.mjs overlays) → plan.overlays; scene
 // "rim" → plan.scenes[i].rim. plan.score = film.score, plan.sounds = custom.mjs sounds.
+// Round 3: cameras see each subject's head as it is held (look up / down, turned) and the other actors (to keep those
+// in front of a close-up's subject out of its frame); an exit to a side walks past every view the shot may show and,
+// once the real cameras exist, on out of the frame they show (nobody vanishes in view); title beats may give "place".
+// Subjects carry `now` (where the drawing really is when it is framed elsewhere, as an exit is) for the camera; a
+// two-shot whose staging can't come near its size is a plan warning.
+// Round 5: a speaker who has no look of their own in the scene yet (or only "down") talks to the nearest actor in front
+// of them.
 import { Actor, RouteLeg, JumpLeg, FlyLeg, groundPos, anchorPos } from './actor.mjs';
 import { buildCamera, frameSubjects, clampFrame } from './camera.mjs';
 import { skyList, mixGrade, mixStory, spanU, STORY, isNight } from './grade.mjs';
@@ -106,9 +113,32 @@ class Compiler {
     rec.music = m;
     this.scenes.push(rec);
     this.glances(rec);
-    this.moveSounds(rec);
     for (const s of rec.shots) this.camera(rec, s);
+    this.finishExits(rec);
+    this.moveSounds(rec);
     return t;
+  }
+  // An exit to a side walks on, at the same pace, until it is out of the real camera (which may show more than the
+  // guess made while the beats were laid out), so nobody vanishes in view. The beat keeps its length; the walk past
+  // the old end point just goes on (and is cut by the next shot if that comes first).
+  finishExits(rec) {
+    const W = this.W, S = rec.S;
+    for (const A of rec.actors.values()) for (const mv of A.moves) {
+      const L = mv.legs?.[mv.legs.length - 1];
+      if (mv.kind !== 'exit' || !mv.side || mv.cut !== undefined || L?.type !== 'route' || L.hops || !L.args) continue;
+      const shot = rec.shots.find(s => mv.t1 >= s.t0 && mv.t1 < s.t1)?.out;
+      if (!shot) continue;
+      const dir = mv.side === 'left' ? -1 : 1, m = this.offMargin(A, mv.final.s);
+      let need = mv.final.x;
+      for (let tt = mv.t1; tt < shot.t1; tt += 1 / 12) { const c = shot.cameraAt(tt), e = c.cx + dir * (W / 2 / c.zoom + m); need = dir > 0 ? Math.max(need, e) : Math.min(need, e); }
+      if ((need - mv.final.x) * dir < 1) continue;
+      const pts = L.args.pts, y = pts[pts.length - 1][1], L2 = new RouteLeg({ ...L.args, pts: [...pts, [need, y]] });
+      const t1 = mv.t1 + L2.T - L.T, next = A.moves.find(o => o !== mv && o.t0 > mv.t0);
+      if (next && next.t0 < t1) continue;
+      for (const list of [A.visEv, A.faceEv, A.poseEv]) for (const e of list) if (e.src === mv && Math.abs(e.t - mv.t1) < 1e-6) e.t = t1;
+      mv.legs[mv.legs.length - 1] = L2; mv.t1 = t1;
+      mv.end = groundPos(S, need, y, A.k); mv.final = { ...mv.end, mode: 'off' };
+    }
   }
   initOff(rec, A, side, t, a = {}) {
     const S = rec.S, y = S.laneAt(side === 'left' ? S.area.x0 : S.area.x1);
@@ -167,7 +197,7 @@ class Compiler {
     }
     if (b.title !== undefined) {
       const d = b.dur ?? 3;
-      this.captions.push({ t0: t, t1: t + d, text: b.title, sub: b.sub ?? b.subtitle ?? null, style: 'title', burn: true });
+      this.captions.push({ t0: t, t1: t + d, text: b.title, sub: b.sub ?? b.subtitle ?? null, style: 'title', burn: true, place: b.place ?? null });
       return d;
     }
     return this.act(rec, srec, b, t);
@@ -565,10 +595,32 @@ class Compiler {
     const F = frameSubjects(subs, spec.size || (ids.length ? 'wide' : 'establishing'), { W: this.W, H: this.H, angle: spec.angle, S: rec.S, zoomK: spec.zoom || 1 });
     return clampFrame(rec.S, F, this.W, this.H);
   }
+  // Where an actor entering or leaving at a side is out of frame: past the edge of every view the shot may show then
+  // (its framing now and, for a pan, a push-in or a pull-out, the framings at either end of the move). edge: a point
+  // just inside the present view.
   offscreenX(rec, srec, A, side, t, override, y) {
-    const cam = this.provisional(rec, srec, t, override), half = this.W / 2 / cam.zoom;
-    const s = rec.S.scaleAt(cam.cx, y) * A.k, fp = this.footprint(A, s), m = Math.max(fp.front, fp.back) + 40;
-    return { off: side === 'left' ? cam.cx - half - m : cam.cx + half + m, edge: side === 'left' ? cam.cx - half + 30 : cam.cx + half - 30, cam };
+    const cam = this.provisional(rec, srec, t, override), spec = srec.def.camera || {}, ids = this.subjectIds(rec, srec), W = this.W, H = this.H;
+    const views = [cam], frame = (list, size) => {
+      const subs = list.map(id => this.subject(rec, id, t, override[id])).filter(Boolean);
+      return subs.length ? clampFrame(rec.S, frameSubjects(subs, size, { W, H, angle: spec.angle, S: rec.S, zoomK: spec.zoom || 1 }), W, H) : null;
+    };
+    const size = spec.size || (ids.length ? 'wide' : 'establishing');
+    if (spec.move === 'pan' && ids.length >= 2) views.push(frame([ids[0]], size), frame([ids[ids.length - 1]], size));
+    if (spec.move === 'pull-out' || spec.move === 'push-in') {
+      if (spec.to || spec.toOn) views.push(frame(spec.toOn ? [].concat(spec.toOn) : ids, spec.to || size));
+      const k = spec.zoomTo ? Math.min(1, spec.zoomTo) : 1 / 1.3;
+      for (const v of views.slice()) if (v) views.push(clampFrame(rec.S, { ...v, zoom: v.zoom * k }, W, H));
+    }
+    const ext = views.filter(Boolean).map(v => v.cx + (side === 'left' ? -1 : 1) * W / 2 / v.zoom);
+    const half = W / 2 / cam.zoom, far = side === 'left' ? Math.min(...ext) : Math.max(...ext);
+    const m = this.offMargin(A, rec.S.scaleAt(cam.cx, y) * A.k);
+    return { off: side === 'left' ? far - m : far + m, edge: side === 'left' ? cam.cx - half + 30 : cam.cx + half - 30, cam };
+  }
+  // How far past a frame edge an actor's contact point must be for all of it (a tail swinging out behind a walk) to
+  // be out of frame.
+  offMargin(A, s) {
+    const fp = this.footprint(A, s);
+    return Math.max(fp.front, fp.back, A.sz.width * s) * 1.2 + 30;
   }
   enter(rec, srec, b, t) {
     this.tNow = t;
@@ -633,7 +685,7 @@ class Compiler {
         legs = r.legs; end = groundPos(S, off, e[1], A.k);
       }
     }
-    const dur = this.addMove(A, t, legs, 'exit', end, b, { framing: 'start', from: p0, final: T.kind === 'side' ? { ...end, mode: 'off' } : null });
+    const dur = this.addMove(A, t, legs, 'exit', end, b, { framing: 'start', from: p0, final: T.kind === 'side' ? { ...end, mode: 'off' } : null, side: T.kind === 'side' ? T.side : null });
     if (T.kind === 'side') { const mv = A.moves[A.moves.length - 1]; A.visEv.push({ t: t + dur, visible: false, src: mv }); A.visEv.sort((a, c) => a.t - c.t); }
     return dur;
   }
@@ -666,7 +718,10 @@ class Compiler {
       }
       const face = override?.faceTo || A.faceAt(t), moving = A.moving(t);
       const g = moving ? null : A.gest.find(G => t >= G.t0 && t < G.t1);
-      const pr = g ? gestureProfile(A, g, t) : profile(A.rig, moving ? 'stand' : A.basePoseName(t), A.paramsAt(t)), s = pos.s;
+      // the head as it is held then (looking up / down, turned toward someone), so a close shot keeps it in frame (a
+      // glance's pitch at a speaker stays inside the headroom: the frame doesn't loosen for it)
+      const hd = override ? null : { tilt: A.tiltAt(t, false), look: A.lookAt(t, pos) };
+      const pr = g ? gestureProfile(A, g, t) : profile(A.rig, moving ? 'stand' : A.basePoseName(t), A.paramsAt(t), hd), s = pos.s;
       const yb = pos.y - (pos.lift || 0) * s, b = pr.box;
       let box = face > 0 ? [pos.x + b[0] * s, yb + b[1] * s, pos.x + b[2] * s, yb + b[3] * s] : [pos.x - b[2] * s, yb + b[1] * s, pos.x - b[0] * s, yb + b[3] * s];
       // a carrier is framed with its riders (one figure); they move with its framing position (an entrance's end)
@@ -681,8 +736,10 @@ class Compiler {
       const ta = Math.max(win ? win[0] : rec.t0, t - 0.15), tb = win ? Math.max(ta, Math.min(t + 0.15, win[1] - 1e-3)) : t + 0.15;
       const p1 = A.posAt(tb), p_ = A.posAt(ta), vx = tb - ta > 0.02 ? (p1.x - p_.x) / (tb - ta) : 0;
       // the resting head (base pose, on the ground): what close shots compose, ignoring jump and gesture apexes
-      const rest = moving || !g ? pr : profile(A.rig, A.basePoseName(t), A.paramsAt(t)), y0 = A.actionAt(t) === 'fly' ? yb : pos.y;
-      return { id, box, head: [pos.x + face * pr.head[0] * s, yb + pr.head[1] * s], rest: [pos.x + face * rest.head[0] * s, y0 + rest.head[1] * s], hh: A.sz.headHeight * s, face, vx };
+      const rest = moving || !g ? pr : profile(A.rig, A.basePoseName(t), A.paramsAt(t), hd), y0 = A.actionAt(t) === 'fly' ? yb : pos.y;
+      // now: where the drawing really is when it is framed elsewhere (an exit framed where it starts)
+      const real = override ? pos : A.posAt(t), now = real.x !== pos.x || real.y !== pos.y ? [box[0] + real.x - pos.x, box[1] + real.y - pos.y, box[2] + real.x - pos.x, box[3] + real.y - pos.y] : null;
+      return { id, box, head: [pos.x + face * pr.head[0] * s, yb + pr.head[1] * s], rest: [pos.x + face * rest.head[0] * s, y0 + rest.head[1] * s], hh: A.sz.headHeight * s, face, vx, key: pos.key ?? pos.y, moving, now };
     }
     const T = parseTarget(id);
     let x, y, s, raised = false;
@@ -699,7 +756,13 @@ class Compiler {
     const spec = srec.def.camera || {}, ids = this.subjectIds(rec, srec);
     const size = spec.size || (ids.length ? 'wide' : 'establishing');
     const W = this.W, H = this.H;
-    const cam = buildCamera({ spec, size, ids, subjectsAt: (t, list) => list.map(id => this.subject(rec, id, t, null, [srec.t0, srec.t1])).filter(Boolean), t0: srec.t0, t1: srec.t1, S: rec.S, W, H, seed: hash32(srec.id) });
+    const win = [srec.t0, srec.t1], subjectsAt = (t, list) => list.map(id => this.subject(rec, id, t, null, win)).filter(Boolean);
+    const othersAt = (t, list) => subjectsAt(t, [...rec.actors.keys()].filter(id => !list.includes(id) && rec.actors.get(id).place0));
+    const cam = buildCamera({ spec, size, ids, subjectsAt, othersAt, t0: srec.t0, t1: srec.t1, S: rec.S, W, H, seed: hash32(srec.id) });
+    // staging the camera can't frame at the size asked for: subjects too far apart for a two-shot of that size
+    if (ids.length >= 2 && cam.reach < 0.45 && size !== 'wide') {
+      this.warn(`${srec.id}: the ${size} shot of ${ids.join(', ')} shows them at ${Math.round(cam.reach * 100)}% of the size each would get alone; they stand too far apart for a ${size} two-shot (stage them closer, or cut between singles)`);
+    }
     // depth of field: true/false, a blur radius, or 'auto' (blur grows as the painted set gets enlarged)
     const dof = spec.dof !== undefined ? spec.dof : (size === 'close' || size === 'extreme-close') ? true : 'auto';
     // a shot may override the scene's time of day (blended across the shot) and grade (blended to gradeTo)
@@ -723,11 +786,20 @@ class Compiler {
       if (L.scene !== rec.id || L.narrator) continue;
       const sp = rec.actors.get(L.who);
       if (!sp || !sp.place0 || !sp.visibleAt(L.t0)) continue;
+      let to = null, best = Infinity;
+      const p = sp.posAt(L.t0), f = sp.faceAt(L.t0);
       for (const [id, B] of rec.actors) {
-        if (B === sp || !B.place0 || !B.visibleAt(L.t0) || B.asleep(L.t0) || B.speaking(L.t0 + 0.01)) continue;
+        if (B === sp || !B.place0 || !B.visibleAt(L.t0) || B.asleep(L.t0)) continue;
+        // the speaker's addressee: the nearest one in front of them (else the nearest)
+        const q = B.posAt(L.t0), d = Math.hypot(q.x - p.x, q.y - p.y) * (Math.sign(q.x - p.x) === f ? 1 : 3);
+        if (d < best) { best = d; to = id; }
+        if (B.speaking(L.t0 + 0.01)) continue;
         const delay = 0.05 + ((hash32(`${L.id}|${id}`) % 1000) / 1000) * 0.25;
         B.glances.push({ t0: L.t0 + delay, t1: L.t1 + 0.35, target: L.who });
       }
+      // a speaker who hasn't been told where to look (no look in the scene yet, or only "down") talks to that one
+      const i = sp.lookEv.findLastIndex(e => e.t <= L.t0), told = i >= 0 && !(sp.lookEv[i].target === 'down' && sp.hTarget(i) == null);
+      if (to && !sp.asleep(L.t0) && !told) sp.glances.push({ t0: L.t0, t1: L.t1 + 0.35, target: to });
     }
   }
 

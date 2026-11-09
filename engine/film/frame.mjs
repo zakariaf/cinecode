@@ -3,18 +3,25 @@
 // wading actors sunk and clipped at the waterline with a ripple ring) → world effects → [world overlays, custom
 // beats] → front layers → [front] → grade → rim light → [grade] → glowing effects → [screen] → titles → fades →
 // captions. [layer] = custom.mjs overlays of the scene and custom beats drawn on that layer (DESIGN §9.1).
-// Close shots get a depth-of-field pass: everything behind the subjects is drawn first and blurred.
+// Close shots get a depth-of-field pass: everything behind the subjects is drawn first and blurred (and, at night,
+// darkened: the moon lights the figure, not the soft world behind it); at night a close or medium shot's vignette
+// centres on its subjects' heads. Captions avoid every head in the picture, a speaker's most (captionLayouts).
 // Actors are drawn in screen space at (world scale × zoom), so rigs thin their ink for close-ups the way a
 // painter redraws a close-up instead of enlarging the wide shot.
 // A dissolve draws the outgoing scene with that scene's own actors, overlays and rim light.
+// The sun casts shadows by time of day (castShadow, propShadow): every grounded figure's and solid prop's silhouette
+// laid across the ground away from the set's light. A memory plate ends with its torn page edge (grade.mjs deckle).
+// Titles sit where their beat's "place" says, else in the calmest band of the picture under them inside title-safe
+// (titleY), centred over the shot's subjects (titleX).
 // frameInfo(plan, t): the same frame's geometry (screen boxes, head boxes, contacts, caption box) for lint/sheets;
 // boxes include the quick squash of a turn and a wading actor's sink (visibleBox: the part above the waterline).
 import { createCanvas } from '@napi-rs/canvas';
-import { grade, black } from './grade.mjs';
+import { grade, black, deckle, sunOf } from './grade.mjs';
 import { drawEvent, rain, zzz, airShadow, ripple, ONE_SHOT } from './fx.mjs';
-import { layoutCaption, drawCaption, drawTitle, drawCard } from './text.mjs';
+import { layoutCaption, drawCaption, drawTitle, drawCard, titleBlock, TITLE_PLACES } from './text.mjs';
 import { viewRect, toScreen } from './camera.mjs';
 import { clamp, ease, probe, rigSizes, hash32 } from './util.mjs';
+import { canvas, rng } from '../core/lib.mjs';
 
 const DISSOLVE = 0.8, SCENE_FADE = 0.35, START_FADE = 0.8, END_FADE = 1.2, CARD_DISSOLVE = 1.0;
 
@@ -84,7 +91,7 @@ function underwater(c, a, P, S, cam, W, H) {
   x.globalCompositeOperation = 'destination-in'; x.fillStyle = g; x.fillRect(0, 0, W, H);
   c.save(); clipWater(c, S, cam, W, H); c.drawImage(cv, 0, 0); c.restore();
 }
-function drawActor(ctx, a, t, cam, W, H, drawn, S) {
+function drawActor(ctx, a, t, cam, W, H, drawn, S, shade = 0) {
   const P = onScreen(a, cam, W, H);
   reset(ctx);
   if (a.alpha <= 0.001) return null;
@@ -106,14 +113,114 @@ function drawActor(ctx, a, t, cam, W, H, drawn, S) {
     return r;
   };
   let r;
-  if (a.alpha < 0.999) {
+  // fading, or standing in a prop's shade (drawn darker and a little cooler): painted aside, then laid in at once
+  if (a.alpha < 0.999 || shade > 0.01) {
     const [cv, x] = scratch(W, H, 'actor');
     r = paint(x);
-    ctx.save(); ctx.globalAlpha = a.alpha; ctx.drawImage(cv, 0, 0); ctx.restore();
+    ctx.save(); ctx.globalAlpha = a.alpha;
+    if (shade > 0.01) ctx.filter = `brightness(${(1 - 0.75 * shade).toFixed(3)}) saturate(${(1 - 0.3 * shade).toFixed(3)})`;
+    // (only the drawing's own region: a full-frame pass per figure is slow)
+    const b = r?.bounds, m = b ? 0.3 * (b[3] - b[1]) + 8 : 0;
+    const [x0, y0, x1, y1] = b ? [clamp(Math.floor(b[0] - m), 0, W), clamp(Math.floor(b[1] - m), 0, H), clamp(Math.ceil(b[2] + m), 0, W), clamp(Math.ceil(b[3] + m), 0, H)] : [0, 0, W, H];
+    if (x1 > x0 && y1 > y0) ctx.drawImage(cv, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+    ctx.restore();
   } else r = paint(ctx);
   if (a.asleep && r?.head) zzz(ctx, r.head, t, Math.min(P.ss * 0.9, 2.6));
   if (r) drawn.set(a.id, r);
   return r;
+}
+
+// ───────────── cast shadows ─────────────
+// The sun lays each grounded figure's silhouette (and each solid prop's) on the ground away from the set's light: it is
+// sheared sideways by len × the height above the ground and falls a little toward the lens (the light is above and
+// behind the scene: an upper-left light throws shadows to the lower right), softened more for taller casters, fading
+// toward its tip, and multiplied over whatever lies under it. Its length and strength follow the time of day (SUN in
+// grade.mjs: short at noon, long at dawn and golden hour, none at night). Perched, hollow-bound and wading actors
+// throw none; a rider's falls from its carrier's ground. A prop's is cached per set, prop and sun; a tall prop's (a
+// tree's canopy) is dappled with light, and a figure standing in a prop's shade is drawn that much darker (shadeAt).
+const SHADOW_RGB = '74,68,112';
+export function sunFor(S, sky) {
+  const s = sunOf(typeof sky === 'string' ? [[sky, 1]] : sky);
+  if (!(s.a > 0.004) || !(s.len > 0)) return null;
+  const dir = (S?.light?.[0] ?? -0.6) < 0 ? 1 : -1;
+  return { a: s.a, len: s.len, dx: dir * 0.87 * s.len, dy: Math.max(0.05, 0.18 * s.len) };
+}
+// the shear about a ground line gy: (x, y) → (x + dx·(gy − y), gy + dy·(gy − y))
+const shear = (c, sun, gy) => c.transform(1, 0, -sun.dx, -sun.dy, sun.dx * gy, gy * (1 + sun.dy));
+function castShadow(ctx, a, P, sun, cam, W, H) {
+  if (!sun || a.alpha < 0.05 || a.mode === 'perch' || a.mode === 'hollow' || P.wl != null || (a.sink || 0) > 0) return;
+  const gy = a.ground != null ? (a.ground - cam.cy) * cam.zoom + H / 2 : P.sy;
+  // softened by painting it smaller and laying it in enlarged (a blur filter would cost a full-frame pass per figure):
+  // 1/k resolution, more for taller casters
+  const k = clamp(Math.round(a.s * cam.zoom * 0.9), 2, 4), [cv, x] = scratch(Math.ceil(W / k), Math.ceil(H / k), 'cast');
+  x.scale(1 / k, 1 / k); shear(x, sun, gy);
+  const r = paintActor(x, a, P, true), b = r?.bounds;
+  if (!b) return;
+  const hgt = Math.max(1, gy - Math.min(b[1], gy)), m = 2 * k;
+  const xs = [b[0], b[2]].flatMap(X => [b[1], b[3]].map(Y => X + sun.dx * (gy - Y))), ys = [b[1], b[3]].map(Y => gy + sun.dy * (gy - Y));
+  const x0 = clamp(Math.floor((Math.min(...xs) - m) / k), 0, cv.width), x1 = clamp(Math.ceil((Math.max(...xs) + m) / k), 0, cv.width);
+  const y0 = clamp(Math.floor((Math.min(...ys) - m) / k), 0, cv.height), y1 = clamp(Math.ceil((Math.max(...ys) + m) / k), 0, cv.height);
+  if (x1 <= x0 || y1 <= y0) return;
+  x.setTransform(1 / k, 0, 0, 1 / k, 0, 0); x.globalCompositeOperation = 'source-in';
+  const g = x.createLinearGradient(P.sx, gy, P.sx + sun.dx * hgt, gy + sun.dy * hgt);
+  g.addColorStop(0, `rgba(${SHADOW_RGB},1)`); g.addColorStop(1, `rgba(${SHADOW_RGB},0.5)`);
+  x.fillStyle = g; x.fillRect(x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k); x.globalCompositeOperation = 'source-over';
+  ctx.save(); reset(ctx); ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = clamp(sun.a * a.alpha); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(cv, x0, y0, x1 - x0, y1 - y0, x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k);
+  ctx.restore();
+}
+const PROP_SHADOW = new WeakMap();
+function propShadowSprite(p, sun) {
+  const py = p.y, hgt = Math.max(1, py - p.sy), X = (x, y) => x + sun.dx * (py - y), Y = y => py + sun.dy * (py - y);
+  const blur = clamp(hgt * 0.012, 1.5, 12), pad = blur * 3;
+  const xs = [X(p.sx, p.sy), X(p.sx + p.sw, p.sy), X(p.sx, py), X(p.sx + p.sw, py)], ys = [Y(p.sy), py];
+  const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad, y0 = Math.min(...ys) - pad, y1 = Math.max(...ys) + pad;
+  const res = clamp(700 / Math.max(x1 - x0, y1 - y0), 0.15, 1), w = Math.ceil((x1 - x0) * res), h = Math.ceil((y1 - y0) * res);
+  const [c, x] = canvas(w, h);
+  x.setTransform(res, 0, 0, res, -x0 * res, -y0 * res); shear(x, sun, py);
+  x.save(); x.beginPath(); x.rect(p.sx - 1, p.sy - 1, p.sw + 2, py - p.sy + 1); x.clip();     // only what stands above the ground
+  x.drawImage(p.sprite, p.sx, p.sy, p.sw, p.sh); x.restore();
+  x.setTransform(res, 0, 0, res, -x0 * res, -y0 * res);
+  const bx = (p.sx + p.sw / 2), g = x.createLinearGradient(bx, py, X(bx, p.sy), Y(p.sy));
+  g.addColorStop(0, `rgba(${SHADOW_RGB},1)`); g.addColorStop(1, `rgba(${SHADOW_RGB},0.8)`);
+  x.globalCompositeOperation = 'source-in'; x.fillStyle = g; x.fillRect(x0, y0, x1 - x0, y1 - y0);
+  // dapples: sun through the leaves of a tall prop, in the part of its shadow away from its foot
+  if (hgt > 300) {
+    const r = rng(hash32(p.id) % 100000 + 17), n = Math.round(clamp(hgt / 12, 30, 140));
+    x.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < n; i++) {
+      const v = 0.35 + 0.65 * r(), sx = p.sx + p.sw * r(), wx = X(sx, py - v * hgt), wy = Y(py - v * hgt), rad = hgt * (0.012 + 0.03 * r());
+      const d = x.createRadialGradient(wx, wy, 0, wx, wy, rad); d.addColorStop(0, `rgba(0,0,0,${(0.45 + 0.35 * r()).toFixed(2)})`); d.addColorStop(1, 'rgba(0,0,0,0)');
+      x.save(); x.translate(wx, wy); x.scale(1, 0.45); x.translate(-wx, -wy); x.fillStyle = d; x.fillRect(wx - rad, wy - rad, 2 * rad, 2 * rad); x.restore();
+    }
+  }
+  const [o, ox] = canvas(w, h); ox.filter = `blur(${(blur * res).toFixed(2)}px)`; ox.drawImage(c, 0, 0); ox.filter = 'none';
+  const A = ox.getImageData(0, 0, w, h).data;
+  // how deep the shade is at a world point (0..1), for the figures standing in it
+  const at = (wx, wy) => { const i = Math.floor((wx - x0) * res), j = Math.floor((wy - y0) * res); return i < 0 || j < 0 || i >= w || j >= h ? 0 : A[(j * w + i) * 4 + 3] / 255; };
+  return { c: o, x0, y0, w: x1 - x0, h: y1 - y0, at };
+}
+// The cached shadow of a solid prop for a sun (null for props that throw none).
+function propShadowOf(S, id, sun) {
+  const p = S.props?.find(q => q.id === id);
+  if (!sun || !p || !p.solid || !p.sprite || !(p.y > p.sy)) return null;
+  let m = PROP_SHADOW.get(S); if (!m) PROP_SHADOW.set(S, (m = new Map()));
+  const q = v => Math.round(v * 20) / 20, key = `${id}|${q(sun.dx)}|${q(sun.dy)}`;
+  if (!m.has(key)) m.set(key, propShadowSprite(p, { dx: q(sun.dx), dy: q(sun.dy) }));
+  return m.get(key);
+}
+// How far an actor stands in the props' shade (0..1 × the sun's strength): it is drawn that much darker.
+function shadeAt(S, a, sun) {
+  if (!sun || a.mode === 'perch' || a.mode === 'hollow' || a.mode === 'air') return 0;
+  let k = 0;
+  for (const p of S.props || []) { if (!p.solid || p.y >= a.key) continue; const e = propShadowOf(S, p.id, sun); if (e) k = Math.max(k, e.at(a.x, a.ground ?? a.y)); }
+  return k * sun.a;
+}
+// (world transform set by the caller)
+function propShadow(ctx, S, id, sun) {
+  const e = propShadowOf(S, id, sun);
+  if (!e) return;
+  ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = clamp(sun.a); ctx.drawImage(e.c, e.x0, e.y0, e.w, e.h); ctx.restore();
 }
 
 // ───────────── rim light ─────────────
@@ -210,7 +317,7 @@ function dofRadius(shot, z, H) {
 
 // The picture of a shot at time t (no captions, no fades). Returns the speakers' head boxes for captions.
 // The actors are those of the shot's own scene (so the outgoing scene of a dissolve keeps its cast).
-function picture(ctx, plan, shot, t) {
+function picture(ctx, plan, shot, t, titles = true) {
   const W = plan.W, H = plan.H, S = shot.set, cam = shot.cameraAt(t), sky = shot.skyAt(t), z = cam.zoom;
   S.build();
   reset(ctx);
@@ -227,8 +334,9 @@ function picture(ctx, plan, shot, t) {
   const drawn = new Map();
   const scene = shot.scene, rect = viewRect(cam, W, H);
   const live = plan.fx.filter(e => e.scene === scene && t >= e.t0 && t < e.t1);
-  const items = S.propsSorted().map(p => ({ key: p.y, ord: 0, draw: () => { world(); p.draw(ctx); } }));
-  for (const a of actors) items.push({ key: a.key, ord: 1, actor: a, draw: () => drawActor(ctx, a, t, cam, W, H, drawn, S) });
+  const sun = sunFor(S, sky);
+  const items = S.propsSorted().map(p => ({ key: p.y, ord: 0, draw: () => { world(); propShadow(ctx, S, p.id, sun); world(); p.draw(ctx); } }));
+  for (const a of actors) items.push({ key: a.key, ord: 1, actor: a, draw: () => { castShadow(ctx, a, onScreen(a, cam, W, H), sun, cam, W, H); drawActor(ctx, a, t, cam, W, H, drawn, S, shadeAt(S, a, sun)); } });
   for (const e of live) if (ONE_SHOT.has(e.name)) items.push({ key: (e.key ?? e.y ?? 0) + 0.5, ord: 2, draw: () => { world(); drawEvent(ctx, e, t, { rect, zoom: z, W, H, S }); } });
   items.sort((a, b) => a.key - b.key || a.ord - b.ord);
   // depth of field: blur everything behind the subjects (fading out below their feet)
@@ -240,6 +348,10 @@ function picture(ctx, plan, shot, t) {
       while (i0 < items.length && items[i0].key < focus) items[i0++].draw();
       const [cv, x] = scratch(W, H, 'dof');
       x.filter = `blur(${dofPx.toFixed(1)}px)`; x.drawImage(ctx.canvas, 0, 0); x.filter = 'none';
+      // at night what lies behind the subjects falls off into the dark (the moon lights the figure, not the soft
+      // world behind it), so a close shot of a figure on enlarged ground doesn't turn into a flat mid-tone
+      const night = clamp(((shot.gradeAt(t).con ?? 1) - 1) / 0.6) * clamp(dofPx / (6 * H / 1080));
+      if (night > 0.01) { x.globalCompositeOperation = 'multiply'; x.fillStyle = `rgba(0,0,0,${(0.38 * night).toFixed(3)})`; x.fillRect(0, 0, W, H); x.globalCompositeOperation = 'source-over'; }
       if (feet < H * 1.05) {
         const g = x.createLinearGradient(0, feet - H * 0.16, 0, feet + H * 0.02);
         g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
@@ -261,27 +373,111 @@ function picture(ctx, plan, shot, t) {
   reset(ctx);
   if (screenFx) rain(ctx, t, W, H, { a: clamp(Math.min((t - screenFx.t0) / 1.2, (screenFx.t1 - t) / 1.2)), seed: screenFx.seed });
   const g = shot.gradeAt(t);
-  grade(ctx, g, t, W, H, g.story);
+  grade(ctx, g, t, W, H, g.story, gradeFocus(shot, actors, drawn, z));
   rimLight(ctx, sceneRecOf(plan, shot)?.rim, actors, t, cam, W, H, drawn);
   layer('grade', screen);
   // lights (fireflies) glow over the grade instead of being darkened by it
   for (const e of live) if (GLOW.has(e.name)) { world(); drawEvent(ctx, field(e), t, { rect, zoom: z, W, H, S }); }
   layer('screen', screen);
+  deckle(ctx, g.story?.deckle, W, H);
   reset(ctx);
-  for (const c of plan.captions) if (c.style === 'title' && c.burn && t >= c.t0 && t < c.t1 && plan.shotAt(c.t0)?.scene === scene) drawTitle(ctx, c, t, W, H);
+  if (titles) for (const c of plan.captions) if (c.style === 'title' && c.burn && t >= c.t0 && t < c.t1 && plan.shotAt(c.t0)?.scene === scene) drawTitle(ctx, c, t, W, H, titleY(plan, c), titleX(plan, c));
   const heads = [];
-  for (const a of actors) if (a.speaking && drawn.has(a.id)) heads.push({ id: a.id, box: headBox(a, drawn.get(a.id), z) });
+  for (const a of actors) if (drawn.has(a.id)) heads.push({ id: a.id, box: headBox(a, drawn.get(a.id), z), speaking: !!a.speaking });
   return { cam, heads };
 }
 
-// Captions burned in at t, placed away from the speakers' heads.
+// What a close or medium shot is about, for the grade: the centre of its subjects' heads in the picture and a radius
+// that holds them (k: 1 for close shots, less for a medium). null when no subject is drawn.
+function gradeFocus(shot, actors, drawn, z) {
+  const k = { close: 1, 'extreme-close': 1, medium: 0.6 }[shot.size];
+  if (!k) return null;
+  const hb = actors.filter(a => shot.on.includes(a.id) && drawn.has(a.id)).map(a => headBox(a, drawn.get(a.id), z));
+  if (!hb.length) return null;
+  const x0 = Math.min(...hb.map(b => b[0])), y0 = Math.min(...hb.map(b => b[1])), x1 = Math.max(...hb.map(b => b[2])), y1 = Math.max(...hb.map(b => b[3]));
+  return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, r: 0.5 * Math.hypot(x1 - x0, y1 - y0) * 1.6, k };
+}
+
+// ───────────── title placement ─────────────
+// A title beat goes where its "place" says (a TITLE_PLACES name or a fraction of the frame height), else into the
+// calmest band of the picture it is laid over: the picture is drawn (without titles) at two moments of the title,
+// shrunk, and every height the lettering could sit at is scored by its edges (a standing stone, a tree, a comet's
+// tail), its unevenness and its brightness (cream lettering needs a darker ground), with a mild preference for the
+// upper middle. A measured title stays inside title-safe (TITLE_SAFE of the frame on every side). Horizontally a title
+// is centred over its shot's subjects (the camera's "on": a stone, a figure) as far as title-safe allows, else on the
+// frame. Computed once per title, from the same frames in every worker, so it never jumps.
+export const TITLE_SAFE = 0.1;
+const TITLE_Y = new WeakMap(), TITLE_X = new WeakMap();
+export function titleY(plan, c) {
+  if (TITLE_Y.has(c)) return TITLE_Y.get(c);
+  const H = plan.H, p = c.place;
+  const y = typeof p === 'number' ? clamp(p, 0.05, 0.95) * H : TITLE_PLACES[p] !== undefined ? TITLE_PLACES[p] * H : calmTitleY(plan, c);   // null / 'auto': measured
+  TITLE_Y.set(c, y);
+  return y;
+}
+// The screen x a title is centred on: its shot's subjects (actors' contact points, anchors) at the title's middle.
+export function titleX(plan, c) {
+  if (TITLE_X.has(c)) return TITLE_X.get(c);
+  const W = plan.W, t = (c.t0 + c.t1) / 2, shot = plan.shotAt(t), half = titleBlock(c, W, plan.H).w / 2;
+  let x = W / 2;
+  if (shot?.on?.length) {
+    const cam = shot.cameraAt(t), S = shot.set, actors = plan.actorsAt(t, shot.scene), xs = [];
+    for (const id of shot.on) {
+      const a = actors.find(q => q.id === id && q.visible);
+      if (a) xs.push(a.x); else if (S.anchorNames?.includes(id)) xs.push(S.anchor(id).x);
+    }
+    const lo = TITLE_SAFE * W + half, hi = (1 - TITLE_SAFE) * W - half;
+    if (xs.length && lo <= hi) x = clamp(((xs.reduce((a, v) => a + v, 0) / xs.length) - cam.cx) * cam.zoom + W / 2, lo, hi);
+  }
+  TITLE_X.set(c, x);
+  return x;
+}
+export function titleScores(plan, c) {
+  const W = plan.W, H = plan.H, w = 192, h = Math.max(2, Math.round((w * H) / W)), L = new Float32Array(w * h);
+  const [cv] = scratch(W, H, 'title'), small = scratch(w, h, 'title-small')[1];
+  let n = 0;
+  for (const u of [0.3, 0.75]) {
+    const t = c.t0 + (c.t1 - c.t0) * u, shot = plan.shotAt(t);
+    if (!shot) continue;
+    const x = cv.getContext('2d'); reset(x); x.clearRect(0, 0, W, H);
+    picture(x, plan, shot, t, false);
+    small.clearRect(0, 0, w, h); small.drawImage(cv, 0, 0, w, h);
+    const d = small.getImageData(0, 0, w, h).data;
+    for (let i = 0; i < w * h; i++) L[i] += (0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2]) / 255;
+    n++;
+  }
+  if (!n) return [];
+  for (let i = 0; i < L.length; i++) L[i] /= n;
+  const B = titleBlock(c, W, H), k = w / W, pad = 0.025 * H, cx = titleX(plan, c);
+  const x0 = Math.max(0, Math.floor((cx - B.w / 2 - pad) * k)), x1 = Math.min(w - 1, Math.ceil((cx + B.w / 2 + pad) * k));
+  const out = [];
+  for (let f = 0.12; f <= 0.861; f += 0.01) {
+    const yc = f * H, y0 = Math.max(0, Math.floor((yc - B.above - pad) * k)), y1 = Math.min(h - 2, Math.ceil((yc + B.below + pad) * k));
+    if ((yc - B.above) < TITLE_SAFE * H - 1e-6 || (yc + B.below) > (1 - TITLE_SAFE) * H + 1e-6) continue;
+    let g = 0, m = 0, m2 = 0, cnt = 0;
+    for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx < x1; xx++) {
+      const v = L[yy * w + xx]; g += Math.abs(L[yy * w + xx + 1] - v) + Math.abs(L[(yy + 1) * w + xx] - v); m += v; m2 += v * v; cnt++;
+    }
+    m /= cnt; const sd = Math.sqrt(Math.max(0, m2 / cnt - m * m));
+    out.push({ f, y: yc, score: (g / cnt) * 12 + sd * 2 + Math.max(0, m - 0.45) * 1.5 + 0.35 * Math.abs(f - 0.34), edge: g / cnt, sd, lum: m });
+  }
+  return out;
+}
+function calmTitleY(plan, c) {
+  const S = titleScores(plan, c);
+  if (!S.length) return plan.H * 0.38;
+  return S.reduce((a, b) => (b.score < a.score ? b : a)).y;
+}
+
+// Captions burned in at t, placed away from the heads in the picture (a speaker's counts three times a listener's).
 // Several captions at once (a line and a sound caption) stack instead of overlapping.
 export function captionLayouts(plan, t, heads) {
+  const avoid = heads.map(h => ({ box: h.box, w: h.speaking === false ? 1 / 3 : 1 }));
   const taken = [], gap = plan.H * 0.012;
   return plan.captions.filter(c => c.burn && c.style !== 'title' && t >= c.t0 && t < c.t1)
     .sort((a, b) => (a.style === 'sound') - (b.style === 'sound') || a.t0 - b.t0)
     .map(c => {
-      const L = layoutCaption(c, plan.W, plan.H, heads.map(h => h.box));
+      const L = layoutCaption(c, plan.W, plan.H, avoid);
       for (let k = 0; k < 4; k++) {
         const hit = taken.find(b => L.box[0] < b[2] && L.box[2] > b[0] && L.box[1] < b[3] && L.box[3] > b[1]);
         if (!hit) break;
@@ -380,7 +576,7 @@ export function frameInfo(plan, t) {
     const q = a.squash ?? 1, X = v => P.sx + (v - P.sx) * q, b0 = r.bounds;
     const box = q === 1 ? b0.slice() : [Math.min(X(b0[0]), X(b0[2])), b0[1], Math.max(X(b0[0]), X(b0[2])), b0[3]], head = [X(r.head[0]), r.head[1]];
     const hb = headBox(a, { head }, z);
-    if (a.speaking) heads.push({ id: a.id, box: hb });
+    heads.push({ id: a.id, box: hb, speaking: !!a.speaking });
     // wading (or riding a wading carrier): the drawing below the waterline is hidden
     const vis = P.wl == null ? box.slice() : [box[0], Math.min(box[1], P.wl), box[2], Math.min(box[3], P.wl)];
     return {
