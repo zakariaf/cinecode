@@ -33,7 +33,7 @@ import { mountPoint, shortHash, probe, profile, rigSizes, clamp } from '../engin
 import { STORY } from '../engine/film/grade.mjs';
 import { rimStrength, sunFor } from '../engine/film/frame.mjs';
 import { stingNames, sfxNames } from '../engine/film/validate.mjs';
-import { slopeAt, followsSlope, SLOPE_MAX } from '../engine/film/actor.mjs';
+import { slopeAt, followsSlope, SLOPE_MAX, SKY } from '../engine/film/actor.mjs';
 
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg ?? ''} expected ${b} ± ${tol}, got ${a}`);
 
@@ -633,7 +633,7 @@ test('look to up / sky / down tilts the head over rig.lookTime; "to" is the targ
   assert.ok(tilt('hare', 1 + LT / 2) > -1 && tilt('hare', 1 + LT / 2) < 1, 'blends from up to down');
   const T = getRig('tortoise');
   assert.ok((T.lookTime ?? 0.3) >= 0.3);
-  near(tilt('tortoise', (T.lookTime ?? 0.3) + 0.05), 1, 1e-9);
+  near(tilt('tortoise', (T.lookTime ?? 0.3) + 0.05), SKY, 1e-9);
   if (T.lookTime > 0.5) assert.ok(tilt('tortoise', 0.3) < 0.6, 'a slow looker takes its time');
   assert.equal(stateAt(plan, 'hare', 0.5).st.look, 0, 'looking up turns the head to centre');
 });
@@ -1289,7 +1289,7 @@ test('eyelines: a look at someone pitches toward their head; "down" keeps the lo
   });
   const p2 = compile(await loadFilm(talk)), [l1, l2] = p2.lines, at = (id, L) => stateAt(p2, id, (L.t0 + L.t1) / 2).st;
   assert.ok(at('tortoise', l1).look > 0.3, `the speaker turns to the hare (${at('tortoise', l1).look})`);
-  near(at('hare', l2).tilt, 1, 1e-9, 'a speaker told to look at the sky keeps looking at it');
+  near(at('hare', l2).tilt, SKY, 1e-9, 'a speaker told to look at the sky keeps looking at it');
 });
 
 test('a turn squashes the drawing through a narrow card over about six frames (not a one-frame mirror)', async () => {
@@ -1529,4 +1529,33 @@ test('slopes: a cast shadow lies on the slope, for an upright figure too', async
   const along = k => { let s = 0, n = 0; for (let d = 0.25 * h; d < 0.7 * h; d++) { const x = Math.round(cx - d), y = Math.round(cy - k * d); if (x < 0 || y < 1 || y >= withP.H - 1) continue; for (let j = -1; j <= 1; j++) { const i = ((y + j) * W + x) * 4; s += B[i + 1] - A[i + 1]; n++; } } return s / n; };
   const onSlope = along(T - toLens), level = along(-toLens);
   assert.ok(onSlope > 3 && onSlope > 2 * level, `the shadow follows the slope (on it ${onSlope.toFixed(1)}, where level ground would put it ${level.toFixed(1)})`);
+});
+
+// ═════════════ overlay api: silhouette ═════════════
+test('overlays: api.silhouette draws an actor exactly where the frame does, pitched on a slope', async () => {
+  const SIL_SRC = `
+export const overlays = { sil: { layer: 'screen', draw(ctx, api) {
+  const a = api.plan.actorsAt(api.t, api.scene.id).find(x => x.id === 'tortoise');
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, api.W, api.H); api.silhouette(ctx, a);
+  (globalThis.__sil ||= []).push({ t: api.t, pitch: a.pitch, data: ctx.getImageData(0, 0, api.W, api.H).data, W: api.W, H: api.H });
+  ctx.restore();
+} } };
+`;
+  await withCustom(SIL_SRC, async custom => {
+    const film = tiny({
+      set: 'hill', actors: { tortoise: { at: 'x:800', face: 'right' } }, scene: { overlays: ['sil'] },
+      shots: [{ id: 'a', camera: { size: 'full', on: ['tortoise'] }, beats: [{ do: 'walk', who: 'tortoise', to: 'x:1250', at: 0 }], dur: 9 }],
+    });
+    const plan = compile(await loadFilm(film, { custom })), t = 4;
+    globalThis.__sil = [];
+    drawFrame(createCanvas(plan.W, plan.H).getContext('2d'), plan, t);
+    const s = globalThis.__sil.at(-1), fi = frameInfo(plan, t).actors.find(a => a.id === 'tortoise');
+    assert.ok(Math.abs(s.pitch) > 10 * DEG, `the tortoise is pitched on the slope (${(s.pitch / DEG).toFixed(1)}°)`);
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (let y = 0; y < s.H; y++) for (let x = 0; x < s.W; x++) if (s.data[(y * s.W + x) * 4 + 3] > 32) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    const b = fi.screenBox;
+    assert.ok(x0 >= b[0] - 2 && y0 >= b[1] - 2 && x1 <= b[2] + 2 && y1 <= b[3] + 2, `the silhouette [${[x0, y0, x1, y1]}] lies inside the frame's box [${b.map(v => v.toFixed(0))}]`);
+    const [hx, hy] = fi.head.map(Math.round);
+    assert.ok(s.data[(hy * s.W + hx) * 4 + 3] > 128, 'the silhouette covers the head where the frame draws it');
+  });
 });

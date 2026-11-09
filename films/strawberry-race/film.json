@@ -1,0 +1,501 @@
+{
+  "title": "The Last Strawberry",
+  "logline": "A gruff old hedgehog and a cheeky young frog race across the stream for the last strawberry of summer; the frog wins, and shares it.",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "captions": "dialogue"
+  },
+  "titles": {
+    "open": {
+      "title": "The Last Strawberry",
+      "subtitle": "a cinecode film",
+      "dur": 2.5
+    },
+    "end": {
+      "lines": [
+        "The End"
+      ],
+      "dur": 2.6
+    }
+  },
+  "score": {
+    "key": "F",
+    "motif": "A4:0.5 C5:0.5 F5:1 E5:0.5 D5:0.5 C5:2"
+  },
+  "voices": {
+    "burr": {
+      "voice": "Algenib",
+      "tone": "gruff, low"
+    },
+    "plink": {
+      "voice": "Puck",
+      "tone": "cheeky, quick"
+    }
+  },
+  "cast": {
+    "burr": {
+      "rig": "hedgehog",
+      "name": "Burr",
+      "voice": "burr",
+      "scale": 1.1
+    },
+    "plink": {
+      "rig": "frog",
+      "name": "Plink",
+      "voice": "plink"
+    },
+    "berry": {
+      "rig": "strawberry",
+      "name": "Strawberry"
+    }
+  },
+  "sets": {
+    "stream": {
+      "kit": "stream"
+    }
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "set": "stream",
+      "time": "golden",
+      "ambience": "auto",
+      "music": {
+        "mood": "pastoral",
+        "intensity": 0.35,
+        "motif": 4,
+        "motifVoice": "flute"
+      },
+      "actors": {
+        "burr": {
+          "at": "x:900,y:1058",
+          "face": "right"
+        },
+        "plink": {
+          "at": "x:985,y:1062",
+          "face": "right"
+        },
+        "berry": {
+          "at": "x:1745,y:1076",
+          "face": "right"
+        }
+      },
+      "shots": [
+        {
+          "id": "1.1",
+          "note": "The brook in late-summer light; two small figures on the left bank.",
+          "camera": {
+            "size": "establishing",
+            "move": "push-in"
+          },
+          "beats": [],
+          "dur": 1.6
+        },
+        {
+          "id": "1.2",
+          "note": "Insert: the last strawberry on the far bank, a glint.",
+          "camera": {
+            "size": "close",
+            "on": [
+              "berry"
+            ]
+          },
+          "beats": [
+            {
+              "do": "custom",
+              "name": "glint",
+              "who": "berry",
+              "dur": 0.9,
+              "after": 0.5
+            },
+            {
+              "music": "sting",
+              "name": "magic",
+              "with": "prev"
+            }
+          ],
+          "dur": 1.8
+        },
+        {
+          "id": "1.3",
+          "note": "Both stare across the water; Burr claims it, Plink turns to him and dares him.",
+          "camera": {
+            "size": "full",
+            "on": [
+              "burr",
+              "plink"
+            ]
+          },
+          "beats": [
+            {
+              "do": "look",
+              "who": "burr",
+              "to": "berry"
+            },
+            {
+              "do": "look",
+              "who": "plink",
+              "to": "berry",
+              "with": "prev"
+            },
+            {
+              "say": "burr",
+              "text": "The last strawberry. Mine!",
+              "tone": "greedy",
+              "expr": "determined",
+              "after": 0.15,
+              "note": "Plink turns to him as he speaks (listening)"
+            },
+            {
+              "do": "look",
+              "who": "plink",
+              "to": "burr",
+              "with": "prev",
+              "after": 2.5,
+              "note": "turns to him on 'Mine!'"
+            },
+            {
+              "say": "plink",
+              "text": "Not if I get there first!",
+              "tone": "teasing",
+              "expr": "smug",
+              "after": 0.15
+            }
+          ],
+          "hold": 0.15
+        },
+        {
+          "id": "1.4",
+          "note": "The race: Plink hops the stones; Burr plunges in and wades, sinking to his snout.",
+          "camera": {
+            "size": "wide",
+            "on": [
+              "plink",
+              "burr"
+            ],
+            "move": "track"
+          },
+          "beats": [
+            {
+              "music": {
+                "mood": "chase",
+                "intensity": 0.7
+              }
+            },
+            {
+              "do": "run",
+              "who": "plink",
+              "to": "stone_2",
+              "speed": 1.5
+            },
+            {
+              "do": "run",
+              "who": "burr",
+              "to": "x:1580,y:1056",
+              "wade": true,
+              "depth": 15,
+              "speed": 1.3,
+              "with": "prev",
+              "after": 0.3,
+              "note": "one long swim: it carries on through 1.5"
+            },
+            {
+              "do": "emote",
+              "who": "burr",
+              "expr": "determined",
+              "with": "prev"
+            },
+            {
+              "do": "walk",
+              "who": "burr",
+              "to": "x:1660,y:1060",
+              "wade": true,
+              "depth": 15,
+              "speed": 1.4,
+              "note": "the trudge out: happens in 1.6"
+            }
+          ],
+          "dur": 4.0
+        },
+        {
+          "id": "1.5",
+          "note": "Plink lands on the far bank past the strawberry, turns round and gloats; then sees Burr and his grin fades.",
+          "camera": {
+            "size": "full",
+            "on": [
+              "plink",
+              "berry"
+            ]
+          },
+          "beats": [
+            {
+              "music": {
+                "mood": "playful",
+                "intensity": 0.6,
+                "downbeat": true
+              }
+            },
+            {
+              "do": "place",
+              "who": "plink",
+              "to": "x:1712,y:1050",
+              "face": "right",
+              "note": "a cut skips the last two stones"
+            },
+            {
+              "do": "hop",
+              "who": "plink",
+              "to": "x:1795,y:1050",
+              "speed": 2.2,
+              "note": "behind the berry (smaller y): a route at its depth swings round it toward the camera"
+            },
+            {
+              "do": "turn",
+              "who": "plink",
+              "face": "left"
+            },
+            {
+              "say": "plink",
+              "text": "Too slow!",
+              "tone": "delighted",
+              "expr": "smug"
+            },
+            {
+              "do": "look",
+              "who": "plink",
+              "to": "burr",
+              "after": 0.2,
+              "note": "Burr is off screen, still in the water, screen left"
+            },
+            {
+              "music": "sting",
+              "name": "sad",
+              "with": "prev",
+              "note": "the turn: he sees Burr"
+            },
+            {
+              "do": "emote",
+              "who": "plink",
+              "expr": "worried",
+              "after": 0.35,
+              "with": "prev"
+            }
+          ],
+          "hold": 0.35
+        },
+        {
+          "id": "1.6",
+          "note": "Burr hauls himself out of the stream, soaked, and slumps.",
+          "camera": {
+            "size": "full",
+            "on": [
+              "burr"
+            ],
+            "move": "track"
+          },
+          "beats": [
+            {
+              "music": {
+                "mood": "sad",
+                "intensity": 0.3
+              }
+            },
+            {
+              "do": "set",
+              "who": "burr",
+              "params": {
+                "spine": "#3d2a1c",
+                "tip": "#7d6e5e"
+              },
+              "expr": "worried"
+            },
+            {
+              "do": "emote",
+              "who": "burr",
+              "expr": "worried",
+              "at": 0.6,
+              "note": "the rigs' 'sad' brow slopes down to the snout and reads as angry; worried, then sleepy (weary) instead"
+            },
+            {
+              "do": "custom",
+              "name": "drips",
+              "who": "burr",
+              "dur": 2.4,
+              "n": 12,
+              "at": 0.8
+            },
+            {
+              "do": "pose",
+              "who": "burr",
+              "pose": "rest",
+              "dur": 0.6,
+              "at": 3.1,
+              "expr": "sleepy"
+            }
+          ],
+          "hold": 0.4
+        },
+        {
+          "id": "1.7",
+          "note": "Burr trudges up to the strawberry; Plink offers to share; it splits; they eat and laugh.",
+          "camera": {
+            "size": "full",
+            "on": [
+              "burr",
+              "plink",
+              "berry"
+            ]
+          },
+          "beats": [
+            {
+              "music": {
+                "mood": "tender",
+                "intensity": 0.35,
+                "motif": 7,
+                "motifVoice": "music-box",
+                "hold": true
+              }
+            },
+            {
+              "do": "place",
+              "who": "plink",
+              "to": "right-of:berry",
+              "face": "left",
+              "note": "the cutaway to Burr (1.6) hides this small shift down to the berry's depth"
+            },
+            {
+              "do": "walk",
+              "who": "burr",
+              "to": "left-of:berry",
+              "speed": 1.3
+            },
+            {
+              "do": "look",
+              "who": "burr",
+              "to": "plink"
+            },
+            {
+              "do": "look",
+              "who": "plink",
+              "to": "burr",
+              "with": "prev"
+            },
+            {
+              "say": "plink",
+              "text": "Ours, then?",
+              "tone": "soft",
+              "expr": "happy",
+              "after": 0.2
+            },
+            {
+              "say": "burr",
+              "text": "Ours, then.",
+              "tone": "warm",
+              "expr": "happy",
+              "after": 0.2
+            },
+            {
+              "do": "pose",
+              "who": "berry",
+              "pose": "split",
+              "dur": 0.4,
+              "after": 0.1
+            },
+            {
+              "sfx": "pop",
+              "with": "prev"
+            },
+            {
+              "music": "sting",
+              "name": "swell",
+              "with": "prev"
+            },
+            {
+              "do": "gesture",
+              "who": "plink",
+              "name": "catch",
+              "after": 0.1
+            },
+            {
+              "do": "set",
+              "who": "berry",
+              "params": {
+                "right": 0
+              },
+              "with": "prev",
+              "after": 0.35
+            },
+            {
+              "do": "gesture",
+              "who": "burr",
+              "name": "sniff",
+              "with": "prev",
+              "after": 0.1
+            },
+            {
+              "do": "set",
+              "who": "berry",
+              "params": {
+                "left": 0.45
+              },
+              "with": "prev",
+              "after": 0.5
+            },
+            {
+              "do": "set",
+              "who": "berry",
+              "params": {
+                "left": 0
+              },
+              "with": "prev",
+              "after": 0.85
+            },
+            {
+              "do": "fade",
+              "who": "berry",
+              "to": 0,
+              "dur": 0.2,
+              "with": "prev",
+              "after": 1.05,
+              "note": "eaten: hides the rig's ground shadow"
+            },
+            {
+              "do": "gesture",
+              "who": "plink",
+              "name": "laugh",
+              "after": 0.1
+            },
+            {
+              "do": "gesture",
+              "who": "burr",
+              "name": "laugh",
+              "with": "prev"
+            },
+            {
+              "do": "run",
+              "who": "plink",
+              "to": "near:burr",
+              "after": 0.1,
+              "note": "the strawberry is gone; he hops up beside Burr: together"
+            },
+            {
+              "do": "sit",
+              "who": "burr",
+              "with": "prev",
+              "after": 0.2
+            },
+            {
+              "sfx": "croak",
+              "on": "plink",
+              "after": 0.9,
+              "with": "prev"
+            }
+          ],
+          "hold": 0.8
+        }
+      ]
+    }
+  ]
+}

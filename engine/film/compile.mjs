@@ -14,7 +14,17 @@
 // two-shot whose staging can't come near its size is a plan warning.
 // Round 5: a speaker who has no look of their own in the scene yet (or only "down") talks to the nearest actor in front
 // of them. Cameras frame a subject on a slope as it is drawn: turned about its contact by the pitch it takes there.
-import { Actor, RouteLeg, JumpLeg, FlyLeg, groundPos, anchorPos } from './actor.mjs';
+// Acting: a look beat may give "tilt" (the head's pitch, outright); the "expr" of a line, pose, set or emote is held
+// until a beat changes it (emote(); one set within 0.1 s of a shot's start changes at the cut, which hides it),
+// except a line's reaction (REACTIONS: surprised, laughing, scared), which lasts the line and REACT_HOLD s after it, or
+// ends at the cut if that comes first.
+// Air: fly / enter / place "height" (units above the place, at the set's scale; a scene actor's too) ends a flier in the
+// air, hovering (hoverPos) over the spot as given (water too); the camera frames it with the reach of its beating wings
+// (actor.mjs hoverProfile); an enter into a hover comes in level at its height, "fly": true makes a flier's enter a
+// flight from above.
+// An entrance never runs past its destination and back (the way in starts at the frame edge or at the destination,
+// whichever is nearer the entry side); near:<actor> keeps clear of the other's longer end and of a hoverer's wings.
+import { Actor, RouteLeg, JumpLeg, FlyLeg, groundPos, anchorPos, canHover, hoverProfile, REACTIONS, REACT_HOLD } from './actor.mjs';
 import { buildCamera, frameSubjects, clampFrame } from './camera.mjs';
 import { skyList, mixGrade, mixStory, spanU, STORY, isNight } from './grade.mjs';
 import { chunkCaption } from './text.mjs';
@@ -97,7 +107,8 @@ class Compiler {
           A.init(T0, C.mountAt(T0, A), faceVal(a.face) || C.faceAt(T0), a.pose ?? (rigPose(A.rig, 'sit')?.name || 'stand'), { expr: a.expr ?? 'neutral', mount: C });
           continue;
         }
-        const A = this.ensure(id), pos = this.place(rec, A, a.at, T0);
+        // ("height": a flier starts hovering that high above its place)
+        const A = this.ensure(id), pos = a.height != null ? this.hoverPos(rec, A, this.place(rec, A, a.at, T0, null, true), a.height) : this.place(rec, A, a.at, T0);
         let face = faceVal(a.face) || faceVal(pos.face) || (pos.faceTo ?? (pos.x < S.refX ? 1 : -1));
         const poseName = a.pose ?? (pos.mode === 'perch' ? (rigPose(A.rig, 'perch')?.name || 'stand') : 'stand');
         A.init(T0, pos, face, poseName, { expr: a.expr ?? 'neutral' });
@@ -170,6 +181,8 @@ class Compiler {
     }
     const len = sh.dur ?? (maxEnd + (sh.hold ?? DEFAULT_HOLD));
     srec.t1 = Math.max(T + 1 / this.fps, this.q(T + len));
+    // a line's reaction still on at the cut ends there (the cut hides the change)
+    for (const e of srec.reactions || []) if (e.until > srec.t1) Object.assign(e, { until: srec.t1, untilCut: true });
     return srec.t1;
   }
 
@@ -216,7 +229,8 @@ class Compiler {
     const A = narrator ? null : rec.actors.get(who);
     if (A && A.place0) {
       A.talk.push({ t0: t, t1: t + dur, env: v?.env || null, seed: hash32(id) });
-      if (b.expr) A.exprTmp.push({ t0: t, t1: t + dur + 0.4, expr: b.expr });
+      // a mood is held until a beat changes it (listening doesn't reset it); a reaction lasts the line and a moment after
+      if (b.expr) this.emote(A, srec, t, b.expr, REACTIONS.has(b.expr) ? t + dur + REACT_HOLD : null);
       srec.refs.add(who);
     }
     return dur;
@@ -243,7 +257,7 @@ class Compiler {
         // an explicit dur is how long the change takes (an old woman rising over 2 s); otherwise a quick 0.35 s blend
         const dur = b.dur ?? 1;
         A.setPose(t, b.pose, b.dur !== undefined ? Math.max(0.12, dur) : 0.35, 'beat');
-        if (b.expr) A.exprEv.push({ t, expr: b.expr });
+        if (b.expr) this.emote(A, srec, t, b.expr);
         if (b.pose !== 'sleep') A.sleepEv.push({ t, asleep: false });
         return dur;
       }
@@ -255,7 +269,7 @@ class Compiler {
       case 'look': {
         const tgt = b.to !== undefined ? b.to : typeof b.at === 'string' ? b.at : undefined;
         const target = this.lookTarget(rec, tgt);
-        A.lookEv.push({ t, target }); A.lookEv.sort((a, c) => a.t - c.t);
+        A.lookEv.push({ t, target, ...(Number.isFinite(b.tilt) ? { tilt: b.tilt } : {}) }); A.lookEv.sort((a, c) => a.t - c.t);
         // turn to face the target if it is behind
         const p = A.posAt(t), tx = typeof target === 'object' && target ? target.x : rec.actors.get(target)?.posAt(t).x;
         const f0 = A.faceAt(t);
@@ -271,7 +285,7 @@ class Compiler {
         if (f1 && f1 !== f0) { A.faceEv.push({ t: t + 0.12, face: f1, flip: true }); A.faceEv.sort((a, c) => a.t - c.t); }
         return 0.25;
       }
-      case 'emote': A.exprEv.push({ t, expr: b.expr }); A.exprEv.sort((a, c) => a.t - c.t); return 0;
+      case 'emote': this.emote(A, srec, t, b.expr); return 0;
       case 'sit': case 'stand': case 'lie': case 'sleep': {
         if (d !== 'sleep') A.sleepEv.push({ t, asleep: false });
         if (d === 'sleep') { A.preSleep = A.basePoseName(t); A.sleepEv.push({ t: t + 0.3, asleep: true }); }
@@ -287,7 +301,9 @@ class Compiler {
         return 0.75;
       }
       case 'place': {
-        const where = b.to ?? (typeof b.at === 'string' ? b.at : null), pos = this.place(rec, A, where, t);
+        const where = b.to ?? (typeof b.at === 'string' ? b.at : null), air = b.height != null;
+        let pos = this.place(rec, A, where, t, null, air);
+        if (air) pos = this.hoverPos(rec, A, pos, b.height);
         if (pos.mode === 'mount') A.addMove({ t0: t, t1: t, mount: rec.actors.get(pos.carrier), legs: [], kind: 'place' });
         else A.addMove({ t0: t, t1: t, place: pos, legs: [], kind: 'place' });
         const f = faceVal(b.face) || faceVal(pos.face) || A.faceAt(t);
@@ -304,12 +320,21 @@ class Compiler {
       case 'set': {
         if (b.params) A.paramEv.push({ t, params: b.params });
         if (b.pose) A.setPose(t, b.pose, 0, 'beat');
-        if (b.expr) A.exprEv.push({ t, expr: b.expr });
+        if (b.expr) this.emote(A, srec, t, b.expr);
         return 0;
       }
       case 'blink': A.blinks.push(t); return 0.2;
       default: throw new Error(`unknown action "${d}"`);
     }
+  }
+
+  // An expression from a beat, held until another changes it (or, a line's reaction, until `until`: shot() ends it at
+  // the cut if that comes first). One set as a shot opens (within 0.1 s of the cut) changes at the cut, which hides it
+  // (elsewhere the actor changes it behind a blink).
+  emote(A, srec, t, expr, until = null) {
+    const cut = t - srec.t0 < 0.1, e = { t: cut ? srec.t0 : t, expr, cut };
+    if (until != null) { e.until = until; (srec.reactions ??= []).push(e); }
+    A.exprEv.push(e); A.exprEv.sort((a, c) => a.t - c.t);
   }
 
   lookTarget(rec, tgt) {
@@ -334,6 +359,21 @@ class Compiler {
 
   // ───────────── places ─────────────
   footprint(A, s) { const b = profile(A.rig, 'stand', A.params0).box; return { w: (b[2] - b[0]) * s, front: b[2] * s, back: -b[0] * s }; }
+  // How far a flier's beating wings reach in front of it (world px at scale s): the furthest its fly gait's drawing
+  // reaches over a wing beat (at least its standing front).
+  wingspan(A, s) {
+    const rig = A.rig;
+    if (A.wing0 === undefined) { A.wing0 = profile(rig, 'stand', A.params0).box[2]; if (rig.gaits?.fly) for (let i = 0; i < 8; i++) A.wing0 = Math.max(A.wing0, probe(rig, 0, 0, 1, 1, { pose: rig.gaits.fly(i / 8), params: A.params0, shadow: false, t: 0 }).bounds[2]); }
+    return A.wing0 * s;
+  }
+  // A flier hovering `height` units (at the set's scale) above a place (above the ground, or above a perch or surface
+  // point): drawn like a flight, y the ground line under it and lift its altitude; pos.hover is the lift it holds.
+  hoverPos(rec, A, pos, height) {
+    if (!canHover(A.rig)) throw new Error(`${A.id} (${A.rig.kind}) cannot fly, so it cannot hover ("height")`);
+    const S = rec.S, gy = pos.mode === 'ground' ? pos.y : pos.depth ?? pos.key, g = groundPos(S, pos.x, gy, A.k);
+    const lift = (height * S.scaleAt(pos.x, gy) + Math.max(0, gy - pos.y)) / g.s;
+    return { ...g, mode: 'air', depth: gy, ground: gy, anchor: pos.anchor ?? null, lift, hover: lift, airborne: true, face: pos.face, faceTo: pos.faceTo };
+  }
   walkable(rec, A, x, y, t, avoid = null) {
     const S = rec.S, s = S.scaleAt(x, y) * A.k, rx = Math.max(8, A.sz.width * s * 0.3), ry = rx * 0.3;
     let p = S.isWalkable(x, y) && !insideCollider(S, x, y, rx * 0.6, ry * 0.6) ? [x, y] : S.nearestWalkable(x, y, { rx: rx * 0.6, ry: ry * 0.6 }) || [x, y];
@@ -352,8 +392,10 @@ class Compiler {
     }
     return p;
   }
-  place(rec, A, target, t, from = null) {
-    const S = rec.S, T = parseTarget(target);
+  // air: the actor will hover there: the spot is taken as given (over water or a stone too, kept inside the set's area),
+  // and beside another actor it keeps clear of that one with its wings spread.
+  place(rec, A, target, t, from = null, air = false) {
+    const S = rec.S, T = parseTarget(target), over = (x, y) => [clamp(x, S.area.x0, S.area.x1), clamp(y, S.area.y0, S.area.y1)];
     if (T.kind === 'on') {
       const C = rec.actors.get(T.who);
       if (!C || !C.place0) throw new Error(`"${T.who}" is not in scene ${rec.id}`);
@@ -363,14 +405,14 @@ class Compiler {
     if (T.kind === 'name') {
       if (S.anchorNames.includes(T.name)) {
         const pos = anchorPos(S, T.name, A.k);
-        if (pos.mode === 'ground') { const [x, y] = this.walkable(rec, A, pos.x, pos.y, t); return { ...groundPos(S, x, y, A.k), anchor: T.name, face: pos.face }; }
+        if (pos.mode === 'ground') { const [x, y] = air ? over(pos.x, pos.y) : this.walkable(rec, A, pos.x, pos.y, t); return { ...groundPos(S, x, y, A.k), anchor: T.name, face: pos.face }; }
         if (pos.mode === 'perch' && !A.rig.perch && !A.rig.flies) this.warn(`${A.id} (${A.rig.kind}) is placed on the perch "${T.name}" but its rig cannot perch`);
         return pos;
       }
-      if (rec.actors.has(T.name)) return this.place(rec, A, `near:${T.name}`, t, from);
+      if (rec.actors.has(T.name)) return this.place(rec, A, `near:${T.name}`, t, from, air);
     }
     if (T.kind === 'x' || T.kind === 'xy') {
-      const y = T.kind === 'xy' ? T.y : S.laneAt(T.x), [x, yy] = this.walkable(rec, A, T.x, y, t);
+      const y = T.kind === 'xy' ? T.y : S.laneAt(T.x), [x, yy] = air ? over(T.x, y) : this.walkable(rec, A, T.x, y, t);
       return groundPos(S, x, yy, A.k);
     }
     if (['near', 'left-of', 'right-of', 'behind', 'front-of'].includes(T.kind)) {
@@ -378,14 +420,19 @@ class Compiler {
       if (!O || !O.place0) throw new Error(`"${T.who}" is not in scene ${rec.id}`);
       // beside a rider = beside its carrier (the pair stands on the carrier's feet)
       const C = O.carrierAt(t); if (C && C !== A) { O = C; T.who = C.id; }
-      const q = O.posAt(t), oy = q.mode === 'ground' ? q.y : S.laneAt(q.x), sA = S.scaleAt(q.x, oy) * A.k, sO = q.s;
-      const gap = this.footprint(A, sA).front + this.footprint(O, sO).front + 0.42 * (A.sz.height * sA + O.sz.height * sO) / 2;
+      // (a hovering actor's ground is the line under it)
+      const q = O.posAt(t), oy = q.mode === 'ground' || q.hover != null ? q.y : S.laneAt(q.x), sA = S.scaleAt(q.x, oy) * A.k, sO = q.s;
+      // the clear space between the two: the arriving actor's front (a hoverer's beating wings), the other's longer end
+      // (it may turn to face the newcomer: a tail or a head), and a gap of 0.42 × their mean height
+      const fO = this.footprint(O, sO);
+      const gap = (air ? this.wingspan(A, sA) : this.footprint(A, sA).front) + Math.max(fO.front, fO.back) + 0.42 * (A.sz.height * sA + O.sz.height * sO) / 2;
       const fx = from ? from.x : A.place0 ? A.posAt(t).x : q.x - 1;
       let side = T.kind === 'left-of' ? -1 : T.kind === 'right-of' ? 1 : Math.sign(fx - q.x) || -1;
       let x = q.x + side * gap, y = oy;
       if (T.kind === 'behind') { x = q.x + side * gap * 0.35; y = oy - 34 * sO; }
       if (T.kind === 'front-of') { x = q.x + side * gap * 0.35; y = oy + 40 * sO; }
-      let [px, py] = this.walkable(rec, A, x, y, t, T.who);
+      // (hovering, the ground under it need not be clear of the other actor's feet: only the gap counts)
+      let [px, py] = air ? over(x, y) : this.walkable(rec, A, x, y, t, T.who);
       if (Math.sign(px - q.x) !== side && T.kind === 'near') { side = -side; [px, py] = this.walkable(rec, A, q.x + side * gap, y, t, T.who); }
       return { ...groundPos(S, px, py, A.k), faceTo: px < q.x ? 1 : -1 };
     }
@@ -482,7 +529,8 @@ class Compiler {
   path(rec, A, p0, dest, kind, gait, mult, opts = {}) {
     const rig = A.rig, flier = !!(rig.flies && rig.gaits?.fly), legs = [];
     const flySpeed = (A.sz.speeds.fly ?? 150) * mult;
-    if (kind === 'fly' || (flier && (p0.mode !== 'ground' || dest.mode !== 'ground') && kind !== 'walk')) {
+    // (a hoverer flies wherever it goes next, landing there)
+    if (kind === 'fly' || p0.hover != null || dest.hover != null || (flier && (p0.mode !== 'ground' || dest.mode !== 'ground') && kind !== 'walk')) {
       return { legs: [new FlyLeg({ A: p0, B: dest, rig, sz: A.sz, speed: flySpeed })], end: dest };
     }
     let cur = p0;
@@ -501,7 +549,8 @@ class Compiler {
   }
   addMove(A, t, legs, kind, end, b, extra = {}) {
     const total = legs.reduce((a, L) => a + L.T, 0);
-    const mv = { t0: t, t1: t + total, legs, kind, end, ...extra };
+    // (into a hover the flapping goes straight on: no blend back to a resting pose)
+    const mv = { t0: t, t1: t + total, legs, kind, end, ...(end?.hover != null ? { noBlendOut: true } : {}), ...extra };
     if (!legs.length || total <= 1e-6) {
       if (b.face) { A.faceEv.push({ t, face: faceVal(b.face), flip: faceVal(b.face) !== A.faceAt(t) }); A.faceEv.sort((a, c) => a.t - c.t); }
       if (b.pose) A.setPose(t, b.pose, 0.3, 'beat');
@@ -527,8 +576,11 @@ class Compiler {
       return this.hopOff(rec, A, b, t, p0, gait, mult);
     }
     if (b.wade && (kind === 'walk' || kind === 'run') && p0.mode === 'ground') return this.wade(rec, A, b, t, p0, gait, mult);
-    const dest = this.place(rec, A, b.to, t, p0);
-    if (Math.hypot(dest.x - p0.x, dest.y - p0.y) < 2 && dest.mode === p0.mode) return this.addMove(A, t, [], kind, dest, b);
+    // "height": the flight ends hovering that high above the place
+    const air = b.height != null;
+    let dest = this.place(rec, A, b.to, t, p0, air);
+    if (air) dest = this.hoverPos(rec, A, dest, b.height);
+    if (Math.hypot(dest.x - p0.x, dest.y - p0.y) < 2 && dest.mode === p0.mode && Math.abs((dest.hover ?? 0) - (p0.hover ?? 0)) < 0.5) return this.addMove(A, t, [], kind, dest, b);
     const { legs, end } = this.path(rec, A, p0, dest, kind, gait, mult, { face0: A.faceAt(t) });
     return this.addMove(A, t, legs, kind, end, b, { framing: 'all', from: p0 });
   }
@@ -539,7 +591,7 @@ class Compiler {
     this.place(rec, A, b.to, t);                                  // validates the carrier
     let cur = p0, tj = t;
     const cp = C.posAt(t), reach = A.sz.height * p0.s * 2.6 + C.sz.width * cp.s * 0.5;
-    if (p0.mode === 'ground' && Math.hypot(cp.x - p0.x, cp.y - p0.y) > reach) {
+    if ((p0.mode === 'ground' || p0.hover != null) && Math.hypot(cp.x - p0.x, cp.y - p0.y) > reach) {
       const near = this.place(rec, A, `near:${C.id}`, t, p0), r = this.path(rec, A, p0, near, 'hop', this.gaitFor(A, 'hop'), mult, { face0: A.faceAt(t) });
       legs.push(...r.legs); cur = groundPos(rec.S, r.end.x, r.end.y, A.k); tj = t + legs.reduce((a, L) => a + L.T, 0);
     }
@@ -631,31 +683,40 @@ class Compiler {
     const mult = b.speed ?? 1, kind = b.run ? 'run' : 'walk';
     const gait = b.gait && A.rig.gaits?.[b.gait] ? b.gait : this.gaitFor(A, kind);
     A.visEv.push({ t, visible: true }); A.visEv.sort((a, c) => a.t - c.t);
+    // "height": the entrance ends hovering that high above its place; "fly": true: a flier flies in (from above when it
+    // comes in from a side) instead of making its way along the ground
+    const air = b.height != null, hover = pos => (air ? this.hoverPos(rec, A, pos, b.height) : pos);
     if (fromT.kind !== 'side') {
       // appear at a place (out of a hollow, from behind a tree) and walk on
-      const p0 = this.place(rec, A, b.from, t);
+      let p0 = this.place(rec, A, b.from, t, null, air && !b.to);
+      if (!b.to) p0 = hover(p0);
       A.addMove({ t0: t, t1: t, place: p0, legs: [], kind: 'place' });
       if (!b.to) return 0;
-      const dest = this.place(rec, A, b.to, t, p0), { legs, end } = this.path(rec, A, p0, dest, kind, gait, mult);
+      const dest = hover(this.place(rec, A, b.to, t, p0, air)), { legs, end } = this.path(rec, A, p0, dest, b.fly ? 'fly' : kind, gait, mult);
       return this.addMove(A, t, legs, 'enter', end, b, { framing: 'all', from: p0 });
     }
     const side = fromT.side;
     // destination: given, or a third of the way into the frame from the entry side
     let dest;
-    if (b.to) dest = this.place(rec, A, b.to, t);
+    if (b.to) dest = this.place(rec, A, b.to, t, null, air);
     else {
       const cam = this.provisional(rec, srec, t), half = this.W / 2 / cam.zoom, x = cam.cx + (side === 'left' ? -half * 0.45 : half * 0.45);
       dest = this.place(rec, A, `x:${Math.round(x)}`, t);
     }
-    const yRef = dest.mode === 'ground' ? dest.y : S.laneAt(dest.x);
+    dest = hover(dest);
+    const yRef = dest.mode === 'ground' || dest.hover != null ? dest.y : S.laneAt(dest.x);
     const { off, edge } = this.offscreenX(rec, srec, A, side, t, { [A.id]: dest }, yRef);
-    const ex = clamp(edge, S.area.x0 + 20, S.area.x1 - 20);
+    // the way in runs from off screen past the frame edge to the destination; a destination nearer the entry side than
+    // the edge is walked straight to (never past it and back)
+    let ex = clamp(edge, S.area.x0 + 20, S.area.x1 - 20);
+    if ((ex - dest.x) * (side === 'left' ? 1 : -1) > 0) ex = dest.x;
     const e = S.nearestWalkable(ex, yRef) || [ex, yRef];
     const start = { ...groundPos(S, off, e[1], A.k) };
     A.addMove({ t0: t - 1e-6, t1: t - 1e-6, place: start, legs: [], kind: 'place' });
     let legs, end;
     if (A.rig.flies && A.rig.gaits?.fly && (dest.mode !== 'ground' || b.fly)) {
-      const hi = { ...start, y: start.y - 260 * start.s, mode: 'air', depth: start.y };
+      // in from above (to a perch, or "fly": true), or into a hover level at its height
+      const hi = dest.hover != null && !b.fly ? { ...start, lift: (dest.hover * dest.s) / start.s, mode: 'air', depth: start.y } : { ...start, y: start.y - 260 * start.s, mode: 'air', depth: start.y };
       ({ legs, end } = { legs: [new FlyLeg({ A: hi, B: dest, rig: A.rig, sz: A.sz, speed: (A.sz.speeds.fly ?? 150) * mult })], end: dest });
     } else {
       const entry = groundPos(S, e[0], e[1], A.k);
@@ -721,8 +782,10 @@ class Compiler {
       // the head as it is held then (looking up / down, turned toward someone), so a close shot keeps it in frame (a
       // glance's pitch at a speaker stays inside the headroom: the frame doesn't loosen for it)
       const hd = override ? null : { tilt: A.tiltAt(t, false), look: A.lookAt(t, pos) };
-      const pr = g ? gestureProfile(A, g, t) : profile(A.rig, moving ? 'stand' : A.basePoseName(t), A.paramsAt(t), hd), s = pos.s;
-      const yb = pos.y - (pos.lift || 0) * s, b = pr.box;
+      // (a hoverer: the reach of its beating wings and its bob, about the hover's height)
+      const hov = pos.hover != null && canHover(A.rig);
+      const pr = hov ? hoverProfile(A.rig, A.paramsAt(t), hd) : g ? gestureProfile(A, g, t) : profile(A.rig, moving ? 'stand' : A.basePoseName(t), A.paramsAt(t), hd), s = pos.s;
+      const yb = pos.y - (hov ? pos.hover : pos.lift || 0) * s, b = pr.box;
       let box = face > 0 ? [pos.x + b[0] * s, yb + b[1] * s, pos.x + b[2] * s, yb + b[3] * s] : [pos.x - b[2] * s, yb + b[1] * s, pos.x - b[0] * s, yb + b[3] * s];
       // on a slope the drawing turns about the contact point (the pitch it takes there)
       const th = A.pitchFor(pos, t), turn = th ? turnAbout(pos.x, pos.y, th) : null;
@@ -739,7 +802,7 @@ class Compiler {
       const ta = Math.max(win ? win[0] : rec.t0, t - 0.15), tb = win ? Math.max(ta, Math.min(t + 0.15, win[1] - 1e-3)) : t + 0.15;
       const p1 = A.posAt(tb), p_ = A.posAt(ta), vx = tb - ta > 0.02 ? (p1.x - p_.x) / (tb - ta) : 0;
       // the resting head (base pose, on the ground): what close shots compose, ignoring jump and gesture apexes
-      const rest = moving || !g ? pr : profile(A.rig, A.basePoseName(t), A.paramsAt(t), hd), y0 = A.actionAt(t) === 'fly' ? yb : pos.y;
+      const rest = moving || !g || hov ? pr : profile(A.rig, A.basePoseName(t), A.paramsAt(t), hd), y0 = A.actionAt(t) === 'fly' || pos.hover != null ? yb : pos.y;
       // now: where the drawing really is when it is framed elsewhere (an exit framed where it starts)
       const real = override ? pos : A.posAt(t), now = real.x !== pos.x || real.y !== pos.y ? [box[0] + real.x - pos.x, box[1] + real.y - pos.y, box[2] + real.x - pos.x, box[3] + real.y - pos.y] : null;
       let head = [pos.x + face * pr.head[0] * s, yb + pr.head[1] * s], restHead = [pos.x + face * rest.head[0] * s, y0 + rest.head[1] * s];
@@ -764,9 +827,16 @@ class Compiler {
     const win = [srec.t0, srec.t1], subjectsAt = (t, list) => list.map(id => this.subject(rec, id, t, null, win)).filter(Boolean);
     const othersAt = (t, list) => subjectsAt(t, [...rec.actors.keys()].filter(id => !list.includes(id) && rec.actors.get(id).place0));
     const cam = buildCamera({ spec, size, ids, subjectsAt, othersAt, t0: srec.t0, t1: srec.t1, S: rec.S, W, H, seed: hash32(srec.id) });
-    // staging the camera can't frame at the size asked for: subjects too far apart for a two-shot of that size
+    // staging the camera can't frame at the size asked for: subjects too far apart for a two-shot of that size; or an
+    // actor framed far under its own size because something else in "on" sets the framing: an anchor or other place
+    // (no actor comes near its size), or a much bigger actor (under a sixth of its own size)
     if (ids.length >= 2 && cam.reach < 0.45 && size !== 'wide') {
       this.warn(`${srec.id}: the ${size} shot of ${ids.join(', ')} shows them at ${Math.round(cam.reach * 100)}% of the size each would get alone; they stand too far apart for a ${size} two-shot (stage them closer, or cut between singles)`);
+    } else if (ids.length >= 2 && size !== 'wide') {
+      const R = cam.reaches || {}, acts = ids.filter(id => rec.actors.has(id) && R[id] !== undefined);
+      const top = Math.max(0, ...acts.map(id => R[id])), small = acts.filter(id => R[id] < (top < 0.45 ? 0.45 : 1 / 6)).sort((a, b) => R[a] - R[b])[0];
+      const by = small && ids.filter(id => id !== small && R[id] !== undefined).sort((a, b) => R[b] - R[a])[0];
+      if (small && by) this.warn(`${srec.id}: the ${size} shot of ${ids.join(', ')} shows ${small} at ${Math.round(R[small] * 100)}% of the size it would get alone; ${by} sets the framing (give ${small} a shot without ${by}, or leave ${small} out of "on" if the shot is about ${by})`);
     }
     // depth of field: true/false, a blur radius, or 'auto' (blur grows as the painted set gets enlarged)
     const dof = spec.dof !== undefined ? spec.dof : (size === 'close' || size === 'extreme-close') ? true : 'auto';

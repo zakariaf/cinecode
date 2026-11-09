@@ -6,7 +6,9 @@ Anchor types: ground (stand here), surface (stand on a prop top: walk there and 
 
 ### forest
 
-4400×1400 world px, camera centre x 700–3700, horizon 720, lane y 1062; ambience forest-day / forest-night; solid props: oak, elm, log, boulder, brambles.
+4400×1400 world px, camera centre x 700–3700, horizon 720, lane y 1062; ambience forest-day / forest-night.
+
+Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): oak* 800–2000 × -560–1040, elm* 2700–3850 × -560–1030, log* 2210–2600 × 1042–1134, boulder* 750–890 × 1098–1178, brambles* 3470–3770 × 960–1150.
 
 | anchor | type | x | y | s | surface |
 |---|---|---|---|---|---|
@@ -24,7 +26,9 @@ Anchor types: ground (stand here), surface (stand on a prop top: walk there and 
 
 ### hill
 
-3300×1500 world px, camera centre x 800–2900, ridge set (ground follows a slope: give x only); ambience wind-hill / meadow-night; solid props: standing_stone, rock_low, rock_mid, rock_high, hawthorn.
+3300×1500 world px, camera centre x 800–2900, horizon 600, ridge set (ground follows a slope: give x only); ambience wind-hill / meadow-night.
+
+Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): standing_stone* 2330–2510 × 471–781, rock_low* 864–936 × 1049–1093, rock_mid* 1672–1728 × 798–838, rock_high* 2858–2942 × 716–764, hawthorn* 2900–3340 × 436–770.
 
 | anchor | type | x | y | s | surface |
 |---|---|---|---|---|---|
@@ -42,7 +46,9 @@ Anchor types: ground (stand here), surface (stand on a prop top: walk there and 
 
 ### meadow
 
-2800×1500 world px, camera centre x 500–2300, horizon 700, lane y 1040; ambience meadow-day / meadow-night; solid props: owl_tree, stump, rock_a, rock_b, rock_c, bush.
+2800×1500 world px, camera centre x 500–2300, horizon 700, lane y 1040; ambience meadow-day / meadow-night.
+
+Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): owl_tree* -280–1040 × -600–1060, stump* 1915–2185 × 860–1040, rock_a* 1162–1238 × 1142–1186, rock_b* 2301–2359 × 1068–1106, rock_c* 736–824 × 1220–1268, bush* 2560–2880 × 740–960.
 
 | anchor | type | x | y | s | surface |
 |---|---|---|---|---|---|
@@ -65,7 +71,9 @@ Anchor types: ground (stand here), surface (stand on a prop top: walk there and 
 
 ### stream
 
-2800×1400 world px, camera centre x 700–2100, horizon 700, lane y 1050; ambience stream / stream; solid props: bank_rock, willow_bush.
+2800×1400 world px, camera centre x 700–2100, horizon 700, lane y 1050; ambience stream / stream.
+
+Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): stone_1 1124–1217 × 1029–1077, stone_2 1231–1309 × 1033–1076, stone_3 1327–1414 × 1029–1075, stone_4 1421–1520 × 1031–1082, frog_rock 1394–1466 × 1106–1146, bank_rock* 1980–2120 × 1140–1220, willow_bush* 480–800 × 760–970.
 
 | anchor | type | x | y | s | surface |
 |---|---|---|---|---|---|
@@ -84,7 +92,9 @@ Anchor types: ground (stand here), surface (stand on a prop top: walk there and 
 
 ### valley
 
-2800×1400 world px, camera centre x 1000–1800, horizon 600, lane y 1200; ambience meadow-day / meadow-night; solid props: lookout_rock, gorse.
+2800×1400 world px, camera centre x 1000–1800, horizon 600, lane y 1200; ambience meadow-day / meadow-night.
+
+Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): lookout_rock* 1790–1970 × 1160–1250, gorse* 720–1000 × 1000–1170.
 
 | anchor | type | x | y | s | surface |
 |---|---|---|---|---|---|
@@ -101,7 +111,9 @@ Anchor types: ground (stand here), surface (stand on a prop top: walk there and 
 
 ### village
 
-2800×1500 world px, camera centre x 600–2300, horizon 660, lane y 1160; ambience village-day / village-night; solid props: cottage, bed_left, bed_right, fence_left, gate_post_l, gate_post_r, fence_right, fence_side_l1, fence_side_l2, fence_side_r1, fence_side_r2, well, bench, lantern, tree, apple_tree, wheelbarrow.
+2800×1500 world px, camera centre x 600–2300, horizon 660, lane y 1160; ambience village-day / village-night.
+
+Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): cottage* 676–1448 × 234–900, bed_left* 706–992 × 796–1040, bed_right* 1110–1356 × 796–1040, fence_left* 660–1004 × 922–1074, gate_post_l* 874–1024 × 912–1074, gate_post_r* 1076–1136 × 912–1074, fence_right* 1096–1430 × 922–1074, fence_side_l1* 660–731 × 863–1072, fence_side_l2* 671–742 × 774–983, fence_side_r1* 1344–1430 × 853–1072, fence_side_r2* 1318–1404 × 754–973, well* 1525–1775 × 689–989, bench* 2047–2273 × 838–972, lantern* 1395–1554 × 664–1086, tree* 1550–3250 × -600–950, apple_tree* 120–640 × 420–912, wheelbarrow* 406–711 × 886–1120.
 
 | anchor | type | x | y | s | surface |
 |---|---|---|---|---|---|
@@ -132,7 +144,9 @@ Anchor types: ground (stand here), surface (stand on a prop top: walk there and 
 
 ### wayside
 
-2800×1500 world px, camera centre x 700–2200, horizon 720, lane y 1080; ambience meadow-day / meadow-night; solid props: way_tree, signpost, mile_stone.
+2800×1500 world px, camera centre x 700–2200, horizon 720, lane y 1080; ambience meadow-day / meadow-night.
+
+Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): way_tree* 560–2460 × -600–1030, signpost* 2140–2340 × 874–1054, mile_stone* 700–820 × 1100–1170.
 
 | anchor | type | x | y | s | surface |
 |---|---|---|---|---|---|
@@ -160,6 +174,15 @@ Anchor types: ground (stand here), surface (stand on a prop top: walk there and 
   `x:1490–1550,y:1028`, 30 px below it, close enough for a two-shot of small rigs. `owl_hollow` is 360 px up its tree:
   owl or other fliers, and cut between it and the ground.
 - **Anchors as camera subjects** (`"on": ["den"]`) are framed as a box about 120 × 110 px × s (a standing hare), so a
-  small actor framed with an anchor comes out small; lint's `subject-size` catches it, `warnings.mjs` doesn't.
-- **Nothing is in the air.** Every anchor and point is somewhere to stand; a flight ends on one of them (or on a
-  rider's place, `on:<actor>`).
+  small actor framed with an anchor comes out small; `warnings.mjs` warns when it gets under 45% of its own size (not
+  in wide shots), and lint's `subject-size` catches the rest.
+- **The air.** Every anchor and point is somewhere to stand, and a flight ends on one of them (or `on:<actor>`)
+  unless it gives `"height"`: then the flier hovers that many units above it (above a perch or surface anchor's
+  point), and the point is taken as given, over water or a stone too. A point in the air is `height` = (ground y −
+  its y) ÷ the scale there.
+- **Props without anchors.** The "Props" line of each kit is the painted extent (custom code: `api.set.props`). The
+  hill's hawthorn crown is about x 2990–3330, y 440–650; a flier at `"x:3160"` with `"height": 160` hovers in the
+  middle of it (a kite snagged there).
+- **The front layer** (foreground grass blades, ferns, low branches) is drawn over the actors with its own parallax
+  and is not on the set sheet: in a low or close shot a small actor near the bottom of the frame can be crossed by
+  blades (the stream's banks, at a strawberry's height). Check those shots on a contact sheet.

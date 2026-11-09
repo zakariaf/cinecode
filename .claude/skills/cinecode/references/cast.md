@@ -91,7 +91,7 @@ Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s
 - gaits: walk, run
 - gestures: wave, nod, shake-head, shrug, laugh, jump-for-joy, point, point-up, point-down, bow, gasp, beckon, clap
 - expressions: neutral, happy, sad, surprised, angry, sleepy, worried, laughing, curious
-- params: age, build, height, seed, skin, blush, eyes, hairStyle, hair, beard, shirt, sleeves, bottom, pants, dress, shoes, socks, scarf, glasses, hat, apron, backpack, tear, hem, scarfLength, dressStyle, top, under, view (profile | three-quarter)
+- params: age, build, height, seed, skin, blush, eyes, view, hairStyle, hair, beard, shirt, sleeves, bottom, pants, dress, shoes, socks, scarf, glasses, hat, apron, backpack, tear, hem, scarfLength, dressStyle, top, under
 
 ### mouse
 
@@ -136,23 +136,41 @@ Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s
 
 ## Notes that the tables don't show
 
-- **human** (`engine/cast/human.mjs` header has the full list): `age` child | teen | adult | elder (each has its own proportions and default clothes); `hairStyle` short | long | ponytail | bun | braids | curly | bald | cap; `build` slight | slim | average | sturdy; `bottom` trousers | shorts | skirt | dress with `pants` / `dress` colours; `top` shirt | cardigan; `scarf` colour + `scarfLength`; `glasses` true or a frame colour (one glint); `tear` 0..1; `shoes` null = barefoot; `hat`, `apron`, `backpack`, `beard`. Poses `sit-ground` (on the grass) and `sit-seat` (contact = the seat surface, e.g. a `bench_seat` anchor). Sit ↔ stand blends route through a crouch: give the pose beat a `dur` of 1–2.5 s for an elder. `point` aims with `to`: up | sky | ahead | down.
+- **human** (`engine/cast/human.mjs` header has the full list): `age` child | teen | adult | elder (each has its own proportions and default clothes); `view` profile (default) | three-quarter (the older head with both eyes); `hairStyle` short | long | ponytail | bun | braids | curly | bald | cap; `build` slight | slim | average | sturdy; `bottom` trousers | shorts | skirt | dress with `pants` / `dress` colours; `top` shirt | cardigan; `scarf` colour + `scarfLength`; `glasses` true or a frame colour (one glint); `tear` 0..1; `shoes` null = barefoot; `hat`, `apron`, `backpack`, `beard`. Poses `sit-ground` (on the grass) and `sit-seat` (contact = the seat surface, e.g. a `bench_seat` anchor). Sit ↔ stand blends route through a crouch: give the pose beat a `dur` of 1–2.5 s for an elder. A gesture beat passes only its `name`: `point` follows her eyeline (a `look` at the sky or at someone first), `point-up` / `point-down` aim outright; a `to` on the gesture is ignored. Her hands are `hand` / `hands.front` / `hands.back` of the rig's `draw(null, …)` (`docs/effects.md`), for a string or a held prop drawn as an overlay.
 - **tortoise**: `mount()` gives the shell-top riding point (`"to": "on:<tortoise>"`), `lookTime` 1 s (looks and tilts are slow), and params `star`, `starCol`, `moss`, `seam`, `lids`, `wet` (animate with `do: set`). Cast `"scale"` sizes him (Seventy-Six Summers: 1.35 old, 0.4 young).
 - **squirrel**: `tail` 0.4..1.8 (under 0.7 = flat and wet); pose `flop` lies over something round (a shell, a branch).
+- **frog**: `walk` and `hop` are small hops at 26 (its slowest: 300 px takes about 9 s); `run` is big leaps at 92. Across
+  stepping stones every rig jumps stone to stone, 0.7–1.5 s a stone (the small rigs the longest) whatever its gait or `speed`.
 - **owl**: expression `one-eye` (a dozing owl peeking). Perches on `perch` anchors; can fly.
 - Cast-level `scale` multiplies the set's perspective scale; lint divides by it, so a big or tiny character isn't a `scale` error.
 - `do: set` changes params mid-shot (`{ "do": "set", "who": "fidget", "params": { "coat": "#8e3c1e", "tail": 0.45 } }`), e.g. wet fur after a wade.
-- **Fliers** (owl, songbird, butterfly) can't hover: every flight ends standing on the ground, a surface, a perch, a
-  hollow, or another actor (`hop` to `on:<actor>`: a butterfly rides a mouse's head). `enter` flies in from above
-  only to a perch, a surface, a hollow or `on:<actor>`; to a ground place it comes along the ground in its `gait`.
-  Land a small flier with an explicit `x:` a body length away: `near:` can put its wings over the other's face.
-- **Head tilt** (`look` `to` up / sky / down): every rig but the beetle, butterfly and songbird. On a small rig in a
-  wide or full shot it is a few pixels; a pose reads better (mouse `alert`, human `look-up`).
-- **Gestures vs. poses in close shots.** Close and extreme-close shots frame the resting head, not a gesture's peak:
-  the mouse's `gasp` gesture sits her up out of the top of a close-up. Use the pose of the same name there (mouse
-  poses `gasp`, `cheer`, `alert`).
+- **Fliers** (owl, songbird, butterfly; the beetle has no fly gait) hover with `"height": N` on a `fly`, `enter` or
+  `place` (or a scene actor's `at`): they hold N units above the place (at the set's scale), flapping with a gentle
+  bob, and talk and gesture there; the camera allows for the beating wings. Without `height` a flight ends on the
+  ground, a surface, a perch, a hollow or another actor (`hop` to `on:<actor>`: a butterfly rides a mouse's head).
+  `enter` flies in from above to a perch, a surface, a hollow or `on:<actor>`, or with `"fly": true`; to a ground
+  place without it, it comes along the ground in its `gait`.
+- **Head tilt** (`look` `to` up / sky / down, or `tilt` −1..1, + up, − down): every rig but the beetle, butterfly and
+  songbird. `up` is a full look up, `sky` a moderate one (about 16°). On a small rig in a wide or full shot it is a few
+  pixels; a pose reads better (mouse `alert`, human `look-up`). The deer's head barely drops at −1 (its neck stays up):
+  for a shy deer, turn it away, use `worried`, or the `graze` pose.
+- **Faces that read wrong.** On the hedgehog, mouse and badger in profile, `sad` (a heavy, slanted lid, no visible
+  frown) reads as a scowl, close to `angry`: use `worried` (anxious) or `sleepy` (weary), and let a pose or the music
+  carry the sadness. Talking, the badger opens a dark red gape with fangs and the fox shows its teeth (gentle lines read
+  as a snarl in a close-up: frame them medium), and the deer's dropped white jaw reads as a grin. Look at the face in a
+  still before a close-up of a gentle line.
+- **Gestures vs. poses in close shots.** A static or handheld `close` shot follows a gesture that holds the head out
+  of frame for 0.5 s or more (the mouse's `gasp` sits her up): it eases out to keep the ears in and back after.
+  Extreme close-ups and moving shots frame the resting head only: use the pose of the same name there (mouse poses
+  `gasp`, `cheer`, `alert`).
 - **No rig for the animal?** Reskin the nearest rig (`params`, cast `scale`) and draw what it lacks as an overlay that
   follows `api.actor(id).box` (light on the `grade` layer). Seen to read well: firefly = butterfly `scale` 0.6, dark
   wings (`col`, `col2`, `tip`), yellow `body` + a glow overlay; crow (loosely, a bat) = near-black songbird `scale`
   1.3; rabbit = hare `scale` 0.7; rat = mouse; wolf or dog = grey or brown fox (`coat`, `cream`, `sock`); ladybird =
   red beetle (`shell`); turtle = tortoise. Name the substitution in the screenplay and the report.
+- **Props** (no rig either). A ground object the camera frames and that changes state (a strawberry that splits, is
+  eaten): a small static `makeRig` rig in `custom.mjs` (`docs/cast.md`, "Adding a rig") with a pose per state and
+  params for the rest; moving actors route round it (a wide detour near a small prop: keep routes clear of it) and its
+  ground shadow stays until a `fade`. A thing in the air (a kite, a ball, a lantern): a butterfly stand-in hovering with
+  `height`, moved by `fly`, faded to 0 by its first beat, carrying an overlay that draws the thing at its `box` (still
+  returned at opacity 0; the camera frames it with `on`).

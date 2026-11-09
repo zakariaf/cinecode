@@ -1,0 +1,113 @@
+{
+  "title": "Storm Shelter",
+  "logline": "A soaked badger dashes through a thunderstorm to the old wayside tree and finds a shy deer already sheltering there.",
+  "format": { "width": 1920, "height": 1080, "fps": 24, "captions": "dialogue" },
+  "titles": {
+    "open": { "title": "Storm Shelter", "subtitle": "a cinecode film", "dur": 2 },
+    "end": { "lines": ["The End"], "dur": 2 }
+  },
+  "score": { "key": "C", "motif": "E5:1 D5:0.5 C5:0.5 D5:2 G4:2" },
+  "voices": {
+    "bramble": { "voice": "Algenib", "tone": "gruff, warm" },
+    "fern": { "voice": "Achernar", "tone": "soft, quiet" }
+  },
+  "cast": {
+    "bramble": { "rig": "badger", "name": "Bramble", "voice": "bramble", "scale": 1.15 },
+    "fern": { "rig": "deer", "name": "Fern", "voice": "fern", "scale": 0.9,
+              "params": { "coat": "#c08b57", "belly": "#f4e8d2", "antlers": false } }
+  },
+  "sets": { "tree": { "kit": "wayside" } },
+  "scenes": [
+    {
+      "id": "s01", "set": "tree", "time": "afternoon",
+      "note": "One scene: the storm. The engine has no storm sky, so storm-sky (clouds + bolts, sky layer) and storm-light (cold grade + flashes, grade layer) come from custom.mjs and key their flashes off the bolt marks.",
+      "music": { "mood": "chase", "intensity": 0.55 },
+      "ambience": "none",
+      "fx": ["rain"],
+      "overlays": [
+        { "name": "storm-sky", "params": { "bolts": { "bolt1": 1, "bolt3": 1.2 } } },
+        { "name": "storm-light", "params": { "flashes": { "bolt1": 0.7, "bolt2": 0.55, "bolt3": 1, "bolt4": 0.12 } } }
+      ],
+      "rim": { "dir": "upper-left", "color": "#cfe0ff", "strength": 0.55 },
+      "actors": {
+        "fern": { "at": "x:1320,y:1026", "face": "right", "pose": "lie", "expr": "worried" },
+        "bramble": { "at": "x:2720", "face": "left", "pose": "stand" }
+      },
+      "shots": [
+        { "id": "1.1", "camera": { "size": "establishing", "move": "push-in" }, "dur": 3.4,
+          "note": "The storm and the tree; a bolt behind the tree; Bramble runs in tiny along the path from the right. The rain bed is pinned here and runs past the shot (dur) through the whole scene.",
+          "beats": [
+            { "sfx": "rain-bed", "at": 0, "dur": 31.6 },
+            { "mark": "bolt1", "at": 0.5 },
+            { "sfx": "thunder", "at": 1.1, "params": { "near": 0.5 } },
+            { "do": "run", "who": "bramble", "to": "x:2180", "at": 0.2 }
+          ] },
+        { "id": "1.2", "camera": { "size": "full", "on": ["bramble"], "move": "track" },
+          "note": "The dash: he runs left, head down, to the roots under the tree.",
+          "beats": [
+            { "do": "emote", "who": "bramble", "expr": "worried" },
+            { "do": "run", "who": "bramble", "to": "x:1545,y:1042", "speed": 1.2 },
+            { "say": "bramble", "text": "Rain, rain, rain!", "tone": "breathless", "with": "prev", "after": 0.6 }
+          ], "hold": 0.2 },
+        { "id": "1.3", "camera": { "size": "full", "on": ["bramble", "fern"] },
+          "note": "He shakes off the water, head down; the flash shows him the deer. Both freeze.",
+          "beats": [
+            { "do": "look", "who": "bramble", "to": "down" },
+            { "do": "custom", "name": "shake", "who": "bramble", "dur": 0.8 },
+            { "mark": "bolt2", "after": 0.2 },
+            { "do": "look", "who": "bramble", "to": "fern", "with": "prev" },
+            { "do": "pose", "who": "bramble", "pose": "alert", "dur": 0.3, "with": "prev" },
+            { "music": "sting", "name": "surprise", "with": "prev" },
+            { "say": "bramble", "text": "Oh! Didn't see you there.", "tone": "startled", "expr": "surprised", "with": "prev", "after": 0.2 },
+            { "do": "emote", "who": "fern", "expr": "scared", "with": "prev", "after": 0.1 },
+            { "do": "gesture", "who": "fern", "name": "flick", "with": "prev", "after": 0.4 }
+          ], "hold": 0.4, "music": { "mood": "tension", "intensity": 0.3 } },
+        { "id": "1.4", "camera": { "size": "medium", "on": ["fern"], "move": "tilt-up", "moveAt": 0, "moveDur": 1.0 },
+          "note": "Fern scrambles up, eyes down, apologises, and turns away toward the open field.",
+          "beats": [
+            { "do": "pose", "who": "fern", "pose": "stand", "dur": 0.9, "expr": "worried" },
+            { "do": "look", "who": "fern", "to": "down", "tilt": -0.8 },
+            { "say": "fern", "text": "Sorry. I'll go.", "tone": "timid", "expr": "sad" },
+            { "do": "turn", "who": "fern", "face": "left", "after": 0.2 }
+          ], "hold": 0.3 },
+        { "id": "1.5", "camera": { "size": "wide", "on": ["fern"] },
+          "note": "She steps out; the biggest bolt and a thunderclap right overhead stop her. She flinches and looks back at him.",
+          "beats": [
+            { "do": "walk", "who": "fern", "to": "x:1220,y:1022" },
+            { "mark": "bolt3", "after": 0.1 },
+            { "sfx": "thunder", "with": "prev", "after": 0.1, "params": { "near": 1 } },
+            { "do": "emote", "who": "fern", "expr": "scared", "with": "prev", "after": 0.1 },
+            { "do": "gesture", "who": "fern", "name": "jump", "with": "prev", "after": 0.12 },
+            { "do": "look", "who": "fern", "to": "bramble", "after": 0.2 },
+            { "do": "pose", "who": "bramble", "pose": "sit", "dur": 0.8, "with": "prev", "after": 0.2 }
+          ], "hold": 0.3 },
+        { "id": "1.6", "camera": { "size": "medium", "on": ["bramble"], "zoom": 0.85, "offset": [0, -0.061] },
+          "note": "The turn: he sits back on his haunches, making room, and asks her to stay.",
+          "music": { "mood": "tender", "intensity": 0.3 },
+          "beats": [
+            { "do": "emote", "who": "bramble", "expr": "happy" },
+            { "say": "bramble", "text": "Stay. It's a big tree.", "tone": "gentle", "after": 0.3 },
+            { "do": "gesture", "who": "bramble", "name": "nod", "with": "prev", "after": 1.0 }
+          ], "hold": 0.4 },
+        { "id": "1.7", "camera": { "size": "full", "on": ["fern"], "zoom": 0.8, "offset": [0, -0.07] },
+          "note": "She comes back and folds down onto the dry roots.",
+          "beats": [
+            { "do": "walk", "who": "fern", "to": "x:1320,y:1026" },
+            { "do": "pose", "who": "fern", "pose": "lie", "dur": 1.2, "expr": "happy" },
+            { "say": "fern", "text": "Thank you.", "tone": "grateful" }
+          ], "hold": 0.4 },
+        { "id": "1.8", "camera": { "size": "wide", "on": ["fern", "bramble"], "move": "pull-out", "zoomTo": 0.55 },
+          "note": "Final image: two shapes in the dry ring under the old tree; the thunder far away now.",
+          "music": { "mood": "tender", "intensity": 0.35, "motif": 5, "motifVoice": "cello" },
+          "beats": [
+            { "do": "look", "who": "fern", "to": "bramble" },
+            { "do": "pose", "who": "bramble", "pose": "rest", "dur": 1.0, "with": "prev" },
+            { "mark": "bolt4", "after": 0.6 },
+            { "sfx": "thunder", "with": "prev", "after": 0.9, "gain": 0.6, "params": { "near": 0 } },
+            { "do": "look", "who": "fern", "to": "sky", "with": "prev", "after": 0.6 },
+            { "wait": 1.3 }
+          ], "hold": 0.5 }
+      ]
+    }
+  ]
+}

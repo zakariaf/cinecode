@@ -1,6 +1,7 @@
 // Water: ponds and streams painted in gouache (bank, depth gradient, sky reflection, ripples) and
-// an animated shimmer drawn per frame inside the same polygon.
-import { rng, pick, path, blob, ink, quad } from '../core/lib.mjs';
+// an animated shimmer drawn per frame inside the same polygon; and the waterline where a body stands in water (the
+// cut that follows the near half of its ring, the meniscus, the darker band under it, rings and foam).
+import { rng, pick, path, blob, ink, quad, arcPts, wobble } from '../core/lib.mjs';
 
 const box = P => { let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const [x, y] of P) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); } return { x0, x1, y0, y1 }; };
 
@@ -176,6 +177,120 @@ export function streamFlow(ctx, G, t, { sAt = () => 1, seed = 5, n = 240, speed 
       ctx.fillStyle = `rgba(${col},${a.toFixed(3)})`;
       for (const side of [-1, 1]) crescent(st.x + side * rx * (0.65 + u * 0.9), yy, (3 + 4 * u) * s, 0.5 * s, 0.9 * s);
     }
+  }
+  ctx.restore();
+}
+
+// ───────────── waterlines ─────────────
+// Where a body stands in water (a wading animal, a sunk shell). Each place the body crosses the surface (its trunk, a
+// leg, a tail: wadeSpans measures them on the drawing) has a ring round it on the water: centre (x, y) on the surface
+// line, half-width rx, half-depth ry (at most 0.26 rx: the surface seen from a little above). Its far half lies behind
+// the body (above y), its near half in front of it (below y). Screen or world space alike; the caller clips to the
+// water.
+const RING_RY = 0.26;
+
+// Where a body crosses the surface line y, measured on a canvas that holds that body alone (drawn whole, before any
+// cut): one crossing per run of opaque pixels just above the line (runs under `join` px apart are one; specks under
+// 2 px none), each { x, rx, ry, rise }. rise: how far (px) the body rises above the line there, counted up to `full`
+// px at most. ry, the depth of its ring, is the least of RING_RY × rx, that rise (a body going under closes its ring
+// to nothing) and half of `below` (how far the body's lowest part reaches under the line: the near arc never lifts the
+// feet out of the water). None once the body is entirely under.
+export function wadeSpans(ctx, y, { below = Infinity, join = 3, full = 0 } = {}) {
+  const W = ctx.canvas.width, H = ctx.canvas.height, row = Math.round(y) - 1;
+  if (!(row >= 0 && row < H)) return [];
+  const d = ctx.getImageData(0, row, W, 1).data, runs = [];
+  for (let x = 0, x0 = -1; x <= W; x++) {
+    const on = x < W && d[x * 4 + 3] >= 128;
+    if (on && x0 < 0) x0 = x;
+    else if (!on && x0 >= 0) { const last = runs[runs.length - 1]; if (last && x0 - last[1] <= join) last[1] = x; else runs.push([x0, x]); x0 = -1; }
+  }
+  const out = [];
+  for (const [a, b] of runs) {
+    if (b - a < 2) continue;
+    const rx = (b - a) / 2, cap = Math.min(RING_RY * rx, below / 2), n = Math.min(row, Math.ceil(Math.max(cap, full)));
+    // the rows above the line in which the run's columns still hold the body, up to n
+    let rise = 0;
+    if (n > 0) {
+      const img = ctx.getImageData(a, row - n, b - a, n).data, w = b - a;
+      for (let k = 1; k <= n; k++) {
+        const o = (n - k) * w * 4;
+        let any = false; for (let i = 0; i < w && !any; i++) any = img[o + i * 4 + 3] >= 128;
+        if (!any) break;
+        rise = k;
+      }
+    }
+    out.push({ x: (a + b) / 2, rx, ry: Math.max(0, Math.min(cap, rise)), rise });
+  }
+  return out;
+}
+
+// The crossings of a waterline: its spans, or the one ring (x, rx, ry) — none for rx 0.
+const crossings = ({ x, rx, ry = rx * RING_RY, spans }) => (spans ?? (rx > 0 ? [{ x, rx, ry }] : [])).slice().sort((a, b) => a.x - b.x);
+
+// Adds the path of what lies under the water, for the caller to fill (destination-out cuts a body at its waterline) or
+// clip with: everything below the surface line y across x0..x1 (default ±4 rx about the ring), down to y1, except the
+// lens between that line and each crossing's near arc, which is the front of the body still above the water. A flat
+// cut at y instead makes a dome look sliced off. No crossings (rx 0, or spans []): the flat cut.
+export function wadeCut(ctx, ring, W = ring.x + 4 * ring.rx, H = ring.y + 4 * ring.rx + 1e4) {
+  const { x, y, rx } = ring, C = crossings(ring);
+  const x0 = Math.min(-1, x - 4 * rx, ...C.map(c => c.x - c.rx - 1)), x1 = Math.max(W + 1, x + 4 * rx, ...C.map(c => c.x + c.rx + 1));
+  const y1 = Math.max(H + 1, y + Math.max(0, ...C.map(c => c.ry)) + 1);
+  ctx.beginPath(); ctx.moveTo(x0, y);
+  for (const c of C) { ctx.lineTo(c.x - c.rx, y); if (c.ry > 0.25) ctx.ellipse(c.x, y, c.rx, c.ry, 0, Math.PI, 0, true); }
+  ctx.lineTo(x1, y); ctx.lineTo(x1, y1); ctx.lineTo(x0, y1); ctx.closePath();
+}
+
+// The waterline painted where a body breaks the water. half 'back' is drawn before the body: the far half of each
+// crossing's ring (a broken pale highlight) and the far halves of two rings spreading out about (x, rx). 'front' is
+// drawn after it, at each crossing: a band of darker water under the near arc (the submerged body and its shade,
+// deepest at the surface, fading over `depth` px) crossed by a faint bent light line (the refraction), the meniscus (a
+// thin dark lip hugging the near arc with a broken light line just under it that shivers on twos) and a few flecks of
+// foam along the arc; then the near halves of the spreading rings. spans: the crossings (wadeSpans; none: the body is
+// under, only the rings spread), else the one ring (x, rx, ry). a: 1 while the body breaks the surface, faint (about
+// 0.35) once it is under; s: the scale (line weights). Deterministic in t and seed (animates on twos).
+export function wadeRing(ctx, { x, y, rx, ry = rx * RING_RY, a = 1, seed = 1, half = 'front', t = 0, s = 1, depth = rx * 0.6, spans }) {
+  const front = half === 'front', tq = Math.floor(t * 12 + 1e-6) / 12, lw = Math.max(1.2, 1.7 * s);
+  const arc = (c, R, u0, u1, j, dy = 0) => wobble(arcPts(c.x, y + dy, R, R * (c.ry / c.rx), Math.PI * u0, Math.PI * u1, 4), seed * 7 + j, Math.min(2.5, lw * 0.5, c.rx * 0.3), false);
+  // an arc in pieces with seeded gaps (front angles 0..1 × π, back 1..2)
+  const pieces = (r, u0, u1, n, j) => { const out = [], st = (u1 - u0) / n; for (let i = 0; i < n; i++) out.push([u0 + st * (i + 0.05 + r() * 0.14), u0 + st * (i + 0.8 + r() * 0.14), j + i]); return out; };
+  const col = (rgb, al) => `rgba(${rgb},${Math.max(0, al * a).toFixed(3)})`;
+  const r = rng(seed * 131 + 7), shiver = rng(seed * 31 + Math.round(tq * 12)), z = Math.hypot(ctx.getTransform().a, ctx.getTransform().b) || 1;
+  ctx.save(); ctx.lineCap = 'round';
+  crossings({ x, rx, ry, spans }).forEach((c, ci) => {
+    const k = ci * 50;
+    if (!front) {
+      for (const [u0, u1, j] of pieces(r, 1.06, 1.94, 3, 9 + k)) ink(ctx, arc(c, c.rx * 0.98, u0, u1, j), lw * 0.9, { closed: false, color: col('236,248,250', 0.6), seed: seed + j });
+      return;
+    }
+    // the band of darker water under the near arc: a crescent hugging it, thickest under the middle and thinning to
+    // nothing at the ring's ends, its lower edge softened (blurred) and fading down; the dry lens stays
+    const band = Math.max(Math.min(4 * lw, c.rx), Math.min(depth, c.rx * 0.5)), yb = y + c.ry + band;
+    ctx.save();
+    wadeCut(ctx, { x: c.x, y, rx: c.rx, ry: c.ry }); ctx.clip();
+    const g = ctx.createLinearGradient(0, y, 0, yb);
+    g.addColorStop(0, col('14,40,54', 0.42)); g.addColorStop(0.45, col('14,40,54', 0.26)); g.addColorStop(1, col('14,40,54', 0));
+    ctx.filter = `blur(${(Math.max(1, band * 0.22) * z).toFixed(1)}px)`; ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(c.x, y - 1, c.rx, c.ry + 1, 0, Math.PI, 0, true); ctx.ellipse(c.x, y, c.rx * 0.9, c.ry + band, 0, 0, Math.PI, false); ctx.closePath(); ctx.fill();
+    ctx.filter = 'none';
+    // the refraction: a faint light line bent under the surface, a third of the band down
+    if (c.rx > 4 * lw) for (const [u0, u1, j] of pieces(r, 0.12, 0.88, 2, 40 + k)) ink(ctx, arc(c, c.rx * 0.92, u0, u1, j, band * 0.3), lw * 0.8, { closed: false, color: col('200,232,238', 0.3), seed: seed + j });
+    ctx.restore();
+    // the meniscus: a dark lip right against the body, light caught just under it
+    for (const [u0, u1, j] of pieces(r, 0.02, 0.98, 2, 1 + k)) ink(ctx, arc(c, c.rx * 0.985, u0, u1, j, lw * 0.3), lw * 1.3, { closed: false, color: col('22,46,60', 0.6), seed: seed + j });
+    for (const [u0, u1, j] of pieces(shiver, 0.04, 0.96, c.rx > 6 * lw ? 4 : 2, 5 + k)) ink(ctx, arc(c, c.rx * 1.01, u0, u1, j, lw * 1.35), lw * 1.15, { closed: false, color: col('240,250,252', 0.85), seed: seed + j });
+    // foam: small flecks along the near arc, gathered toward its ends (fewer on a narrow crossing)
+    ctx.fillStyle = col('244,251,252', 0.7);
+    for (let i = 0, n = Math.max(1, Math.min(7, Math.round(c.rx / (2.5 * lw)))); i < n; i++) {
+      const v = (shiver() < 0.5 ? -1 : 1) * (0.55 + 0.45 * Math.sqrt(shiver())), px = c.x + v * c.rx * 1.02, py = y + c.ry * Math.sqrt(Math.max(0, 1 - v * v)) + lw * (0.6 + shiver());
+      blob(ctx, px, py, (0.7 + shiver() * 1.1) * lw, (0.45 + shiver() * 0.5) * lw, 0, shiver, 6);
+    }
+  });
+  // two rings spreading out about the whole body and fading
+  const o = { x, rx, ry: rx * RING_RY };
+  for (let q = 0; q < 2; q++) {
+    const ph = (tq * 0.55 + q / 2 + (seed % 97) / 97) % 1, R = rx * (1.1 + 0.8 * ph), al = 0.5 * (1 - ph) ** 1.5;
+    if (al * a < 0.02) continue;
+    for (const [u0, u1, j] of pieces(r, front ? 0.08 : 1.12, front ? 0.92 : 1.88, 2, 20 + q * 4)) ink(ctx, arc(o, R, u0, u1, j), lw * (1.1 - 0.5 * ph), { closed: false, color: col('232,246,250', al), seed: seed + j });
   }
   ctx.restore();
 }

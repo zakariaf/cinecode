@@ -669,8 +669,13 @@ function drawFireflyFill(ctx, u, api) {
     glow(x, p.x, p.y, 0, rr * 0.8, '236,255,170', 0.9 * p.a);
     x.fillStyle = `rgba(250,255,214,${p.a})`; x.beginPath(); x.arc(p.x, p.y, Math.max(1.5, rr * 0.16), 0, 7); x.fill();
   }
+  // (her silhouette drawn on its own, then erased with: the rig shades with 'multiply', which would paint, not erase,
+  // if it were drawn straight into the fireflies)
+  const [sc, sx] = scratch('ff-sil', W, H);
+  sx.clearRect(0, 0, W, H);
+  R.draw(sx, ax, ay, ss, f, { ...a.st, shadow: false });
   x.globalCompositeOperation = 'destination-out';
-  R.draw(x, ax, ay, ss, f, { ...a.st, shadow: false });
+  x.drawImage(sc, 0, 0);
   ctx.globalCompositeOperation = 'screen';
   ctx.drawImage(cv, 0, 0);
   // their light on her: a yellow-green fill from behind and below, only on her

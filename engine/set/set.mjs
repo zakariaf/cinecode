@@ -363,7 +363,21 @@ export function makeSet(def) {
   const mixHaze = hz => {
     let r = 0, g = 0, b = 0, n = 0;
     for (const [name, a] of hz) { if (!(a > 0)) continue; const [cr, cg, cb] = skyHaze(name).split(',').map(Number); r += cr * a; g += cg * a; b += cb * a; n += a; }
-    return n ? `${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)}` : '255,255,255';
+    return n ? [r / n, g / n, b / n] : [255, 255, 255];
+  };
+  // A layer's paint times a colour (rgb 0..255; its alpha kept, exactly), blurred like the layer: cached per colour and blur.
+  const shaded = (ly, rgb, px) => {
+    const key = `${rgb}|${px}`, M = (ly.shaded ??= new Map());
+    if (M.has(key)) return M.get(key);
+    let c = M.get(`${rgb}|0`);
+    if (!c) {
+      const [t, x] = canvas(ly.c.width, ly.c.height); x.drawImage(ly.c, 0, 0);
+      const im = x.getImageData(0, 0, t.width, t.height), d = im.data, [r, g, b] = rgb.map(v => v / 255);
+      for (let i = 0; i < d.length; i += 4) { d[i] *= r; d[i + 1] *= g; d[i + 2] *= b; }
+      x.putImageData(im, 0, 0); M.set(`${rgb}|0`, (c = t));
+    }
+    if (px) { const [t, x] = canvas(c.width, c.height); x.filter = `blur(${px * ly.res}px)`; x.drawImage(c, 0, 0); M.set(key, (c = t)); }
+    return c;
   };
   const scratch = { c: null, x: null };
   const drawLayers = (ctx, cam, front, opts = {}) => {
@@ -374,13 +388,21 @@ export function makeSet(def) {
       const dx = (cam.cx - refX) * (1 - ly.k), dy = (cam.cy - refY) * (1 - ly.k) * 0.4, b = dofPx(ly, opts.dof);
       const img = b ? blurred(ly, b) : ly.c, w = ly.c.width / ly.res, h = ly.c.height / ly.res;
       const hz = !front && ly.k < 1 && haze.length ? haze : null;
-      if (hz) {
+      // a shade (ly.shade(S) → { rgb, a } | null: a far range by night): the layer's own paint times rgb, crossfaded in
+      // by a, so it never darkens what lies behind the layer and a blurred edge takes it like the rest
+      const sh = ly.shade?.(S), sa = sh ? clamp(sh.a ?? 0) : 0;
+      if (hz || sa > 0.004) {
         const cw = ctx.canvas.width, ch = ctx.canvas.height;
         if (!scratch.c || scratch.c.width !== cw || scratch.c.height !== ch) [scratch.c, scratch.x] = canvas(cw, ch);
-        const sx = scratch.x; sx.setTransform(1, 0, 0, 1, 0, 0); sx.globalCompositeOperation = 'copy'; sx.globalAlpha = 1;
+        const sx = scratch.x; sx.setTransform(1, 0, 0, 1, 0, 0); sx.globalCompositeOperation = 'copy'; sx.globalAlpha = sa > 0.004 ? 1 - sa : 1;
         sx.setTransform(ctx.getTransform()); sx.drawImage(img, ly.E.x0 + dx, ly.E.y0 + dy, w, h);
-        sx.setTransform(1, 0, 0, 1, 0, 0); sx.globalCompositeOperation = 'source-atop';
-        sx.fillStyle = `rgba(${mixHaze(hz)},${hazeK * (1 - ly.k) * (def.hazeScale ?? 1)})`; sx.fillRect(0, 0, cw, ch);
+        if (sa > 0.004) { sx.globalCompositeOperation = 'lighter'; sx.globalAlpha = sa; sx.drawImage(shaded(ly, sh.rgb, b), ly.E.x0 + dx, ly.E.y0 + dy, w, h); sx.globalAlpha = 1; }
+        sx.setTransform(1, 0, 0, 1, 0, 0);
+        if (hz) {
+          // (the haze is shaded with the paint, as if laid on the layer before its shade)
+          const hc = mixHaze(hz).map((v, i) => Math.round(v * (sa > 0.004 ? 1 - sa * (1 - sh.rgb[i] / 255) : 1)));
+          sx.globalCompositeOperation = 'source-atop'; sx.fillStyle = `rgba(${hc.join(',')},${hazeK * (1 - ly.k) * (def.hazeScale ?? 1)})`; sx.fillRect(0, 0, cw, ch);
+        }
         ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(scratch.c, 0, 0); ctx.restore();
       } else ctx.drawImage(img, ly.E.x0 + dx, ly.E.y0 + dy, w, h);
       if (ly.anim) { ctx.save(); ctx.translate(dx, dy); ly.anim(ctx, t, S, opts); ctx.restore(); }

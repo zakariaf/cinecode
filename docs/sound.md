@@ -104,7 +104,11 @@ them.
 
 `node .claude/skills/cinecode/scripts/takes.mjs films/<slug>` lists flagged and non-verbal takes with what was asked
 and what was heard, every try of a flagged line, and `TONE-CUT` for a kept take that was sent with less direction
-than asked (or none) because earlier tries read it aloud. To fix a take, simplify its tone (that makes a new line), or
+than asked (or none) because earlier tries read it aloud. With `--all` it lists every take, each with its length
+against the estimate and any pause of 0.35 s or more inside it: read them all, since a take can pass and still be
+wrong. Two traps seen: a one-word line or a homophone (`"Ours."` was heard as "hours" and "Walrus" on every try;
+`"Ours, then."` passed), and a slow voice (`Algenib`, "gruff, low") taking twice the estimate with a pause between two
+sentences. To fix a take, simplify its tone (that makes a new line), or
 delete its two cache files and run `voice` again.
 
 The kept take is trimmed of silence below −45 dBFS (10 ms windows, 60 ms kept around the speech), resampled to 48 kHz
@@ -156,7 +160,14 @@ counter-line, percussion, doublings. 0.3 is sparse, 0.8 is full.
 
 How cues fit together: music is written in four-bar phrases, and the tempo is nudged (up to ±13%) so a cue's last
 tonic chord lands about 3 s before it ends. Consecutive cues of the same mood merge into one continuous cue whose
-arrangement follows the intensity changes; different moods crossfade over 1.5 s. Without a score key, each cue picks a
+arrangement follows the intensity changes; different moods crossfade over 1.5 s. Two consequences to listen for (or
+measure with `node .claude/skills/cinecode/scripts/levels.mjs films/<slug>`, which flags a second or more of
+near-silence under a cue):
+
+- A new mood that starts on a cut without `"downbeat": true` can open with a near-silent lead-in of a second or more
+  (seen: 1.5 s under a line, at −55 to −70 dB). Give a mood change on a cut `"downbeat": true`.
+- The last cue runs under the end card, but its final chord lands about 3 s before the film's end and dies away, so
+  under a 2.5 s end card the score is already gone. `"hold": true` on the last cue sustains it to the end. Without a score key, each cue picks a
 key from its mood's preferred keys, close on the circle of fifths to the previous cue.
 
 ### The motif
@@ -279,6 +290,11 @@ bed by the scene's time ([sets.md](sets.md#ambience)), a name forces one, `"none
 | `wind-hill` | strong whistling wind and a far skylark |
 
 Beds never loop (every layer is a seeded process), start already alive, and crossfade over 1 s when the bed changes.
+
+`ambience` takes only these eight. For a bed of your own (rain, a storm), write it as a sound in `custom.mjs` and lay
+it as one long effect at the start of the scene, with its length in `params` rather than on the beat: `{ "sfx":
+"rain-bed", "params": { "dur": 30 } }` takes no time in the shot and plays on across the cuts (a beat-level `"dur": 30`
+would hold the shot for 30 s). The same works for the continuous built-ins (`wind`, `stream`, `fire`, `cricket`).
 
 ## The mix
 

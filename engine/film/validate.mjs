@@ -7,7 +7,10 @@
 // beats (unique names), riding ("on:<actor>" for hop / place, scene actors { on }), wade / depth, look to up / sky /
 // down, camera to / toOn / zoomTo / moveAt / moveDur / offset, shot time / grade / gradeTo / music, scene overlays
 // and rim, music motif / motifVoice / hold / downbeat / tempo, the film's score, touch / contact on any beat; title
-// beats' place (a TITLE_PLACES name, "auto" or a fraction of the frame height).
+// beats' place (a TITLE_PLACES name, "auto" or a fraction of the frame height). Hovering: "height" on a fly / enter /
+// place of a rig that flies (not with "on:"), or on a scene actor's starting place; a hoverer takes no sit / lie /
+// sleep / pose until a move without "height" lands it; "fly" (true / false) on an enter of a flier. A look may give "tilt" (a
+// head pitch, -1..1); DO_KEYS lists the fields only one action takes.
 import * as SFX from '../audio/sfx.mjs';
 import * as MUSIC from '../audio/music.mjs';
 import { parseTarget, rigPose, poseNames } from './util.mjs';
@@ -46,8 +49,14 @@ const BEAT_KEYS = {
   wait: ['wait'],
   title: ['title', 'sub', 'subtitle', 'dur', 'place'],
   mark: ['mark'],
-  do: ['do', 'who', 'to', 'from', 'speed', 'gait', 'pose', 'dur', 'expr', 'name', 'face', 'params', 'run', 'look', 'end', 'over', 'height', 'alpha', 'wade', 'depth'],
+  do: ['do', 'who', 'to', 'from', 'speed', 'gait', 'pose', 'dur', 'expr', 'name', 'face', 'params', 'run', 'look', 'end', 'over', 'height', 'alpha', 'wade', 'depth', 'fly'],
 };
+// fields only one action takes (on top of BEAT_KEYS.do)
+const DO_KEYS = { look: ['tilt'] };
+// a rig that flies (a fly gait): it can hover ("height")
+const canFly = R => !!(R?.flies && R.gaits?.fly);
+const HEIGHT_UNITS = 'must be a positive number of units above the place (at the set\'s scale: a mouse is about 18 tall, a human child 141)';
+const noHover = R => `rig "${R.kind}" cannot fly, so it cannot hover; "height" is for rigs that fly (a fly gait)`;
 const SCORE_TOKEN = /^[A-Ga-g][#b]?-?\d:\d+(\.\d+)?$/;
 // Why music.mjs parseMotif could not play a note:beats token (beats must be > 0, the note one it knows), or null.
 function scoreTokenProblem(tk) {
@@ -202,8 +211,9 @@ export function validateFilm(film, ctx) {
       }
     }
 
-    // actors present in the scene (initial), then grown by enter beats; riders (rider → carrier), tracked in beat order
-    const present = new Set(), riding = new Map();
+    // actors present in the scene (initial), then grown by enter beats; riders (rider → carrier) and hoverers (in the air,
+    // "height"), tracked in beat order
+    const present = new Set(), riding = new Map(), hovering = new Set();
     if (sc.actors !== undefined && !isObj(sc.actors)) P(`${sp}.actors`, 'must be an object { castId: { at, face, pose } }');
     const sceneActors = isObj(sc.actors) ? sc.actors : {};
     for (const [id, a] of Object.entries(sceneActors)) {
@@ -226,6 +236,14 @@ export function validateFilm(film, ctx) {
       if (a.face !== undefined && !faceOK(a.face)) P(`${ap}.face`, 'must be "left" or "right"');
       if (a.pose !== undefined && rigOf[id] && !rigPose(rigOf[id], a.pose)) P(`${ap}.pose`, `rig "${rigOf[id].kind}" has no pose "${a.pose}" (poses: ${poseNames(rigOf[id]).join(', ')})`);
       if (a.expr !== undefined && rigOf[id] && !(rigOf[id].expressions || []).includes(a.expr)) Wn(`${ap}.expr`, `rig "${rigOf[id].kind}" has no expression "${a.expr}"`);
+      // starting in the air: "height" above its place ("at"), a flier only
+      if (a.height !== undefined) {
+        if (a.at === undefined) P(`${ap}.height`, 'only an actor starting at a place ("at") can start in the air');
+        else if (!(isNum(a.height) && a.height > 0)) P(`${ap}.height`, HEIGHT_UNITS);
+        else if (rigOf[id] && !canFly(rigOf[id])) P(`${ap}.height`, noHover(rigOf[id]));
+        else if (a.pose !== undefined) P(`${ap}.pose`, 'a hovering flier keeps flapping, so it takes no pose; start it on the ground (drop "height") for a pose');
+        else hovering.add(id);
+      }
     }
 
     if (!Array.isArray(sc.shots) || !sc.shots.length) { P(`${sp}.shots`, 'at least one shot is required'); return; }
@@ -291,7 +309,7 @@ export function validateFilm(film, ctx) {
         }
         if (b.at !== undefined && atIsTime && !(isNum(b.at) && b.at >= 0)) P(`${bp}.at`, 'must be a time in seconds from the shot start');
         if (b.at !== undefined && !atIsTime && !(isStr(b.at) || (isNum(b.at) && b.at >= 0))) P(`${bp}.at`, 'must be a time in seconds, or a place (actor or anchor)');
-        const known = new Set([...COMMON, ...BEAT_KEYS[kind]]);
+        const known = new Set([...COMMON, ...BEAT_KEYS[kind], ...(kind === 'do' ? DO_KEYS[b.do] || [] : [])]);
         for (const k of Object.keys(b)) if (!known.has(k) && !(kind === 'do' && b.do === 'custom')) Wn(`${bp}.${k}`, `unknown field "${k}" for a ${kind === 'do' ? `"${b.do}"` : kind} beat; ignored`);
         const whoOK = (who, p, need = true) => {
           if (who === undefined) { if (need) P(p, 'who is required'); return false; }
@@ -355,6 +373,29 @@ export function validateFilm(film, ctx) {
             else checkTarget(b.to, `${bp}.to`, { anchors, cast, S, P, allowSide: false, self: b.who, ride });
             if (d === 'fly' && R && !R.flies) P(`${bp}.do`, `rig "${R.kind}" cannot fly`);
           }
+          // hovering: "height" ends a fly / enter / place in the air, that many units above the place (fliers only);
+          // "fly": true makes a flier's enter a flight
+          const flier = canFly(R);
+          let hovers = false;
+          if (b.height !== undefined) {
+            if (!['fly', 'enter', 'place'].includes(d)) P(`${bp}.height`, `only a fly, enter or place can end in the air ("height"); a ${d} cannot`);
+            else if (!(isNum(b.height) && b.height > 0)) P(`${bp}.height`, HEIGHT_UNITS);
+            else if (R && !flier) P(`${bp}.height`, noHover(R));
+            else if (parseTarget(b.to ?? (d === 'place' ? b.at : undefined)).kind === 'on') P(`${bp}.height`, 'cannot hover and ride at once: drop "height" or the "on:" target');
+            else hovers = true;
+            if (hovers && b.pose !== undefined) P(`${bp}.pose`, 'a hovering flier keeps flapping, so it takes no pose; drop "height" to land it for a pose');
+          }
+          // a hoverer flaps in the air: it cannot sit, lie, sleep or take a pose there (it would do it in mid-air)
+          if (b.who !== undefined && hovering.has(b.who)) {
+            if (['sit', 'lie', 'sleep', 'pose'].includes(d)) P(`${bp}.do`, `"${b.who}" is hovering (flapping in the air), so it cannot ${d === 'pose' ? 'take a pose' : d} there; land it first: a fly or walk to a place without "height"`);
+            else if (d === 'set' && b.pose !== undefined) P(`${bp}.pose`, `"${b.who}" is hovering (flapping in the air), so it takes no pose; land it first: a fly or walk to a place without "height"`);
+          }
+          if (b.who !== undefined && (MOVE_DO.includes(d) || ['enter', 'exit', 'place'].includes(d))) { if (hovers) hovering.add(b.who); else hovering.delete(b.who); }
+          if (b.fly !== undefined) {
+            if (typeof b.fly !== 'boolean') P(`${bp}.fly`, 'must be true or false');
+            else if (d !== 'enter') P(`${bp}.fly`, `only an enter takes "fly" (to fly a ${d}, use "do": "fly")`);
+            else if (b.fly && R && !flier) P(`${bp}.fly`, `rig "${R.kind}" cannot fly`);
+          }
           if (b.wade !== undefined) { if (typeof b.wade !== 'boolean') P(`${bp}.wade`, 'must be true or false'); else if (d !== 'walk' && d !== 'run') P(`${bp}.wade`, 'only a walk or run can wade'); }
           if (b.depth !== undefined) { if (!(isNum(b.depth) && b.depth > 0)) P(`${bp}.depth`, 'must be a positive number of rig units (how deep the actor sinks)'); else if (!b.wade) Wn(`${bp}.depth`, 'only used with "wade": true'); }
           if (d === 'exit') { if (b.to === undefined) P(`${bp}.to`, 'where to: "left", "right" or a place'); else checkTarget(b.to, `${bp}.to`, { anchors, cast, S, P, allowSide: true, self: b.who }); present.delete(b.who); for (const [r, c] of riding) if (c === b.who) present.delete(r); }   // riders leave with their carrier
@@ -377,6 +418,7 @@ export function validateFilm(film, ctx) {
             const at = b.to !== undefined ? b.to : typeof b.at === 'string' ? b.at : undefined, lp = `${bp}.${b.to !== undefined ? 'to' : 'at'}`;
             if (at === undefined) P(`${bp}.to`, 'what to look at is required: "to": an actor, an anchor, "left", "right", "up", "sky", "down" or "none"');
             else if (!LOOK_SPECIAL.includes(at)) checkTarget(at, lp, { anchors, cast, S, P, allowSide: true, actorsOK: true });
+            if (b.tilt !== undefined && !(isNum(b.tilt) && b.tilt >= -1 && b.tilt <= 1)) P(`${bp}.tilt`, 'must be a head pitch from -1 (all the way down) to 1 (all the way up); 0.35 is a look about 16° up, "sky"\'s default');
           }
           if (d === 'turn' && !(faceOK(b.face) || b.face === 'around')) P(`${bp}.face`, 'must be "left", "right" or "around"');
           if ((d === 'emote' || b.expr !== undefined) && R) {

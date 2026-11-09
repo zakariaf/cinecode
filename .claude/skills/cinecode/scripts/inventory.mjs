@@ -1,5 +1,5 @@
 // Print the live cast and set inventory as Markdown: every registered rig (size, speeds, poses, gestures,
-// expressions, params) and every kit (anchors with type, position and scale; solid props; ambience).
+// expressions, params) and every kit (anchors with type, position and scale; props with their painted extent; ambience).
 //   node .claude/skills/cinecode/scripts/inventory.mjs [cast|sets] [films/<slug>]
 // With a film, its custom.mjs rigs and kits are registered first (loadFilm), so they are listed too.
 import { resolve } from 'node:path';
@@ -40,7 +40,9 @@ if (what !== 'cast') {
   for (const k of listKits()) {
     const name = typeof k === 'string' ? k : k.id ?? k.name, S = getKit(name)({});
     const b = S.bounds, amb = S.ambience ?? S.def?.ambience ?? {};
-    out.push(`### ${name}`, '', `${S.W}×${S.H} world px, camera centre x ${b.x0}–${b.x1}, ${S.groundAt(b.x0) != null ? 'ridge set (ground follows a slope: give x only)' : `horizon ${S.horizon}, lane y ${S.laneY}`}; ambience ${amb.day ?? '-'} / ${amb.night ?? '-'}; solid props: ${S.colliders().map(c => c.id).join(', ') || 'none'}.`, '');
+    out.push(`### ${name}`, '', `${S.W}×${S.H} world px, camera centre x ${b.x0}–${b.x1}, horizon ${S.horizon}, ${S.groundAt(b.x0) != null ? 'ridge set (ground follows a slope: give x only)' : `lane y ${S.laneY}`}; ambience ${amb.day ?? '-'} / ${amb.night ?? '-'}.`, '');
+    const props = S.props.filter(p => p.bounds).map(p => { const [x0, y0, x1, y1] = p.bounds.map(Math.round); return `${p.id}${p.solid ? '*' : ''} ${x0}–${x1} × ${y0}–${y1}`; });
+    out.push(`Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): ${props.join(', ') || 'none'}.`, '');
     out.push('| anchor | type | x | y | s | surface |', '|---|---|---|---|---|---|');
     for (const a of S.anchors()) out.push(`| ${a.name} | ${a.type}${a.prop ? ` (${a.prop})` : ''} | ${Math.round(a.x)} | ${Math.round(a.y)} | ${a.s.toFixed(2)} | ${a.surface} |`);
     out.push('');

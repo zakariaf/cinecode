@@ -16,7 +16,10 @@ export const kits = { … };      // new locations (see sets.md, "Adding a kit")
 `cinecode new` writes a working example (`templates/custom.mjs`): a custom beat that throws glints from a character,
 an overlay of sunbeams and a bell sound. `films/_test/custom.mjs` is another small one, and
 `films/seventy-six-summers/custom.mjs` with its `fx/` folder a large one (a comet, mist, a far hill, a reflection).
-Their code may import engine helpers with a relative path (`../../engine/core/lib.mjs` from `films/<slug>/`).
+Their code may import engine helpers with a relative path (`../../engine/core/lib.mjs` from `films/<slug>/`). The
+path ties the file to its depth: a copy of the film somewhere else (a repro under `out/<name>/` is one level deeper)
+fails `check` with "Cannot find module" until the path is changed (`../../../engine/…`). Code that needs only a
+seeded generator can carry its own, as the template does, and survives any copy.
 
 ## Two rules
 
@@ -81,8 +84,37 @@ A scene's `overlays` list holds custom overlay names or the built-in fields (`le
 `api.params`.
 
 An overlay can follow an actor through the scene, which is how a reskinned rig gets what it lacks (a firefly is a
-butterfly plus a glow, [cast.md](cast.md)): on the `grade` layer, take `api.actor(id)` (null while it isn't drawn), its
-world `box`, and draw at `api.toScreen` of its centre, sized by `api.cam.zoom` × the actor's `s`.
+butterfly plus a glow, [cast.md](cast.md)): on the `grade` layer, take `api.actor(id)` (null while it is off stage),
+its world `box`, and draw at `api.toScreen` of its centre, sized by `api.cam.zoom` × the actor's `s`.
+
+## Props
+
+The engine has no props: an object the story turns on is built from what it has.
+
+- **On the ground, changing state** (a strawberry that splits and is eaten): a small static rig ([adding a
+  rig](cast.md#adding-a-rig)) with a pose for each state and params for the rest (`do: set` changes them). As a cast
+  member it sorts in depth, the camera can frame it (`on`), and lint sees it. Moving actors route round it like round
+  any actor (near a small prop the detour can swing toward the camera: keep routes clear of it), and its ground
+  shadow stays until it is faded (`do: fade`).
+- **In the air** (a kite, a ball, a lantern): a stand-in flier, a butterfly hovering with `height`, moved by `fly`
+  beats and faded to 0 by its first beat (`{ "do": "fade", "who": "kite", "to": 0, "dur": 0.01 }`), carrying an
+  overlay that draws the object at its `box`. `api.actor` still returns it at opacity 0 (its `alpha` is 0), and the
+  camera frames it with `on`, so a shot can follow the kite. There is no hidden start: the stand-in is drawn in the
+  first frame of its first shot (and in the opening card's dissolve into it), so draw the object over it.
+- **Held, or on a string**: draw it from the human's hand. `api.actor` gives no hand point, but the human rig's own
+  `draw` with no canvas returns its anchors in world coordinates without drawing (not turned for a slope). The
+  animal rigs return only `head`, `mouth` and `bounds`: take a paw from the `box`.
+- **A part of the set** that has no anchor (the crown of the hill's hawthorn): its painted extent is in `api.set.props`
+  (`{ id, bounds: [x0, y0, x1, y1], solid, … }`, world px), and the skill's `inventory.mjs sets` lists every prop's.
+  A stand-in hovering at its middle (`"to": "x:3160", "height": 160` for the hawthorn: [sets.md](sets.md#hill)) puts
+  something in it.
+
+```js
+// the string of a kite: from June's front hand to the stand-in "kite"
+const a = api.actor('june'), k = api.actor('kite');
+const { hand, hands } = a.R.draw(null, a.x, a.y + (a.sink || 0), a.s, a.face, a.st);   // hands.front, hands.back
+const tip = [(k.box[0] + k.box[2]) / 2, (k.box[1] + k.box[3]) / 2];
+```
 
 ## Layers
 
@@ -90,7 +122,7 @@ Overlays and custom beats name the layer they draw on. In the order a frame is d
 
 | layer | drawn | coordinates |
 |---|---|---|
-| `sky` | after the sky, before any land | screen pixels |
+| `sky` | after the sky, before any land (the horizon is at `api.toScreen([x, api.set.horizon])`) | screen pixels |
 | `back` | after the set's back layers, before props and actors | world |
 | `world` | after props, actors and the built-in world effects (the default) | world |
 | `front` | after the set's front layers (foreground grass, branches) | world |
@@ -112,7 +144,7 @@ Overlays get `draw(ctx, api)`, custom beats `draw(ctx, u, api)`. `api` holds:
 | `st`, `su` | seconds since the scene started, and the scene's progress 0..1 |
 | `lt` | seconds since the shot started |
 | `scene`, `shot` | the plan's scene and shot records (`id`, `t0`, `t1`, …) |
-| `set` | the set: `set.anchor(name)`, `set.groundAt(x)`, `set.scaleAt(x, y)`, `set.inWater(x, y)`, … |
+| `set` | the set: `set.anchor(name)`, `set.scaleAt(x, y)`, `set.inWater(x, y)`, `set.groundAt(x)` (a ridge set's ground line; null on the others), `set.horizon` (world y), `set.props` (each prop's `id`, `bounds` `[x0, y0, x1, y1]` and `solid` footprint), … |
 | `cam` | the camera: `{ cx, cy, zoom }`, the world point at the centre of the frame and the zoom |
 | `W`, `H` | the frame size in pixels |
 | `plan` | the whole compiled plan |
@@ -120,9 +152,10 @@ Overlays get `draw(ctx, api)`, custom beats `draw(ctx, u, api)`. `api` holds:
 | `params` | the overlay's params, or the beat's fields and params |
 | `seed` | a seed for this overlay in this scene, or for this beat |
 | `name` | the overlay's or beat's name |
-| `actor(id)` | an actor on screen: its draw state (`x`, `y`, `s` scale, `face` ±1, `st` with pose, expression and talk, `asleep`, `speaking`, …) plus `head` and `mouth` points and its `box` `[x0, y0, x1, y1]`, all in world coordinates; `null` if it isn't drawn |
+| `actor(id)` | an actor on stage: its draw state (`x`, `y`, `s` scale, `face` ±1, `alpha` 0..1, `st` with pose, expression and talk, `asleep`, `speaking`, `R` its rig, …) plus `head` and `mouth` points and its `box` `[x0, y0, x1, y1]`, all in world coordinates; `null` while it is off stage (not yet entered, or exited). An actor faded to 0 is still returned. The human's hands: see [props](#props) |
 | `anchor(name)` | an anchor of the set: `{ x, y, s, type, … }` |
 | `toScreen([x, y])`, `toWorld([x, y])` | map a point between world and screen pixels |
+| `silhouette(ctx, actor)` | draw an actor (an id, or a state from `plan.actorsAt`) in screen space exactly as the frame draws it (slope pitch, turn squash, wading cut), without shadows; use it for masks and cut-outs instead of calling the rig yourself |
 
 Custom beats also get `u` (0..1 across the beat), `bt` (seconds since the beat started), `dur` and `beat` (the beat
 object itself).
@@ -145,7 +178,9 @@ export const sounds = {
 ```
 
 Use it like a built-in effect: `{ "sfx": "tiny-bell", "dur": 2, "params": { … } }`, or in a custom beat's `sfx`.
-`dur` and `params` come from the beat; `seed` is set per event. The mixer replaces non-finite samples with silence and
+`dur` and `params` come from the beat; `seed` is set per event. A sound under a whole scene (a rain bed) takes its
+length from `params` instead of the beat: `{ "sfx": "rain-bed", "params": { "dur": 30 } }` at the start of the scene
+takes no time in the shot and plays on across the cuts, while a beat-level `"dur": 30` would hold the shot for 30 s. The mixer replaces non-finite samples with silence and
 softens the first 2 ms and last 5 ms. It does **not** level a custom sound the way it levels the built-in effects:
 set the level in the function (peaks around 0.1–0.3 sit under dialogue), and adjust with the beat's `gain`.
 

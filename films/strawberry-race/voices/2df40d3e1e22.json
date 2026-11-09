@@ -1,0 +1,34 @@
+{
+ "id": "2df40d3e1e22",
+ "who": "plink",
+ "text": "Ours, then?",
+ "voice": "Puck",
+ "tone": "cheeky, quick, soft",
+ "prompt": "[cheeky, quick, soft] Ours, then?",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.07,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0,0.587,1,0.996,0.982,0.966,0.955,0.982,0.941,0.694,0.283,0,0,0,0.887,1,1,1,0.976,0.5,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "ours then",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "cheeky, quick, soft",
+    "wer": 0,
+    "transcript": "ours then",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.07
+   }
+  ]
+ }
+}

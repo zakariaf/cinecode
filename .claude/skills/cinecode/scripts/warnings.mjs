@@ -1,5 +1,6 @@
 // Print what `cinecode check` and `plan` don't: validation warnings (unknown fields, e.g. a typo that is silently
-// ignored) and compile warnings (blocked routes, perch on a rig that can't, two-shots staged too far apart).
+// ignored) and compile warnings (blocked routes, perch on a rig that can't, two-shots staged too far apart, an actor
+// dwarfed by an anchor or a much bigger actor in "on").
 //   node .claude/skills/cinecode/scripts/warnings.mjs films/<slug>
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';

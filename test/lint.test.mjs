@@ -11,7 +11,8 @@ import { join } from 'node:path';
 import { loadFilm } from '../engine/film/load.mjs';
 import { compile } from '../engine/film/compile.mjs';
 import { frameInfo } from '../engine/film/frame.mjs';
-import { lintPlan, writeLintReport, RULES, LIMITS } from '../engine/lint/lint.mjs';
+import { lintPlan, writeLintReport, RULES, LIMITS, silhouette, skyDiscs, blended } from '../engine/lint/lint.mjs';
+import { createCanvas } from '@napi-rs/canvas';
 import { ZMAX } from '../engine/film/camera.mjs';
 
 // Every fault in its own shot: a1–a2 identical framings (cut-jump), a3 a place that swaps the talkers' sides at
@@ -64,10 +65,11 @@ function perturb(plan, t0, t1, fn) {
 }
 const mid = s => [s.t0 + 0.25 * (s.t1 - s.t0), s.t0 + 0.75 * (s.t1 - s.t0)];
 
-test('every rule of the DESIGN table exists with its severity', () => {
-  assert.deepEqual(Object.keys(RULES).sort(), ['axis', 'caption-face', 'collision', 'cut-jump', 'floating', 'in-water', 'inside-solid', 'offscreen-speaker', 'scale', 'subject-size', 'teleport', 'timing']);
+test('every rule of the DESIGN table exists with its severity, and every rule says how to fix it', () => {
+  assert.deepEqual(Object.keys(RULES).sort(), ['axis', 'caption-face', 'collision', 'continuity', 'cut-jump', 'edge-cut', 'floating', 'halo', 'in-water', 'inside-solid', 'offscreen-speaker', 'scale', 'subject-size', 'tangent', 'teleport', 'timing']);
   for (const r of ['floating', 'inside-solid', 'in-water', 'teleport', 'offscreen-speaker', 'collision']) assert.equal(RULES[r].severity, 'error', r);
-  for (const r of ['subject-size', 'caption-face', 'cut-jump', 'axis', 'scale', 'timing']) assert.equal(RULES[r].severity, 'warning', r);
+  for (const r of ['subject-size', 'caption-face', 'cut-jump', 'axis', 'scale', 'timing', 'continuity', 'edge-cut', 'tangent', 'halo']) assert.equal(RULES[r].severity, 'warning', r);
+  for (const [r, R] of Object.entries(RULES)) assert.ok(typeof R.fix === 'string' && R.fix.length > 20 && typeof R.catches === 'string', r);
 });
 
 test('a speaker far outside a close-up is an error; a vo line is not', async () => {
@@ -345,6 +347,262 @@ test('the same empty view on both sides of a cut (a time-lapse into a title) is 
   assert.equal(seen.length, 1); assert.equal(seen[0].shot, 'v2');
 });
 
+// ───────────── continuity across cuts, time seen on its own after a dissolve ─────────────
+// C: Pip sits on the grass; at the cut to c2 she is standing (a "set" at the cut, never seen); in c3 she sits down
+// on screen (seen). D dissolves in (same set and time) on a d1 of Pip standing elsewhere: at 1.2 s the dissolve leaves
+// too little of it on its own to pass time; then d2 places her back on the grass, sitting, at the cut. Held 2.5 s, d1
+// passes time: only the cut into d2 jumps.
+function contFilm(d1 = 1.2) {
+  return {
+    title: 'Continuity', format: { width: 640, height: 360, fps: 24, captions: 'none' },
+    cast: { pip: { rig: 'human', params: { age: 'child' } }, hare: { rig: 'hare' } },
+    sets: { m: { kit: 'meadow' } },
+    scenes: [
+      { id: 'C', set: 'm', time: 'morning', actors: { pip: { at: 'x:1200,y:1060', face: 'right', pose: 'sit-ground' }, hare: { at: 'x:1450,y:1060', face: 'left' } },
+        shots: [
+          { id: 'c1', camera: { size: 'wide', on: ['pip', 'hare'] }, beats: [{ wait: 2 }] },
+          { id: 'c2', camera: { size: 'wide', on: ['pip', 'hare'], angle: 'high' }, beats: [{ do: 'set', who: 'pip', pose: 'stand', at: 0 }, { wait: 2 }] },
+          { id: 'c3', camera: { size: 'full', on: ['pip'] }, beats: [{ do: 'pose', who: 'pip', pose: 'sit-ground', dur: 1 }, { wait: 1 }] },
+        ] },
+      { id: 'D', set: 'm', time: 'morning', transition: 'dissolve', actors: { pip: { at: 'x:1650,y:1060', face: 'left' }, hare: { at: 'x:1450,y:1060', face: 'left' } },
+        shots: [
+          { id: 'd1', camera: { size: 'wide', on: ['pip', 'hare'] }, beats: [{ wait: 0.5 }], dur: d1 },
+          { id: 'd2', camera: { size: 'wide', on: ['pip', 'hare'], angle: 'high' }, beats: [{ do: 'place', who: 'pip', to: 'x:1250,y:1060', at: 0 }, { do: 'set', who: 'pip', pose: 'sit-ground', at: 0 }, { wait: 2 }] },
+        ] },
+    ],
+  };
+}
+
+test('a pose or place changed across a cut, unseen, is a continuity warning; across a dissolve only when it is too short to pass time', async () => {
+  const short = lintPlan(compile(await loadFilm(contFilm(1.2))), { rules: ['continuity'] }).warnings;
+  assert.deepEqual(short.map(i => i.shot), ['c2', 'd1', 'd2'], JSON.stringify(short.map(i => i.message)));
+  const [c2, d1, d2] = short;
+  assert.equal(c2.actor, 'pip'); assert.match(c2.message, /across the cut c1 → c2, pip goes from low \(drawn at 0\.\d\d× its standing height\) to standing/);
+  assert.ok(!/moves/.test(c2.message), 'she sits where she stood');
+  assert.equal(c2.frames.length, 2); assert.ok(c2.frames[0] < c2.frames[1]);
+  assert.match(d1.message, /across the dissolve c3 → d1 \(too short to pass time: d1 plays 0\.\d\d s on its own\), pip goes from low .* to standing .* and moves \d+ px/);
+  assert.match(d2.message, /across the cut d1 → d2, pip goes from standing .* to low .* and moves \d+ px/);
+  assert.ok(!short.some(i => i.actor === 'hare'), 'the hare stays put');
+  // held long enough, the dissolve passes time
+  const long = lintPlan(compile(await loadFilm(contFilm(2.5))), { rules: ['continuity'] }).warnings;
+  assert.deepEqual(long.map(i => i.shot), ['c2', 'd2']);
+});
+
+test('a shot a dissolve leaves less than 1.2 s of on its own is a timing warning, and its "dur" fixes it', async () => {
+  const plan = compile(await loadFilm(contFilm(1.2))), d1 = shotOf(plan, 'd1'), b = blended(plan, d1);
+  assert.ok(d1.t1 - d1.t0 >= LIMITS.minShot - 1e-6 && b.clean < 0.9 && b.parts.length === 1 && /dissolve from C/.test(b.parts[0].what), JSON.stringify(b));
+  assert.equal(blended(plan, shotOf(plan, 'c2')).clean, shotOf(plan, 'c2').t1 - shotOf(plan, 'c2').t0, 'a cut takes nothing');
+  const tm = lintPlan(plan, { rules: ['timing'] }).warnings.filter(i => i.shot === 'd1');
+  assert.equal(tm.length, 1, JSON.stringify(tm));
+  const m = /lasts 1\.2\d s, but 0\.\d\d s of the dissolve from C leaves it only (0\.\d\d) s on its own .*"dur": (\d\.\d\d)/.exec(tm[0].message);
+  assert.ok(m, tm[0].message);
+  // the hint works: at that length the shot plays 1.2 s on its own
+  const fixed = lintPlan(compile(await loadFilm(contFilm(+m[2]))), { rules: ['timing'] }).warnings;
+  assert.deepEqual(fixed, [], JSON.stringify(fixed));
+});
+
+// ───────────── the frame's edges ─────────────
+// Faults made by moving an actor (screen px) inside a1's middle; each message's fix, applied to the film, clears it.
+const shove = (plan, id, [t0, t1], dx, dy) => {
+  const z = plan.shotAt(t0).cameraAt(t0).zoom;
+  return perturb(plan, t0, t1, a => (a.id === id ? { ...a, x: a.x + dx / z, y: a.y + dy / z, key: a.key + dy / z } : a));
+};
+const actorAt = (plan, t, id) => { const info = frameInfo(plan, t), a = info.actors.find(x => x.id === id), st = plan.actorsAt(t, info.scene).find(x => x.id === id); return { info, a, st, sil: silhouette(plan, info, a, st) }; };
+// the film with one shot's camera offset set as a message suggests
+async function withOffset(msg, shot) {
+  const m = /"offset": \[(-?[\d.]+), (-?[\d.]+)\]/.exec(msg);
+  assert.ok(m, `an offset in: ${msg}`);
+  const film = brokenFilm(); for (const sc of film.scenes) for (const sh of sc.shots) if (sh.id === shot) sh.camera = { ...sh.camera, offset: [+m[1], +m[2]] };
+  return compile(await loadFilm(film));
+}
+
+test('an outline just touching a frame edge is a tangent, and its offset clears it', async () => {
+  const { plan } = await broken();
+  const win = mid(shotOf(plan, 'a1')), tm = (win[0] + win[1]) / 2, { sil } = actorAt(plan, tm, 'tortoise'), H = plan.H;
+  assert.equal(lintPlan(plan, { rules: ['tangent'] }).warnings.filter(i => i.shot === 'a1').length, 0, 'clear of the edges as composed');
+  // the feet 3 px above the bottom edge
+  const dy = H - 3 - sil.box[3], r = lintPlan(shove(plan, 'tortoise', win, 0, dy), { rules: ['tangent'] }).warnings;
+  assert.equal(r.length, 1, JSON.stringify(r));
+  assert.equal(r[0].actor, 'tortoise'); assert.match(r[0].message, /tortoise's outline ends \d px above the bottom edge of the frame \(a tangent\)/);
+  assert.ok(r[0].t1 - r[0].t0 >= LIMITS.edgeHold);
+  // well clear, or for a moment only, it is none
+  assert.equal(lintPlan(shove(plan, 'tortoise', win, 0, H - 40 - sil.box[3]), { rules: ['tangent'] }).warnings.length, 0);
+  assert.equal(lintPlan(shove(plan, 'tortoise', [win[0], win[0] + 0.3], 0, dy), { rules: ['tangent'] }).warnings.length, 0);
+  // the offset in the message, applied: the same feet clear the edge
+  const fixed = await withOffset(r[0].message, 'a1');
+  assert.equal(lintPlan(shove(fixed, 'tortoise', win, 0, dy), { rules: ['tangent'] }).warnings.filter(i => i.actor === 'tortoise').length, 0);
+});
+
+test('a head the frame edge cuts near its eyes, and a sliver of an actor, are edge-cuts', async () => {
+  const { plan } = await broken();
+  const win = mid(shotOf(plan, 'a1')), { a } = actorAt(plan, (win[0] + win[1]) / 2, 'tortoise');
+  assert.equal(lintPlan(plan, { rules: ['edge-cut'] }).warnings.filter(i => i.shot === 'a1').length, 0);
+  // its eyes a tenth of a head below the top edge
+  const hh = (a.headBox[2] - a.headBox[0]) / 1.2, head = lintPlan(shove(plan, 'tortoise', win, 0, 0.1 * hh - a.head[1]), { rules: ['edge-cut'] }).warnings.filter(i => i.shot === 'a1');
+  assert.equal(head.length, 1, JSON.stringify(head));
+  assert.match(head[0].message, /tortoise's head is cut by the top edge of the frame, \d+ px from its eyes: /);
+  assert.ok(head[0].marks.some(m => /head/.test(m.label)));
+  // in the medium a3, the back fifth of its box left in at the left edge, its head (it faces left) out
+  const w3 = mid(shotOf(plan, 'a3')), s3 = actorAt(plan, (w3[0] + w3[1]) / 2, 'tortoise').sil.box, left = f => shove(plan, 'tortoise', w3, -(s3[2] - f * (s3[2] - s3[0])), 0);
+  assert.equal(lintPlan(plan, { rules: ['edge-cut'] }).warnings.filter(i => i.shot === 'a3').length, 0);
+  const sl = lintPlan(left(0.2), { rules: ['edge-cut'] }).warnings.filter(i => i.shot === 'a3');
+  assert.equal(sl.length, 1, JSON.stringify(sl));
+  assert.match(sl[0].message, /only a sliver of tortoise is in frame \(\d+% of it, at the left edge, its head out\): /);
+  // half of it in is no sliver
+  assert.equal(lintPlan(left(0.5), { rules: ['edge-cut'] }).warnings.filter(i => i.shot === 'a3').length, 0);
+});
+
+// ───────────── the moon on a head ─────────────
+// (the hill's sky is open: its moon shows over the slope in a low full shot, where a meadow's trees hide it)
+function moonFilm(time = 'night') {
+  return { title: 'Moon', format: { width: 640, height: 360, fps: 24, captions: 'none' }, cast: { pip: { rig: 'human', params: { age: 'child' } } }, sets: { h: { kit: 'hill' } },
+    scenes: [{ id: 'N', set: 'h', time, actors: { pip: { at: 'x:1180', face: 'right' } }, shots: [{ id: 'n1', camera: { size: 'full', on: ['pip'], angle: 'low' }, beats: [{ wait: 3 }] }] }] };
+}
+
+test('the sky\'s discs are where the sky paints them', async () => {
+  const plan = compile(await loadFilm(moonFilm())), s = plan.shots[0], t = (s.t0 + s.t1) / 2, cam = s.cameraAt(t);
+  const [d, ...more] = skyDiscs(s.set, cam, s.skyAt(t), plan.W, plan.H);
+  assert.equal(more.length, 0); assert.equal(d.kind, 'moon'); assert.equal(d.a, 1);
+  const c = createCanvas(plan.W, plan.H), x = c.getContext('2d'); s.set.drawSky(x, cam, s.skyAt(t), t);
+  const lum = (px, py) => { const p = x.getImageData(Math.round(px), Math.round(py), 1, 1).data; return p[0] + p[1] + p[2]; };
+  assert.ok(lum(d.x, d.y) > lum(d.x + 2.5 * d.r, d.y) + 150 && lum(d.x - 0.6 * d.r, d.y) > lum(d.x - 1.6 * d.r, d.y) + 100, 'a bright disc of radius r at (x, y)');
+  // a morning sky has no disc (its sun is a glow), a crossfade weights them
+  assert.deepEqual(skyDiscs(s.set, cam, 'morning', plan.W, plan.H), []);
+  assert.equal(skyDiscs(s.set, cam, [['night', 1], ['morning', 1]], plan.W, plan.H)[0].a, 0.5);
+});
+
+test('the moon on a head is a halo, and the offset in its message moves the head off it', async () => {
+  const plan = compile(await loadFilm(moonFilm())), s = plan.shots[0], win = [s.t0 + 0.3, s.t1 - 0.3], tm = (win[0] + win[1]) / 2;
+  assert.equal(lintPlan(plan, { rules: ['halo'] }).warnings.length, 0, 'clear of the moon as composed');
+  const { info, a } = actorAt(plan, tm, 'pip'), [d] = skyDiscs(s.set, info.camera, s.skyAt(tm), plan.W, plan.H), hh = (a.headBox[2] - a.headBox[0]) / 1.2;
+  // the moon just over the crown of her head
+  const put = p => shove(p, 'pip', win, d.x - a.head[0], d.y + d.r + 0.6 * hh - a.head[1]);
+  const r = lintPlan(put(plan), { rules: ['halo'] }).warnings;
+  assert.equal(r.length, 1, JSON.stringify(r));
+  assert.match(r[0].message, /the moon (sits on|stands just over|touches) pip's head like a halo .*"offset": \[-?[\d.]+, -?[\d.]+\] moves pip/);
+  assert.ok(r[0].marks.some(m => m.kind === 'ellipse' && m.label === 'moon'));
+  // by day there is no disc to sit on
+  const day = compile(await loadFilm(moonFilm('morning')));
+  assert.equal(lintPlan(put(day), { rules: ['halo'] }).warnings.length, 0);
+  // the hint, applied
+  const m = /"offset": \[(-?[\d.]+), (-?[\d.]+)\]/.exec(r[0].message), film = moonFilm();
+  film.scenes[0].shots[0].camera.offset = [+m[1], +m[2]];
+  assert.equal(lintPlan(put(compile(await loadFilm(film))), { rules: ['halo'] }).warnings.length, 0);
+});
+
+// ───────────── framing faults: what counts, and fixes that work ─────────────
+// The camera change a message suggests ("offset", "zoom", "size", "angle"), or null for staging advice.
+function cameraFix(msg) {
+  const o = /"offset": \[(-?[\d.]+), (-?[\d.]+)\]/.exec(msg), z = /"zoom": (-?[\d.]+)/.exec(msg), s = /"size": "([\w-]+)"/.exec(msg), g = /"angle": "(\w+)"/.exec(msg);
+  const fix = { ...(o ? { offset: [+o[1], +o[2]] } : {}), ...(z ? { zoom: +z[1] } : {}), ...(s ? { size: s[1] } : {}), ...(g ? { angle: g[1] } : {}) };
+  return Object.keys(fix).length ? fix : null;
+}
+async function refilm(film, shot, fix) {
+  for (const sc of film.scenes) for (const sh of sc.shots) if (sh.id === shot) sh.camera = { ...sh.camera, ...fix };
+  return compile(await loadFilm(film));
+}
+const FRAMING = ['edge-cut', 'tangent', 'halo'];
+
+test('a tangent is measured on the part of the drawing facing the frame: a low end leaving by the side is not at the bottom', async () => {
+  const { plan } = await broken();
+  const s = shotOf(plan, 'a3'), win = mid(s), tm = (win[0] + win[1]) / 2, W = plan.W, H = plan.H, T = LIMITS.tangent * H, z = s.cameraAt(tm).zoom;
+  // the tortoise tilted (its back end down), that end leaving by the right edge 3 px above the bottom
+  const tilt = (p, dx = 0, dy = 0) => perturb(p, win[0], win[1], a => (a.id === 'tortoise' ? { ...a, pitch: 0.6, x: a.x + dx / z, y: a.y + dy / z, key: a.key + dy / z } : a));
+  const b = actorAt(tilt(plan), tm, 'tortoise').sil.box, w = b[2] - b[0], p = tilt(plan, W + 0.36 * w - b[2], H - 3 - b[3]), { sil } = actorAt(p, tm, 'tortoise');
+  assert.ok(H - sil.box[3] < T && sil.frac >= 0.5, 'its outline\'s box ends just above the bottom');
+  assert.ok(sil.edges.bottom > T && sil.edges.right < -T, `in the frame's width it ends higher, and it crosses the right edge clearly: ${JSON.stringify(sil.edges)}`);
+  assert.deepEqual(lintPlan(p, { rules: ['tangent'] }).warnings.filter(i => i.shot === 'a3'), []);
+});
+
+test('touches that come and go are not held: two 0.2 s touches 0.6 s apart are no tangent; 0.7 s in one stretch is', async () => {
+  const { plan } = await broken();
+  const s = shotOf(plan, 'a1'), { sil } = actorAt(plan, (s.t0 + s.t1) / 2, 'tortoise'), dy = plan.H - 3 - sil.box[3], t0 = s.t0 + 0.5;
+  const touch = (p, a) => shove(p, 'tortoise', [a, a + 0.2], 0, dy);
+  assert.deepEqual(lintPlan(touch(touch(plan, t0), t0 + 0.8), { rules: ['tangent'] }).warnings, []);
+  assert.equal(lintPlan(shove(plan, 'tortoise', [t0, t0 + 0.7], 0, dy), { rules: ['tangent'] }).warnings.length, 1);
+});
+
+test('a sliver of a walker at the top edge is an edge-cut (a walker is judged at the top and bottom only)', async () => {
+  const { plan } = await broken();
+  const s = shotOf(plan, 'a7'), win = mid(s), tm = (win[0] + win[1]) / 2, { sil, st } = actorAt(plan, tm, 'hare');
+  assert.equal(st.action, 'walk');
+  // its feet 12% of its height below the top edge, its head out
+  const up = shove(plan, 'hare', win, 0, 0.12 * (sil.box[3] - sil.box[1]) - sil.box[3]);
+  const r = lintPlan(up, { rules: ['edge-cut'] }).warnings.filter(i => i.shot === 'a7' && i.actor === 'hare');
+  assert.equal(r.length, 1, JSON.stringify(r));
+  assert.match(r[0].message, /only a sliver of hare is in frame \(\d+% of it, at the top edge, its head out\): /);
+  // (the shot's subject: the fix frames it in)
+  const fix = cameraFix(r[0].message);
+  assert.ok(fix, r[0].message);
+  const dz = shotOf(plan, 'a7').cameraAt(tm).zoom, fixed = await refilm(brokenFilm(), 'a7', fix), k = fixed.shotAt(tm).cameraAt(tm).zoom / dz;
+  const again = shove(fixed, 'hare', win, 0, (0.12 * (sil.box[3] - sil.box[1]) - sil.box[3]) * k);
+  assert.deepEqual(lintPlan(again, { rules: FRAMING }).warnings.filter(i => i.shot === 'a7').map(i => i.message), []);
+  // the same walker leaving by the side edge is not judged there
+  const out = shove(plan, 'hare', win, plan.W - sil.box[0] - 0.12 * (sil.box[2] - sil.box[0]), 0);
+  assert.equal(lintPlan(out, { rules: ['edge-cut'] }).warnings.filter(i => i.shot === 'a7' && i.actor === 'hare').length, 0);
+});
+
+test('a fix never brings a new framing fault: clearing one actor\'s edge would make another touch the opposite one', async () => {
+  const { plan } = await broken();
+  const s = shotOf(plan, 'a1'), win = mid(s), tm = (win[0] + win[1]) / 2, W = plan.W, z = s.cameraAt(tm).zoom;
+  // the tortoise's outline 3 px inside the right edge, the hare's 14 px inside the left one: moving the picture 11 px
+  // left clears the tortoise but brings the hare to 3 px
+  const t = actorAt(plan, tm, 'tortoise').sil.box, h = actorAt(plan, tm, 'hare').sil.box;
+  const both = p => { const d = { tortoise: (W - 3 - t[2]) / z, hare: (14 - h[0]) / z }; return perturb(p, win[0], win[1], a => (d[a.id] ? { ...a, x: a.x + d[a.id] } : a)); };
+  const r = lintPlan(both(plan), { rules: FRAMING }).warnings.filter(i => i.shot === 'a1');
+  assert.equal(r.length, 1, JSON.stringify(r)); assert.equal(r[0].actor, 'tortoise'); assert.equal(r[0].rule, 'tangent');
+  const fix = cameraFix(r[0].message);
+  assert.ok(fix, r[0].message);
+  const after = lintPlan(both(await refilm(brokenFilm(), 'a1', fix)), { rules: FRAMING }).warnings.filter(i => i.shot === 'a1');
+  assert.deepEqual(after.map(i => i.message), []);
+});
+
+// A pull-out from a close shot of pip to a full one (inside a window of the shot); a hare beside her, not framed.
+function pullFilm(cam = {}) {
+  return { title: 'Pull', format: { width: 640, height: 360, fps: 24, captions: 'none' }, cast: { pip: { rig: 'human', params: { age: 'child' } }, hare: { rig: 'hare' } }, sets: { m: { kit: 'meadow' } },
+    scenes: [{ id: 'P', set: 'm', time: 'morning', actors: { pip: { at: 'x:1180,y:1100', face: 'right' }, hare: { at: 'x:1300,y:1100', face: 'left' } },
+      shots: [{ id: 'p1', camera: { size: 'close', on: ['pip'], move: 'pull-out', to: 'full', moveAt: 1, moveDur: 2.2, ...cam }, beats: [{ wait: 4 }] }] }] };
+}
+
+test('a fix is tried on the shot\'s real camera: in a pull-out, the camera change in the message, applied, frames the head in', async () => {
+  const plan = compile(await loadFilm(pullFilm())), s = plan.shots[0], tm = s.t0 + 0.8 * (s.t1 - s.t0), W = plan.W;
+  // the hare moved so that, at the end of the pull-out, the right edge cuts its head just past its eyes
+  const { a } = actorAt(plan, tm, 'hare'), hh = (a.headBox[2] - a.headBox[0]) / 1.2, z = s.cameraAt(tm).zoom, d = (W - 0.15 * hh - a.head[0]) / z;
+  const put = p => perturb(p, -1, 1e9, x => (x.id === 'hare' ? { ...x, x: x.x + d } : x));
+  const r = lintPlan(put(plan), { rules: FRAMING }).warnings;
+  assert.equal(r.length, 1, JSON.stringify(r));
+  assert.match(r[0].message, /hare's head is cut by the right edge of the frame/);
+  const fix = cameraFix(r[0].message);
+  assert.ok(fix, r[0].message);
+  const fixed = await refilm(pullFilm(), 'p1', fix), c0 = s.cameraAt(r[0].t), c1 = fixed.shots[0].cameraAt(r[0].t);
+  assert.ok(Math.abs(c1.cx - c0.cx) * c0.zoom > 10, 'the camera moves');
+  assert.deepEqual(lintPlan(put(fixed), { rules: FRAMING }).warnings.map(i => i.message), []);
+});
+
+test('a camera its composition holds gets no "offset"; a staging is printed only when it lands there and works', async () => {
+  // a full shot of the hare at "zoom" 1.5: its head is pinned under the top edge, the picture can't move up or down;
+  // (fox: a fox standing just behind the tortoise's spot, where compile won't let it step back)
+  const film = (at = 'x:1420,y:1120', fox = false) => ({ title: 'Held', format: { width: 640, height: 360, fps: 24, captions: 'none' }, cast: { hare: { rig: 'hare' }, tortoise: { rig: 'tortoise' }, fox: { rig: 'fox' } }, sets: { m: { kit: 'meadow' } },
+    scenes: [{ id: 'A', set: 'm', time: 'morning', actors: { ...(fox ? { fox: { at: 'x:1420,y:1090', face: 'left' } } : {}), hare: { at: 'x:1200,y:1100', face: 'right' }, tortoise: { at, face: 'left' } },
+      shots: [{ id: 'h1', camera: { size: 'full', on: ['hare'], zoom: 1.5 }, beats: [{ wait: 3 }] }] }] });
+  for (const fox of [false, true]) {
+    const plan = compile(await loadFilm(film(undefined, fox))), s = plan.shots[0], win = [0.5, 2.5], tm = 1.5, z = s.cameraAt(tm).zoom;
+    // the tortoise (not framed) 200 px left and its feet 4 px above the bottom
+    const { sil } = actorAt(plan, tm, 'tortoise'), dy = (plan.H - 4 - sil.box[3]) / z;
+    const put = p => perturb(p, win[0], win[1], a => (a.id === 'tortoise' ? { ...a, x: a.x - 200 / z, y: a.y + dy, key: a.key + dy } : a));
+    const r = lintPlan(put(plan), { rules: FRAMING }).warnings;
+    assert.equal(r.length, 1, JSON.stringify(r)); assert.equal(r[0].rule, 'tangent');
+    assert.equal(cameraFix(r[0].message), null, r[0].message);
+    const m = /stage tortoise about (\d+) px (further back|nearer) \(y [−+] \d+\)/.exec(r[0].message);
+    if (fox && !m) { assert.match(r[0].message, /no "offset" or simple move of tortoise clears it here/); continue; }
+    assert.ok(m, r[0].message);
+    // applied: the tortoise stands where the message says, and the tangent is gone
+    const y = 1120 + (m[2] === 'nearer' ? 1 : -1) * +m[1], moved = compile(await loadFilm(film(`x:1420,y:${y}`, fox))), t = moved.actorsAt(tm, 'A').find(a => a.id === 'tortoise');
+    assert.ok(Math.abs(t.x - 1420) < 2 && Math.abs(t.y - y) < 2, `staged at (1420, ${y}), it lands at (${t.x}, ${t.y})`);
+    assert.deepEqual(lintPlan(put(moved), { rules: FRAMING }).warnings.map(i => i.message), []);
+  }
+});
+
 test('lint is deterministic', async () => {
   const { plan, result } = await broken();
   const again = lintPlan(plan), strip = r => JSON.stringify({ e: r.errors, w: r.warnings });
@@ -359,6 +617,7 @@ test('the report writes lint.json and lint.jpg', async () => {
     const j = JSON.parse(readFileSync(out.json, 'utf8'));
     assert.equal(j.counts.errors, result.errors.length); assert.equal(j.counts.warnings, result.warnings.length);
     assert.equal(j.errors.length, result.errors.length); assert.equal(j.limits.minShot, LIMITS.minShot);
+    assert.deepEqual(Object.keys(j.fixes), Object.keys(RULES)); assert.equal(j.fixes.halo, RULES.halo.fix);
     assert.equal(out.tiles, 3); assert.equal(out.omitted, issues(result).length - 3);
     const jpg = readFileSync(out.jpg);
     assert.ok(jpg[0] === 0xff && jpg[1] === 0xd8 && jpg.length > 20000);

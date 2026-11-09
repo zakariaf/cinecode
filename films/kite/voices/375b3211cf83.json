@@ -1,0 +1,34 @@
+{
+ "id": "375b3211cf83",
+ "who": "grandpa",
+ "text": "Well. Now the tree is flying it.",
+ "voice": "Algenib",
+ "tone": "old, warm, gentle",
+ "prompt": "[old, warm, gentle] Well. Now the tree is flying it.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 3.12,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0.494,0.686,0.856,0.953,0.997,1,0.997,0.985,0.969,0.945,0.824,0.459,0.115,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.422,0.858,0.816,0.924,0.913,0.844,0.905,0.903,0.892,0.957,0.859,0.984,1,0.878,0.544,0.274,1,1,1,1,1,0.892,0.549,0.22,0.629,0.997,0.953,0.903,0.847,0.818,0.926,0.959,1,1,0.925,0.662,0.266,0.066,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Well, now the tree is flying it.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "old, warm, gentle",
+    "wer": 0,
+    "transcript": "Well, now the tree is flying it.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 3.12
+   }
+  ]
+ }
+}

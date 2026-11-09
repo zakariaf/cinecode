@@ -342,7 +342,7 @@ export const overlays = {
 export const sounds = { 'tiny-bell': ({ seed, dur, params }) => new Float32Array(48000) };   // 48 kHz mono
 ```
 
-Overlay and custom-beat `api`: `{ t, st /* s since scene start */, su /* 0..1 scene progress */, lt /* s since shot start */, scene, shot, set, cam, W, H, plan, marks, params, seed, actor(id), anchor(name), toScreen([x, y]) → [sx, sy], toWorld([sx, sy]) → [x, y] }` (custom beats keep their `u` argument and also get these). The `world` transform is already applied for world layers; `toScreen` works in every layer.
+Overlay and custom-beat `api`: `{ t, st /* s since scene start */, su /* 0..1 scene progress */, lt /* s since shot start */, scene, shot, set, cam, W, H, plan, marks, params, seed, actor(id), anchor(name), toScreen([x, y]) → [sx, sy], toWorld([sx, sy]) → [x, y], silhouette(ctx, actor) /* the actor drawn as the frame draws it, no shadows, screen space */ }` (custom beats keep their `u` argument and also get these). The `world` transform is already applied for world layers; `toScreen` works in every layer.
 
 **Fixes owed (film):** the dissolve draws the *outgoing* scene with the *incoming* scene's actors (`picture()` must take the actors of the shot's own scene at t); the camera composes a subject's head from the highest head over the whole shot (use the resting head; ignore transient jump/gesture apexes); the validator must accept `touch` and `contact` on beats (lint reads them); `frameInfo` must apply `a.squash`.
 

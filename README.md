@@ -18,8 +18,8 @@ TTS); they are checked and cached on disk, so a voiced film re-renders the same 
    and caches the result. Shot lengths now come from the real takes.
 5. **Contact sheets.** `cinecode sheet` draws the middle frame of every shot; strips of frames show the motion. Look,
    fix `film.json`, look again.
-6. **Lint.** `cinecode lint` checks staging and editing: floating feet, speakers out of frame, captions over faces,
-   jump cuts, and more.
+6. **Lint.** `cinecode lint` checks staging and editing: floating feet, speakers out of frame, heads cut by the frame
+   edge, captions over faces, jump cuts, continuity across cuts, and more, with a fix tried for each framing fault.
 7. **Music and mix.** `cinecode mix` composes the score and mixes it with the dialogue, effects and ambience.
 8. **Animatic.** `cinecode animatic`: a quick preview at half size and 12 fps, with sound.
 9. **Render.** `cinecode render`: full HD in parallel, with an `.srt` and soft subtitles, checked with ffprobe.
@@ -36,8 +36,9 @@ TTS); they are checked and cached on disk, so a voiced film re-renders the same 
 - **Camera.** Shot sizes from establishing to extreme close-up framed on the actors you name; push-in, pull-out, pan,
   track, tilt and handheld moves; lead room, headroom and caption-safe framing; depth of field on close shots;
   dissolves between scenes.
-- **Acting.** Walks, runs, hops and flights along routes; looks, eyelines and glances at the speaker; lip sync from
-  the voice's envelope; blinking and breathing; riding on another character; wading.
+- **Acting.** Walks, runs, hops and flights along routes; fliers that hover; looks, eyelines and listeners who keep
+  watching the speaker; expressions that change behind a blink; lip sync from the voice's envelope; blinking and
+  breathing; riding on another character; wading.
 - **Voices with QA.** 30 Gemini voices, each line's direction kept short, every take transcribed and held to a word
   error rate of 0.2, up to three takes, cached by content. [docs/sound.md](docs/sound.md#voices)
 - **Music.** A procedural score in ten moods, phrased in four-bar periods, voice-led, arranged by intensity, with a
@@ -45,7 +46,8 @@ TTS); they are checked and cached on disk, so a voiced film re-renders the same 
   [docs/sound.md](docs/sound.md#music)
 - **Sound and mix.** 39 synthesized effects, automatic footsteps by surface, eight ambience beds, dialogue
   normalization, music ducking and a two-pass loudness master to −16 LUFS. [docs/sound.md](docs/sound.md)
-- **Lint.** Twelve staging and editing rules with an illustrated report. [docs/lint.md](docs/lint.md)
+- **Lint.** Sixteen staging and editing rules with an illustrated report; each framing fault comes with a camera
+  change or staging that was tried on the recompiled film. [docs/lint.md](docs/lint.md)
 - **Parallel render.** The frames are split between worker processes (by default one fewer than the CPU cores),
   each with its own x264 encoder, and the parts are joined without re-encoding.
   [docs/rendering.md](docs/rendering.md)
@@ -78,7 +80,7 @@ field.
 
 ## The demo: Seventy-Six Summers
 
-`films/seventy-six-summers/` is a 3:43 film made with cinecode: 12 scenes, 56 shots, 56 voiced lines. A
+`films/seventy-six-summers/` is a 3:45 film made with cinecode: 12 scenes, 56 shots, 56 voiced lines. A
 hundred-year-old tortoise has one day to cross the valley and keep a promise he made to a six-year-old girl the last
 time the comet came, with a squirrel riding on his shell. Its screenplay, storyboard, custom effects and voice cache
 are all in the folder, so it renders without a key:
@@ -101,7 +103,9 @@ the working method used for the demo: writing the screenplay, translating it to 
 takes, the contact-sheet review loop, custom effects, and the final render. Open Claude Code in this repository and
 ask for a film ("make a two-minute animated film about a fox who is afraid of the dark"), or point it at a screenplay
 of your own. The skill's `references/` hold quick tables of rigs, kits, voices and review checklists, and its
-`scripts/` print live inventories, voice-take audits and the warnings `check` doesn't show.
+`scripts/` print what the commands don't: live inventories of rigs and kits (with every prop's extent), the warnings
+`check` doesn't show, every beat's start and end and the marks' times (`timeline.mjs`), what each voice take says
+with its length and pauses (`takes.mjs --all`), and the score's level per shot with any quiet holes (`levels.mjs`).
 
 ## Repository layout
 
@@ -119,6 +123,8 @@ engine/
 films/
   seventy-six-summers/      the demo film
   glim/                     a 27 s film a fresh agent made from one sentence with the skill
+  kite/, strawberry-race/,
+  storm-shelter/            three ~35 s films, each made by a fresh agent from one sentence
   _test/                    a small film used by the tests
 templates/                  what `cinecode new` copies: film.json, screenplay.md, custom.mjs
 docs/                       the reference

@@ -1,0 +1,43 @@
+{
+ "id": "1d7a058012d3",
+ "who": "burr",
+ "text": "Ours, then.",
+ "voice": "Algenib",
+ "tone": "gruff, low, warm",
+ "prompt": "[gruff, low, warm] Ours, then.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 0.96,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0.732,1,1,1,1,0.992,0.966,0.88,0.709,0.386,0.104,0.042,0.319,0.925,0.969,0.943,0.86,0.669,0.458,0.224,0,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "ours then",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 2,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "gruff, low, warm",
+    "wer": 0.5,
+    "transcript": "Hours then",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.47
+   },
+   {
+    "attempt": 2,
+    "direction": "gruff, low, warm",
+    "wer": 0,
+    "transcript": "ours then",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 0.96
+   }
+  ]
+ }
+}

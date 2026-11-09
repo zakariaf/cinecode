@@ -58,8 +58,9 @@ export function chunkCaption(text, style, t0, t1, W, H) {
 }
 
 // Where a caption goes: at the bottom, or at the top when that covers less of the heads in the picture. avoid: screen
-// boxes, or { box, w } (a weight: a speaker's head counts more than a listener's). → { lines, box, top, st }
-export function layoutCaption(cap, W, H, avoid = []) {
+// boxes, or { box, w } (a weight: a speaker's head counts more than a listener's); band: true / false puts it at the
+// top / bottom whatever the heads. → { lines, box, top, st }
+export function layoutCaption(cap, W, H, avoid = [], band = null) {
   const ctx = measurer(), st = captionStyle(cap.style, W, H, cap.text); ctx.font = st.font;
   const lines = cap.lines || wrapText(ctx, cap.text, maxWidth(W, H));
   const lh = st.size * 1.28, w = Math.max(...lines.map(l => ctx.measureText(l).width)), pad = st.size * 0.4;
@@ -67,7 +68,7 @@ export function layoutCaption(cap, W, H, avoid = []) {
   const at = top => { const y0 = top ? H * 0.065 : H - H * 0.07 - blockH; return [W / 2 - w / 2 - pad, y0 - pad * 0.6, W / 2 + w / 2 + pad, y0 + blockH + pad * 0.4]; };
   const hit = b => avoid.reduce((a, o) => { const q = o.box || o; return a + (o.w ?? 1) * Math.max(0, Math.min(b[2], q[2]) - Math.max(b[0], q[0])) * Math.max(0, Math.min(b[3], q[3]) - Math.max(b[1], q[1])); }, 0);
   const bottom = at(false), topB = at(true);
-  const top = hit(bottom) > 0 && hit(topB) < hit(bottom);
+  const top = band ?? (hit(bottom) > 0 && hit(topB) < hit(bottom));
   return { lines, box: top ? topB : bottom, top, st, lh };
 }
 

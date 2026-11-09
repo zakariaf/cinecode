@@ -10,6 +10,10 @@
 // Close shots compose the range a subject's resting head covers (sub.rest, with its look up / down applied:
 // sub.heads) from the first to the last moment it is near where it stays longest: pacing about or stepping away and
 // back stays in frame; the apex of a jump or gesture, a run out of the close-up or an arrival from afar does not.
+// A gesture that holds the head somewhere for HOLD s or more (a mouse sitting up to gasp, a deer grazing) and would
+// take it out of a static or handheld close shot's frame (not an extreme close-up) is followed: the frame eases out to
+// hold it, with its crown (the ears), just before, and back after (followHeld); the rest of the shot keeps its
+// composition.
 // Placement: a framing that shows whole bodies with room to spare (a medium two-shot fitted to the width, a full
 // shot of a low, long animal) sits on the lower part of the frame like a full / wide shot instead of hanging from
 // the top; the framed region always stays inside the frame (an offset or the lead room can't push a head out), and
@@ -22,9 +26,11 @@
 // a push-in to a close-up), the camera eases back just before they would leave, to a framing that holds it all.
 // A static shot never moves: one framing, composed once for everything its subjects do over the shot (a subject
 // walking toward another stays whole in it from the first frame to the last; to tighten as they come together, a shot
-// declares a push-in "to" a size). A pan to someone who is leaving arrives while they are still whole in its last frame.
+// declares a push-in "to" a size; the one exception is following a held gesture in a close shot, above). A pan to
+// someone who is leaving arrives while they are still whole in its last frame.
 // buildCamera's reach (and frameSubjects'): how close the framing of the subjects together gets to the framing the
-// hardest of them would get alone (compile warns when a two-shot's staging keeps it under half).
+// hardest of them would get alone (compile warns when a two-shot's staging keeps it under half); reaches: the same
+// for each subject on its own size (compile warns about an actor dwarfed by an anchor or a much bigger actor).
 import { noise1 } from '../core/lib.mjs';
 import { clamp, lerp, ease, easeIO } from './util.mjs';
 
@@ -61,7 +67,7 @@ const union = (A, B) => (A ? [Math.min(A[0], B[0]), Math.min(A[1], B[1]), Math.m
  * appears at screen point `scr` (so the same composition can be re-solved at another zoom with at()).
  * opts: { W, H, angle, lead (override), zoomK (multiplier), offset: [fx, fy] (frame fractions), S (set) }
  */
-export function frameSubjects(subs, size, { W, H, angle = 'eye', zoomK = 1, offset = null, S = null, faceHint = 0, refH = null } = {}) {
+export function frameSubjects(subs, size, { W, H, angle = 'eye', zoomK = 1, offset = null, S = null, faceHint = 0, refH = null, refHs = null } = {}) {
   const spec = SIZE_SPEC[size] || SIZE_SPEC.wide;
   const px = offset && (Math.abs(offset[0]) > 2 || Math.abs(offset[1]) > 2) ? offset : null, frac = px ? null : offset;
   if (!subs.length || size === 'establishing') {
@@ -130,7 +136,17 @@ export function frameSubjects(subs, size, { W, H, angle = 'eye', zoomK = 1, offs
   // reach: how close the framing of them together gets to the framing the hardest of them to frame would get alone
   // (1: as close; well below 1: they stand too far apart, side by side or one above the other, for this size)
   const alone = Math.min(...subs.map(s => { const g = regionOf(s, size); return Math.min(sizeZ, (spec.wmax * W) / Math.max(1, g[2] - g[0]), (hfit * H) / Math.max(1, g[3] - g[1])); }));
-  return { ...at({ ref: [rcx + ox, wy + oy], scr: [sx, sy] }, zoom, W, H), reach: Math.min(1, zoom / (Math.min(alone, ZMAX) * zoomK)) };
+  // reaches: the same for each subject on its own size (its typical framed height, refHs), so a small actor framed
+  // with an anchor or a much bigger actor shows how small it reads (1: as big as it would be framed alone)
+  const zcap = ZMAX * Math.max(1, Math.min(W, H) / 1080), reaches = {};
+  for (const s of subs) {
+    const g = regionOf(s, size), gh = Math.max(1, g[3] - g[1]), e = 0.62 * s.hh, [, hb, , hd] = s.heads || [...s.head, ...s.head];
+    let z = Math.min((spec.f * H) / Math.max(1, refHs?.[s.id] ?? gh), (spec.wmax * W) / Math.max(1, g[2] - g[0]), (hfit * H) / gh) * zoomK;
+    if (!head) z = Math.min(z, ((CAPTION_BAND - 0.05) * H) / Math.max(1, hd + 0.55 * s.hh - g[1]));
+    if (spec.region === 'head') z = Math.min(z, (0.86 * H) / Math.max(1, hd - hb + 2 * e));
+    reaches[s.id] = Math.min(1, zoom / Math.min(z, zcap));
+  }
+  return { ...at({ ref: [rcx + ox, wy + oy], scr: [sx, sy] }, zoom, W, H), reach: Math.min(1, zoom / (Math.min(alone, ZMAX) * zoomK)), reaches };
 }
 // Re-solve a composition at another zoom.
 export function at(F, zoom, W, H) {
@@ -157,6 +173,98 @@ function anchored(a, b, P, W, H) {
   return u => {
     const z = a.zoom * Math.pow(b.zoom / a.zoom, u);
     return { cx: P[0] - (lerp(sa[0], sb[0], u) - W / 2) / z, cy: P[1] - (lerp(sa[1], sb[1], u) - H / 2) / z, zoom: z };
+  };
+}
+
+// How long a gesture must hold the head in one place (its offset from rest within FLAT head heights) for a close shot
+// to follow it (s).
+export const HOLD = 0.5, FLAT = 0.5;
+// The part of each sample's head offset from its resting head (a gesture: the head as drawn minus the resting head,
+// while standing still) that is held for HOLD s or more: per axis and direction, the largest offset that every sample
+// of some HOLD-long stretch around it reaches (an opening: the min over the stretch, the max over the stretches), from
+// the stretches where the head holds a place (their median offset within FLAT head heights of that level): a mouse
+// sitting up to gasp, a deer grazing; not the arc of a jump or a nod's dip.
+// subs: one subject's samples in time order; ts: their times. → [[dx, dy], ...]
+export function heldOffsets(subs, ts) {
+  const n = subs.length, d = subs.map(s => (s.moving || !s.rest ? [0, 0] : [s.head[0] - s.rest[0], s.head[1] - s.rest[1]]));
+  // the stretches: from sample j to the first sample at least HOLD later (none when the samples end first)
+  const ends = ts.map((t, j) => { let k = j; while (k < n - 1 && ts[k] - t < HOLD - 1e-6) k++; return ts[k] - t >= HOLD - 1e-6 ? k : -1; });
+  const out = d.map(() => [0, 0]);
+  for (const ax of [0, 1]) for (const sg of [1, -1]) {
+    const f = d.map(v => Math.max(0, sg * v[ax]));
+    for (let j = 0; j < n; j++) {
+      if (ends[j] < 0) continue;
+      const v = f.slice(j, ends[j] + 1).sort((a, b) => a - b), m = v[0];
+      // (a sample is held one way or the other on an axis, never both)
+      if (m > 0 && v[v.length >> 1] - m <= FLAT * subs[j].hh) for (let i = j; i <= ends[j]; i++) out[i][ax] = sg * Math.max(m, sg * out[i][ax]);
+    }
+  }
+  return out;
+}
+
+// A static or handheld close shot following the gestures that hold a head out of its frame (heldOffsets). A held head
+// (its resting head moved by the held offset, ±0.62 head heights, with its crown: how far the drawing goes over the
+// resting head, the ears, 0.62 to 1.2 head heights) should stay in the frame with a little air, or as far in as the
+// resting head is. Where it does not, the frame eases (over FOLLOW s or more, longer for a longer move) to one that
+// holds every held head with its crown and every resting face over that stretch, the base frame moved and pulled back
+// no more than that takes; holds it from just before the gesture leaves the base frame to just after it is back; and
+// eases back (a stretch too near the cut holds that frame from the cut). Holding both, no head leaves the frame however
+// the drawing times the gesture; a long move pulls back further (a deer grazing in a close-up is seen whole while it
+// grazes). cam: the shot's frame (clamped); tracks: per subject, its samples at `times` (null where absent) and their
+// held offsets (kept). → null when nothing has to move, else t → camera (not clamped).
+export const FOLLOW = 0.5;
+export function followHeld(cam, tracks, W, H, times) {
+  const z = cam.zoom, n = times.length, ext = [W, H];
+  if (n < 2) return null;
+  const dt = (times[n - 1] - times[0]) / (n - 1), M = Math.max(1, Math.ceil(0.15 / dt));
+  // (the crown: how far the drawing goes over the head at rest, its median; a gesture takes the ears along)
+  const crowns = tracks.map(({ subs, kept }) => {
+    const v = subs.flatMap((s, i) => (s && !s.moving && !kept[i][0] && !kept[i][1] ? [(s.head[1] - s.box[1]) / s.hh] : [])).sort((a, b) => a - b);
+    return clamp(v.length ? v[v.length >> 1] : 0, 0.62, 1.2);
+  });
+  // per sample, each subject standing still, on screen: its resting head (face: f; with its crown: c) and its head
+  // where it is held (with its crown; the resting face when it is not held)
+  const heads = times.map((_, i) => tracks.flatMap(({ subs, kept }, j) => {
+    const s = subs[i]; if (!s || s.moving) return [];
+    const p = s.rest || s.head, [kx, ky] = kept[i], h = s.hh * z, x = (p[0] - cam.cx) * z + W / 2, y = (p[1] - cam.cy) * z + H / 2;
+    const e = 0.62 * h, f = [x - e, y - e, x + e, y + e], c = [f[0], y - crowns[j] * h, f[2], f[3]];
+    // (held: away from its resting place by more than a little)
+    const tol = 0.15 * h, held = Math.hypot(kx, ky) * z > tol;
+    return [{ f, c, b: held ? [c[0] + kx * z, c[1] + ky * z, c[2] + kx * z, c[3] + ky * z] : f, held, tol }];
+  }));
+  // where boxes may go: the frame less a little air, or as far out as the given resting boxes already are
+  const area = (list, k) => [0, 1].map(a => [Math.min(0.02 * ext[a], ...list.map(o => o[k][a])), Math.max(0.98 * ext[a], ...list.map(o => o[k][a + 2]))]);
+  // a held head goes further out of the frame than its resting head does (with their crowns)
+  const need = heads.map(list => { const A = area(list, 'c'); return list.some(o => o.held && [0, 1].some(a => A[a][0] - o.b[a] > o.tol || o.b[a + 2] - A[a][1] > o.tol)); });
+  if (!need.some(Boolean)) return null;
+  // the frame for samples i0..i1: every held head with its crown and every resting face in it, the base frame pulled
+  // back (about its centre) and moved no more than that takes (too tall for the frame: the crowns stay); its ease (s)
+  const frameFor = (i0, i1) => {
+    const list = heads.slice(i0, i1 + 1).flat(); let Q = null, Qh = null; for (const o of list) { Q = union(union(Q, o.b), o.f); if (o.held) Qh = union(Qh, o.b); }
+    // (the held heads keep a little more room at the sides)
+    const A = area(list, 'f'), Ah = [[Math.max(A[0][0], 0.05 * W), Math.min(A[0][1], 0.95 * W)], A[1]];
+    const fitK = (B, R) => Math.min(1, (R[0][1] - R[0][0]) / (B[2] - B[0]), (R[1][1] - R[1][0]) / (B[3] - B[1]));
+    const k = Math.min(fitK(Q, A), fitK(Qh, Ah));
+    const sc = B => B.map((v, j) => ext[j % 2] / 2 + (v - ext[j % 2] / 2) * k), q = sc(Q), qh = sc(Qh);
+    const sh = [0, 1].map(a => {
+      const want = q[a + 2] - q[a] > A[a][1] - A[a][0] + 1e-6 ? A[a][0] - q[a] : Math.max(0, A[a][0] - q[a]) - Math.max(0, q[a + 2] - A[a][1]);
+      return qh[a + 2] - qh[a] > Ah[a][1] - Ah[a][0] + 1e-6 ? Ah[a][0] - qh[a] : clamp(want, Ah[a][0] - qh[a], Ah[a][1] - qh[a + 2]);
+    });
+    const F = { cx: cam.cx - sh[0] / (z * k), cy: cam.cy - sh[1] / (z * k), zoom: z * k };
+    return { F, T: Math.max(FOLLOW, Math.min(1.2, (Math.hypot(...sh) - 1.5 * H * Math.log(k)) / (1.2 * H))) };
+  };
+  // the stretches that need it (runs of samples), merged while their eases would meet
+  let spans = [];
+  need.forEach((v, i) => { if (!v) return; const L = spans[spans.length - 1]; if (L && L.i1 === i - 1) L.i1 = i; else spans.push({ i0: i, i1: i }); });
+  const close = sp => { const { F, T } = frameFor(Math.max(0, sp.i0 - M), Math.min(n - 1, sp.i1 + M)); const a = times[Math.max(0, sp.i0 - M)], b = times[Math.min(n - 1, sp.i1 + M)]; return { ...sp, F, a: a - T < times[0] ? -Infinity : a, b: b + T > times[n - 1] ? Infinity : b, T }; };
+  spans = spans.map(close);
+  for (let j = 0; j + 1 < spans.length;) {
+    if (spans[j].b + spans[j].T > spans[j + 1].a - spans[j + 1].T) spans.splice(j, 2, close({ i0: spans[j].i0, i1: spans[j + 1].i1 })); else j++;
+  }
+  return t => {
+    const sp = spans.find(sp => t > sp.a - sp.T && t < sp.b + sp.T); if (!sp) return { ...cam };
+    const w = t < sp.a ? easeIO((t - sp.a + sp.T) / sp.T) : t > sp.b ? easeIO((sp.b + sp.T - t) / sp.T) : 1;
+    return lerpCam(cam, sp.F, w);
   };
 }
 
@@ -255,6 +363,13 @@ export function buildCamera({ spec = {}, size, ids, subjectsAt: subjectsAt0, oth
     for (const t of within(win)) { let h = 0; for (const s of subjectsAt(t, list)) { const g = regionOf(s, sz); h = Math.max(h, g[3] - g[1]); } if (h > 0) hs.push(h); }
     hs.sort((a, b) => a - b); return hs.length ? hs[hs.length >> 1] : null;
   };
+  // ... and each subject's own (for how big each reads in the framing of them together)
+  const refHs = (list, sz = size, win) => {
+    const by = {};
+    for (const t of within(win)) for (const s of subjectsAt(t, list)) { const g = regionOf(s, sz); (by[s.id] ||= []).push(g[3] - g[1]); }
+    for (const id in by) { const hs = by[id].sort((a, b) => a - b); by[id] = hs[hs.length >> 1]; }
+    return by;
+  };
   // the move's window: moveAt / moveDur (s from the shot start), else the whole shot
   const windowed = spec.moveAt !== undefined || spec.moveDur !== undefined;
   const mAt = clamp(spec.moveAt ?? 0, 0, dur), mDur = Math.max(1e-3, spec.moveDur ?? dur - mAt);
@@ -264,7 +379,7 @@ export function buildCamera({ spec = {}, size, ids, subjectsAt: subjectsAt0, oth
   const span = Math.max(dur / 5, 3 / 8);
   const winA = windowed ? [t0, t0 + Math.max(mAt, span)] : null, winB = windowed ? [Math.min(t0 + mAt + mDur, t1 - span), t1] : null;
   let cameraAt, frames = {}, endF = null;
-  const F = (list, sz = size, win = null, stayOnly = false) => frameSubjects(perId(list, win, stayOnly), sz, { ...opts, refH: refH(list, sz, win) });
+  const F = (list, sz = size, win = null, stayOnly = false) => frameSubjects(perId(list, win, stayOnly), sz, { ...opts, refH: refH(list, sz, win), refHs: refHs(list, sz, win) });
   // a subject's resting head is inside a camera's frame
   const headIn = (c, s) => {
     const [x, y] = s.rest || s.head, e = 0.5 * s.hh, X = v => (v - c.cx) * c.zoom + W / 2, Y = v => (v - c.cy) * c.zoom + H / 2;
@@ -356,24 +471,36 @@ export function buildCamera({ spec = {}, size, ids, subjectsAt: subjectsAt0, oth
     }
     const Ac = clampCam(A), Bc = clampCam(B), path = anchored(Ac, Bc, P, W, H);
     frames = { from: Ac, to: re ? re.b : Bc };
+    // a close shot follows the gestures that hold a head out of its frame (an actor's samples: its held offsets)
+    let follow = null;
+    if ((move === 'static' || move === 'handheld') && size === 'close') {
+      const by = new Map();
+      times.forEach((t, i) => { for (const s of subjectsAt(t, ids)) if (s.key !== undefined) { if (!by.has(s.id)) by.set(s.id, times.map(() => null)); by.get(s.id)[i] = s; } });
+      const tracks = [...by.values()].map(subs => {
+        const ix = subs.flatMap((s, i) => (s ? [i] : [])), k = heldOffsets(ix.map(i => subs[i]), ix.map(i => times[i])), kept = subs.map(() => [0, 0]);
+        ix.forEach((i, j) => { kept[i] = k[j]; });
+        return { subs, kept };
+      });
+      follow = followHeld(Bc, tracks, W, H, times);
+    }
     if (move === 'handheld') {
       const nx = noise1(seed % 9973 + 11), ny = noise1(seed % 9973 + 23), nz = noise1(seed % 9973 + 37);
       cameraAt = t => {
-        const c = { ...Bc }, vw = W / c.zoom, vh = H / c.zoom;
+        const c = follow ? follow(t) : { ...Bc }, vw = W / c.zoom, vh = H / c.zoom;
         c.cx += (nx(t * 0.55) - 0.5) * 0.016 * vw + (nx(t * 2.1 + 40) - 0.5) * 0.003 * vw;
         c.cy += (ny(t * 0.5) - 0.5) * 0.014 * vh + (ny(t * 2.3 + 40) - 0.5) * 0.003 * vh;
         c.zoom *= 1 + (nz(t * 0.3) - 0.5) * 0.012;
         return clampCam(c);
       };
-    } else if (move === 'static') cameraAt = () => Bc;
+    } else if (move === 'static') cameraAt = follow ? t => clampCam(follow(t)) : () => Bc;
     else if (re) {
       const back = anchored(re.a, re.b, re.P, W, H);
       cameraAt = t => clampCam(t < re.t0 ? path(mu(t)) : back(easeIO((t - re.t0) / re.dur)));
     } else cameraAt = t => clampCam(path(windowed ? mu(t) : easeIO((t - t0) / dur)));
   }
-  // how close to its size the framing the shot ends on gets
-  const reach = endF?.reach ?? 1;
-  return { cameraAt, size, move, angle, frames, reach };
+  // how close to its size the framing the shot ends on gets (reaches: per subject id)
+  const reach = endF?.reach ?? 1, reaches = endF?.reaches ?? {};
+  return { cameraAt, size, move, angle, frames, reach, reaches };
 }
 
 // World rect visible to a camera.

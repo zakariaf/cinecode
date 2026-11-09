@@ -3,12 +3,14 @@
 // wading actors sunk and clipped at the waterline with a ripple ring) → world effects → [world overlays, custom
 // beats] → front layers → [front] → grade → rim light → [grade] → glowing effects → [screen] → titles → fades →
 // captions. [layer] = custom.mjs overlays of the scene and custom beats drawn on that layer (DESIGN §9.1).
-// Close shots get a depth-of-field pass: everything behind the subjects is drawn first and blurred (and, at night,
-// darkened: the moon lights the figure, not the soft world behind it); at night a close or medium shot's vignette
+// Close shots get a depth-of-field pass: everything behind the subjects (all the camera names: "on", and a push-in's or
+// pull-out's "toOn") is drawn first and blurred (and, at night, darkened: the moon lights the figure, not the soft world
+// behind it); at night a close or medium shot's vignette
 // centres on its subjects' heads. Captions avoid every head in the picture, a speaker's most (captionLayouts).
 // Actors are drawn in screen space at (world scale × zoom), so rigs thin their ink for close-ups the way a
 // painter redraws a close-up instead of enlarging the wide shot.
-// A dissolve draws the outgoing scene with that scene's own actors, overlays and rim light.
+// A dissolve draws the outgoing scene with that scene's own actors, overlays and rim light; it lasts DISSOLVE, but at
+// most DISSOLVE_SHARE of the shot it opens and of the shot it leaves (dissolveLen).
 // The sun casts shadows by time of day (castShadow, propShadow): every grounded figure's and solid prop's silhouette
 // laid across the ground away from the set's light. A memory plate ends with its torn page edge (grade.mjs deckle).
 // Titles sit where their beat's "place" says, else in the calmest band of the picture under them inside title-safe
@@ -20,13 +22,23 @@
 // the waterline).
 import { createCanvas } from '@napi-rs/canvas';
 import { grade, black, deckle, sunOf } from './grade.mjs';
-import { drawEvent, rain, zzz, airShadow, ripple, ONE_SHOT } from './fx.mjs';
+import { drawEvent, rain, zzz, airShadow, ONE_SHOT, groundTone } from './fx.mjs';
 import { layoutCaption, drawCaption, drawTitle, drawCard, titleBlock, TITLE_PLACES } from './text.mjs';
 import { viewRect, toScreen } from './camera.mjs';
 import { clamp, ease, probe, rigSizes, hash32 } from './util.mjs';
 import { canvas, rng } from '../core/lib.mjs';
+import { wadeSpans, wadeCut, wadeRing } from '../paint/water.mjs';
 
-const DISSOLVE = 0.8, SCENE_FADE = 0.35, START_FADE = 0.8, END_FADE = 1.2, CARD_DISSOLVE = 1.0;
+export const DISSOLVE = 0.8, DISSOLVE_SHARE = 0.4;
+const SCENE_FADE = 0.35, START_FADE = 0.8, END_FADE = 1.2, CARD_DISSOLVE = 1.0;
+// How long the dissolve into scene i (plan.scenes index) lasts: DISSOLVE, but never more than DISSOLVE_SHARE of the
+// shot it opens or of the shot it leaves, so a short shot is never mostly a double exposure.
+export function dissolveLen(plan, i) {
+  const sc = plan.scenes[i], prev = plan.scenes[i - 1];
+  if (!sc || !prev) return 0;
+  const inc = plan.shots.find(s => s.scene === sc.id), out = plan.shots.findLast(s => s.scene === prev.id), len = s => (s ? s.t1 - s.t0 : Infinity);
+  return Math.min(DISSOLVE, DISSOLVE_SHARE * len(inc), DISSOLVE_SHARE * len(out));
+}
 
 const SCRATCH = new Map();
 function scratch(W, H, i) {
@@ -88,14 +100,19 @@ function paintActor(c, a, P, silhouette = false) {
   c.restore();
   return P.rot ? turner(P.sx, P.sy + P.sink, P.rot).result(r) : r;
 }
-// The ripple ring where a wading actor (or a rider sunk with its carrier) meets the water: the back half before the
-// actor, the front half after it. Faint once the actor is entirely under.
-function rippleOf(a, P, t, half) {
+// The waterline where a wading actor (or a rider sunk with its carrier) meets the water (water.mjs wadeRing): a ring at
+// each place its drawing (body: a canvas holding it alone, uncut) crosses the surface, measured there (wadeSpans: the
+// trunk, a leg, the tail), and rings spreading about the whole body. Faint once it is entirely under (eased by how far
+// it still rises above the surface); none while its feet are above the water.
+function rippleOf(a, P, t, body) {
   if (P.wl == null) return null;
-  const top = P.sy + P.sink - rigSizes(a.R, a.st.params || {}).height * P.ss * 1.05;
-  if (P.sy + P.sink <= P.wl + 0.5) return null;                       // feet above the water
-  const w = rigSizes(a.R, a.st.params || {}).width * P.ss;
-  return { x: P.sx, y: P.wl, rx: Math.max(6, w * 0.42), a: top < P.wl ? 1 : 0.35, seed: hash32(a.id), half, t, s: P.ss };
+  const depth = P.sy + P.sink - P.wl;
+  if (depth <= 0.5) return null;                                       // feet above the water
+  const sz = rigSizes(a.R, a.st.params || {}), full = 0.12 * sz.height * P.ss, spans = wadeSpans(body, P.wl, { below: depth, full });
+  let x0 = P.sx - Math.max(6, sz.width * P.ss * 0.42), x1 = 2 * P.sx - x0;
+  for (const c of spans) { x0 = Math.min(x0, c.x - c.rx); x1 = Math.max(x1, c.x + c.rx); }
+  const rise = Math.max(0, ...spans.map(c => c.rise));
+  return { x: (x0 + x1) / 2, y: P.wl, rx: (x1 - x0) / 2, spans, a: 0.35 + 0.65 * clamp(rise / full, 0, 1), seed: hash32(a.id), t, s: P.ss, depth };
 }
 // The set's water in screen space, as a clip.
 function clipWater(c, S, cam, W, H) {
@@ -103,35 +120,34 @@ function clipWater(c, S, cam, W, H) {
   for (const P of S?.walk?.water || []) P.forEach(([x, y], i) => { const sx = (x - cam.cx) * z + W / 2, sy = (y - cam.cy) * z + H / 2; if (i) c.lineTo(sx, sy); else c.moveTo(sx, sy); });
   c.clip();
 }
-// The part of a wading body below the waterline, seen faintly through the water: tinted, fading with depth.
-function underwater(c, a, P, S, cam, W, H) {
+// The part of a wading body below the waterline, seen faintly through the water: tinted, fading with depth (not the
+// front of the body still above the water at its crossings: wadeCut).
+function underwater(c, a, P, S, cam, W, H, ring) {
   const [cv, x] = scratch(W, H, 'under'), hh = rigSizes(a.R, a.st.params || {}).height * P.ss;
   paintActor(x, a, { ...P, under: true }, true);
   x.globalCompositeOperation = 'source-atop'; x.fillStyle = 'rgba(58,104,124,0.72)'; x.fillRect(0, 0, W, H);
   const g = x.createLinearGradient(0, P.wl, 0, P.wl + Math.max(8, hh * 0.9));
   g.addColorStop(0, 'rgba(0,0,0,0.5)'); g.addColorStop(1, 'rgba(0,0,0,0)');
   x.globalCompositeOperation = 'destination-in'; x.fillStyle = g; x.fillRect(0, 0, W, H);
-  c.save(); clipWater(c, S, cam, W, H); c.drawImage(cv, 0, 0); c.restore();
+  c.save(); clipWater(c, S, cam, W, H); if (ring) { wadeCut(c, ring, W, H); c.clip(); } c.drawImage(cv, 0, 0); c.restore();
 }
 function drawActor(ctx, a, t, cam, W, H, drawn, S, shade = 0) {
   const P = onScreen(a, cam, W, H);
   reset(ctx);
   if (a.alpha <= 0.001) return null;
-  const back = rippleOf(a, P, t, 'back'), front = back && { ...back, half: 'front' };
   const wet = (c, fn) => { c.save(); clipWater(c, S, cam, W, H); fn(c); c.restore(); };
   const paint = c => {
-    if (back) wet(c, x => ripple(x, back));
-    let r;
-    if (P.wl == null) r = paintActor(c, a, P);
-    else {
-      // hide the body below the waterline only where it is over the water (a hind leg still on the bank stays)
-      const [cv, x] = scratch(W, H, 'wade');
-      r = paintActor(x, a, { ...P, wl: null });
-      x.save(); clipWater(x, S, cam, W, H); x.globalCompositeOperation = 'destination-out'; x.fillRect(-1, P.wl, W + 2, H - P.wl + 1); x.restore();
-      c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(cv, 0, 0); c.restore();
-      underwater(c, a, P, S, cam, W, H);
-    }
-    if (front) wet(c, x => ripple(x, front));
+    if (P.wl == null) return paintActor(c, a, P);
+    // wading: the body drawn whole aside, its waterline measured on it; the back of the waterline, the body hidden below
+    // it only where it is over the water (a hind leg still on the bank stays) and past each crossing's near arc (the
+    // front of the body above the water stays: wadeCut), the faint body under the water, the front of the waterline
+    const [cv, x] = scratch(W, H, 'wade');
+    const r = paintActor(x, a, { ...P, wl: null }), ring = rippleOf(a, P, t, x);
+    if (ring) wet(c, y => wadeRing(y, { ...ring, half: 'back' }));
+    x.save(); clipWater(x, S, cam, W, H); x.globalCompositeOperation = 'destination-out'; wadeCut(x, ring ?? { x: P.sx, y: P.wl, rx: 0 }, W, H); x.fill(); x.restore();
+    c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(cv, 0, 0); c.restore();
+    underwater(c, a, P, S, cam, W, H, ring);
+    if (ring) wet(c, y => wadeRing(y, { ...ring, half: 'front' }));
     return r;
   };
   let r;
@@ -321,6 +337,9 @@ function layerRunner(ctx, plan, shot, t, cam, actors) {
   const base = {
     t, st: t - scene.t0, su: clamp((t - scene.t0) / ((scene.t1 - scene.t0) || 1)), lt: t - shot.t0, scene, shot, set: S, cam, W, H, plan,
     marks: plan.marks || {}, actor, anchor: n => S.anchor(n),
+    // an actor (id or a plan.actorsAt state) drawn exactly as the frame draws it (slope pitch, turn squash, wading cut),
+    // without shadows, in screen space on c: for masks and silhouettes, so overlays never re-derive the placement
+    silhouette: (c, a) => { a = typeof a === 'string' ? actors.find(x => x.id === a) : a; if (a) paintActor(c, a, onScreen(a, cam, W, H), true); },
     toScreen: ([x, y]) => [(x - cam.cx) * z + W / 2, (y - cam.cy) * z + H / 2],
     toWorld: ([x, y]) => [(x - W / 2) / z + cam.cx, (y - H / 2) / z + cam.cy],
   };
@@ -337,6 +356,25 @@ function layerRunner(ctx, plan, shot, t, cam, actors) {
 
 const GLOW = new Set(['fireflies']);
 
+// Movement dust takes the colour of the ground it rises from (fx groundTone: the set's back alone around the contact,
+// in the light of the moment it is kicked up, from the shot that moment falls in), worked out once per event: a puff
+// keeps one colour all its life wherever the camera goes, and no actor, shadow or prop over the contact counts.
+const TONES = new WeakMap();
+export function dustTone(plan, e) {
+  if (!TONES.has(e)) {
+    const ref = plan.shots.find(s => s.scene === e.scene && e.t0 < s.t1) ?? plan.shots.findLast(s => s.scene === e.scene), sky = ref.skyAt(e.t0);
+    TONES.set(e, groundTone(ref.set, e.x, e.y, e.s, { t: e.t0, haze: sky, sky }));
+  }
+  return TONES.get(e);
+}
+
+// The subjects a shot's camera names: its "on", and the "toOn" a push-in / pull-out ends on (sharp the whole shot,
+// so the camera never arrives on a soft subject).
+export function focusIds(plan, shot) {
+  const to = sceneRecOf(plan, shot)?.shots?.find(s => s.out === shot)?.def?.camera?.toOn;
+  return to == null ? shot.on : [...new Set([...shot.on, ...[].concat(to)])];
+}
+
 // Depth of field radius (screen px) for a shot at zoom z: explicit, or automatic once the painted set is
 // enlarged enough to look soft.
 function dofRadius(shot, z, H) {
@@ -347,11 +385,13 @@ function dofRadius(shot, z, H) {
   return (shot.dof === true ? Math.max(5, auto) : auto) * k;
 }
 
-// The picture of a shot at time t (no captions, no fades). Returns the speakers' head boxes for captions.
+// The picture of a shot at time t (no captions, no fades).
 // The actors are those of the shot's own scene (so the outgoing scene of a dissolve keeps its cast).
 function picture(ctx, plan, shot, t, titles = true) {
   const W = plan.W, H = plan.H, S = shot.set, cam = shot.cameraAt(t), sky = shot.skyAt(t), z = cam.zoom;
   S.build();
+  // the live dust's colours first: working one out paints the set's back, in the light of its own moment
+  for (const e of plan.fx) if (e.name === 'dust' && e.scene === shot.scene && t >= e.t0 && t < e.t1) dustTone(plan, e);
   reset(ctx);
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   S.drawSky(ctx, cam, sky, t);
@@ -369,14 +409,17 @@ function picture(ctx, plan, shot, t, titles = true) {
   const sun = sunFor(S, sky);
   const items = S.propsSorted().map(p => ({ key: p.y, ord: 0, draw: () => { world(); propShadow(ctx, S, p.id, sun); world(); p.draw(ctx); } }));
   for (const a of actors) items.push({ key: a.key, ord: 1, actor: a, draw: () => { castShadow(ctx, a, onScreen(a, cam, W, H), sun, cam, W, H); drawActor(ctx, a, t, cam, W, H, drawn, S, shadeAt(S, a, sun)); } });
-  for (const e of live) if (ONE_SHOT.has(e.name)) items.push({ key: (e.key ?? e.y ?? 0) + 0.5, ord: 2, draw: () => { world(); drawEvent(ctx, e, t, { rect, zoom: z, W, H, S }); } });
+  for (const e of live) if (ONE_SHOT.has(e.name)) items.push({ key: (e.key ?? e.y ?? 0) + 0.5, ord: 2, draw: () => { world(); drawEvent(ctx, e, t, { rect, zoom: z, W, H, S, tone: e.name === 'dust' ? dustTone(plan, e) : undefined }); } });
   items.sort((a, b) => a.key - b.key || a.ord - b.ord);
-  // depth of field: blur everything behind the subjects (fading out below their feet)
+  // depth of field: blur everything behind the subjects (fading out below their feet), when a figure the camera is on
+  // is on stage. The subjects are every one the camera names (focusIds), the places among them (anchors) too.
   let i0 = 0;
   if (dofPx > 0.5) {
-    const subj = actors.filter(a => shot.on.includes(a.id));
-    if (subj.length) {
-      const focus = Math.min(...subj.map(a => a.key)) - 2, feet = Math.max(...subj.map(a => onScreen(a, cam, W, H).sy));
+    const ids = focusIds(plan, shot), subj = actors.filter(a => ids.includes(a.id));
+    if (subj.some(a => shot.on.includes(a.id))) {
+      const places = ids.filter(id => !subj.some(a => a.id === id) && S.anchorNames?.includes(id)).map(id => S.anchor(id).depth);
+      const focus = Math.min(...subj.map(a => a.key), ...places) - 2;
+      const feet = Math.max(...subj.map(a => onScreen(a, cam, W, H).sy), ...places.map(y => (y - cam.cy) * z + H / 2));
       while (i0 < items.length && items[i0].key < focus) items[i0++].draw();
       const [cv, x] = scratch(W, H, 'dof');
       x.filter = `blur(${dofPx.toFixed(1)}px)`; x.drawImage(ctx.canvas, 0, 0); x.filter = 'none';
@@ -414,9 +457,6 @@ function picture(ctx, plan, shot, t, titles = true) {
   deckle(ctx, g.story?.deckle, W, H);
   reset(ctx);
   if (titles) for (const c of plan.captions) if (c.style === 'title' && c.burn && t >= c.t0 && t < c.t1 && plan.shotAt(c.t0)?.scene === scene) drawTitle(ctx, c, t, W, H, titleY(plan, c), titleX(plan, c));
-  const heads = [];
-  for (const a of actors) if (drawn.has(a.id)) heads.push({ id: a.id, box: headBox(a, drawn.get(a.id), z), speaking: !!a.speaking });
-  return { cam, heads };
 }
 
 // What a close or medium shot is about, for the grade: the centre of its subjects' heads in the picture and a radius
@@ -501,24 +541,120 @@ function calmTitleY(plan, c) {
   return S.reduce((a, b) => (b.score < a.score ? b : a)).y;
 }
 
-// Captions burned in at t, placed away from the heads in the picture (a speaker's counts three times a listener's).
-// Several captions at once (a line and a sound caption) stack instead of overlapping.
-export function captionLayouts(plan, t, heads) {
-  const avoid = heads.map(h => ({ box: h.box, w: h.speaking === false ? 1 / 3 : 1 }));
-  const taken = [], gap = plan.H * 0.012;
-  return plan.captions.filter(c => c.burn && c.style !== 'title' && t >= c.t0 && t < c.t1)
-    .sort((a, b) => (a.style === 'sound') - (b.style === 'sound') || a.t0 - b.t0)
-    .map(c => {
-      const L = layoutCaption(c, plan.W, plan.H, avoid);
-      for (let k = 0; k < 4; k++) {
-        const hit = taken.find(b => L.box[0] < b[2] && L.box[2] > b[0] && L.box[1] < b[3] && L.box[3] > b[1]);
-        if (!hit) break;
-        const dy = L.top ? hit[3] + gap - L.box[1] : hit[1] - gap - L.box[3];
-        L.box = [L.box[0], L.box[1] + dy, L.box[2], L.box[3] + dy];
+// ───────────── burned-in captions ─────────────
+// A caption chunk is placed once for as long as it is up, so it never jumps between bands mid-line: at the bottom, or
+// at the top when the top covers less of the heads in the picture over the whole chunk (sampled every CAP_STEP s; the
+// caption's own speaker's head counts three times anyone else's, and for a sound caption every head counts the same).
+// One caption per band, and the lines come first. A line takes the band the picture gives it, at once; a newer caption
+// replaces the one up there (which fades out in CAP_SWAP s as the new one starts) instead of stacking. A sound caption
+// gives way: it takes the other band when its own is held while it would be up (by a line still being spoken, by any
+// caption up less than CAP_READ s) or a line would take its own before it has been up CAP_READ s; when both bands are
+// held it waits for one. A caption carries over a cut only while what it captions is still heard (its line still
+// spoken, a sound caption's sfx for its dur) or until it has been up CAP_READ s; otherwise it leaves with the cut, or
+// fades out by a dissolve or a fade. Worked out from the plan alone, for each run of captions that overlap in time, so
+// every render worker places a caption the same way.
+const CAP_FADE = 0.15, CAP_SWAP = 0.08, CAP_READ = 0.6, CAP_STEP = 1 / 4;
+const CAPS = new WeakMap();
+// The heads in the picture at t (screen boxes, measured as frameInfo measures them).
+function headsAt(plan, t) {
+  const shot = plan.shotAt(t);
+  if (!shot) return [];
+  const W = plan.W, H = plan.H, cam = shot.cameraAt(t);
+  return plan.actorsAt(t, shot.scene).filter(a => a.visible && a.mode !== 'off' && a.alpha > 0.001).map(a => {
+    const P = onScreen(a, cam, W, H), r = probe(a.R, P.sx, P.sy + P.sink, P.ss, a.face, { ...a.st, shadow: false }), q = a.squash ?? 1;
+    let head = [P.sx + (r.head[0] - P.sx) * q, r.head[1]];
+    if (P.rot) head = turner(P.sx, P.sy + P.sink, P.rot).pt(head);
+    return { id: a.id, box: headBox(a, { head }, cam.zoom) };
+  });
+}
+// The burned captions of a plan in runs that overlap in time (in screen order: of a line and a sound caption starting
+// together, the line first), and what a run shows (lazily): { runs: [{ t0, t1, caps }], show(run) → [{ c, L, t0, t1,
+// end, hard, swap }] } (on screen t0..t1; end: where its own fade-out ends; hard: it leaves with a cut; swap: a newer
+// caption takes its band at t1).
+function captionSchedule(plan) {
+  let S = CAPS.get(plan);
+  if (S) return S;
+  const isLine = c => c.line != null;
+  const caps = plan.captions.filter(c => c.burn && c.style !== 'title').sort((a, b) => a.t0 - b.t0 || isLine(b) - isLine(a));
+  // the shot changes: cuts, and soft ones (a dissolve or a fade between scenes, a shot's own fade in or out)
+  const changes = plan.shots.slice(1).map((s, k) => {
+    const p = plan.shots[k], soft = s.fadeIn > 0 || p.fadeOut > 0 || (s.scene !== p.scene && (sceneRecOf(plan, s)?.transition ?? 'cut') !== 'cut');
+    return { t: s.t0, hard: !soft };
+  });
+  // until when a caption must stay up: while what it captions is heard (its line, the latest one with that id, being
+  // spoken; a sound for the dur of its sfx, plan sfx times being rounded to the ms), and CAP_READ s at least
+  const hold = c => {
+    let line = null;
+    if (isLine(c)) for (const l of plan.lines || []) if (l.id === c.line && l.t0 <= c.t0 + 1e-6 && (!line || l.t0 >= line.t0)) line = l;
+    const heard = line ? line.t1 : c.t0 + Math.max(0, ...(plan.sfx || []).filter(e => !e.auto && Math.abs(e.t - c.t0) < 6e-4).map(e => e.params?.dur || 0));
+    return Math.max(heard, c.t0 + CAP_READ);
+  };
+  const runs = [];
+  for (const c of caps) { const r = runs.at(-1); if (r && c.t0 < r.t1) { r.caps.push(c); r.t1 = Math.max(r.t1, c.t1); } else runs.push({ t0: c.t0, t1: c.t1, caps: [c] }); }
+  // a caption's layout, its end (t1, hard: at a cut) and until when it holds its band (keep: a sound that waits for its
+  // band holds it CAP_READ s from when it shows)
+  const placed = new Map();
+  const place = (c, run) => {
+    if (placed.has(c)) return placed.get(c);
+    const h = hold(c), x = changes.find(x => x.t > c.t0 + 1e-6 && x.t < c.t1 && x.t >= h - 1e-6), t1 = x?.t ?? c.t1;
+    const n = Math.max(1, Math.ceil((t1 - c.t0) / CAP_STEP)), avoid = [];
+    for (let i = 0; i < n; i++) for (const hd of headsAt(plan, c.t0 + ((i + 0.5) * (t1 - c.t0)) / n)) avoid.push({ box: hd.box, w: c.who && hd.id !== c.who ? 1 / 3 : 1 });
+    let L = layoutCaption(c, plan.W, plan.H, avoid), shows = c.t0;
+    if (!isLine(c)) {
+      // a sound's room in a band: from when the captions before it let go of the band until a line takes it
+      const room = top => {
+        let from = c.t0, until = t1, after = false;
+        for (const p of run.caps) {
+          if (p === c) { after = true; continue; }
+          if (after && !isLine(p)) continue;
+          const e = place(p, run);
+          if (e.L.top !== top) continue;
+          if (after) until = Math.min(until, p.t0); else from = Math.max(from, e.keep);
+        }
+        return { from, len: until - from, read: from <= c.t0 + 1e-6 && until - c.t0 >= Math.min(t1 - c.t0, CAP_READ) - 1e-6 };
+      };
+      const own = room(L.top), other = room(!L.top), flip = !own.read && (other.read || other.len > own.len + 1e-6);
+      if (flip) L = layoutCaption(c, plan.W, plan.H, avoid, !L.top);
+      shows = (flip ? other : own).from;
+    }
+    const e = { L, t1, hard: !!x?.hard, keep: Math.min(t1, Math.max(h, shows + CAP_READ)) };
+    placed.set(c, e);
+    return e;
+  };
+  // what a run shows, band by band in screen order: a line takes its band at once, a sound once the band is let go
+  const show = run => {
+    if (run.shown) return run.shown;
+    const on = new Map();
+    for (const top of [false, true]) {
+      const up = [];
+      for (const c of run.caps) {
+        const e = place(c, run);
+        if (e.L.top !== top) continue;
+        const s = { c, L: e.L, t0: c.t0, t1: e.t1, end: e.t1, hard: e.hard, keep: e.keep, swap: false };
+        if (!isLine(c)) for (const p of up) if (p.t1 > s.t0 && p.keep > s.t0) s.t0 = Math.min(p.keep, p.t1);
+        if (s.t0 >= s.t1) continue;
+        for (const p of up) if (p.t1 > s.t0) { p.t1 = Math.max(p.t0, s.t0); p.swap = true; }
+        up.push(s); on.set(c, s);
       }
-      taken.push(L.box);
-      return { c, L, alpha: Math.min(ease((t - c.t0) / 0.15), ease((c.t1 - t) / 0.15)) };
-    });
+    }
+    return (run.shown = run.caps.map(c => on.get(c)).filter(s => s && s.t1 > s.t0));
+  };
+  CAPS.set(plan, (S = { runs, show }));
+  return S;
+}
+// The captions burned in at t: [{ c, L, alpha }].
+export function captionLayouts(plan, t) {
+  const { runs, show } = captionSchedule(plan), out = [];
+  for (const run of runs) {
+    if (run.t0 > t) break;
+    if (t >= run.t1) continue;
+    for (const s of show(run)) {
+      if (t < s.t0 || t >= s.t1) continue;
+      const fadeOut = Math.min(s.swap ? ease((s.t1 - t) / CAP_SWAP) : 1, s.hard ? 1 : ease((s.end - t) / CAP_FADE));
+      out.push({ c: s.c, L: s.L, alpha: Math.min(ease((t - s.t0) / CAP_FADE), fadeOut) });
+    }
+  }
+  return out;
 }
 
 function fadeAmount(plan, shot, t) {
@@ -535,20 +671,21 @@ function fadeAmount(plan, shot, t) {
   return a;
 }
 
-// The full scene frame at t: picture, dissolve from the previous scene, fades. → heads for captions
+// The full scene frame at t: picture, dissolve from the previous scene, fades.
 function sceneFrame(ctx, plan, shot, t) {
-  const W = plan.W, H = plan.H, out = picture(ctx, plan, shot, t);
+  const W = plan.W, H = plan.H;
+  picture(ctx, plan, shot, t);
   const rec = sceneRecOf(plan, shot), scenes = plan._scenes || [], i = scenes.indexOf(rec);
-  if (rec && i > 0 && rec.transition === 'dissolve' && t - rec.t0 < DISSOLVE) {
+  const d = rec && i > 0 && rec.transition === 'dissolve' ? dissolveLen(plan, i) : 0;
+  if (t - rec?.t0 < d) {
     const prev = scenes[i - 1], pshot = [...plan.shots].reverse().find(s => s.scene === prev.id);
     if (pshot) {
       const [cv, x] = scratch(W, H, 'dissolve');
       picture(x, plan, pshot, t);
-      reset(ctx); ctx.globalAlpha = 1 - ease((t - rec.t0) / DISSOLVE); ctx.drawImage(cv, 0, 0); reset(ctx);
+      reset(ctx); ctx.globalAlpha = 1 - ease((t - rec.t0) / d); ctx.drawImage(cv, 0, 0); reset(ctx);
     }
   }
   black(ctx, fadeAmount(plan, shot, t), W, H);
-  return out;
 }
 
 /** Draw the frame at film time t into a W×H context. */
@@ -561,9 +698,9 @@ export function drawFrame(ctx, plan, t) {
     if (card) { drawCardFrame(ctx, plan, card, tt); return; }
     const shot = plan.shotAt(tt) ?? plan.shots[plan.shots.length - 1];
     if (!shot) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); return; }
-    const { heads } = sceneFrame(ctx, plan, shot, tt);
+    sceneFrame(ctx, plan, shot, tt);
     reset(ctx);
-    if (plan.captionMode !== 'none') for (const { L, alpha } of captionLayouts(plan, tt, heads)) drawCaption(ctx, L, alpha, W, H);
+    if (plan.captionMode !== 'none') for (const { L, alpha } of captionLayouts(plan, tt)) drawCaption(ctx, L, alpha, W, H);
   } finally { ctx.restore(); }
 }
 
@@ -601,7 +738,7 @@ function drawCardFrame(ctx, plan, card, t) {
 export function frameInfo(plan, t) {
   const W = plan.W, H = plan.H, shot = plan.shotAt(t);
   if (!shot) return { t, shot: null, scene: null, set: null, camera: null, actors: [], captionBox: null, captions: [], colliders: [], card: plan.cards.find(c => t >= c.t0 && t < c.t1)?.kind ?? null };
-  const cam = shot.cameraAt(t), z = cam.zoom, heads = [];
+  const cam = shot.cameraAt(t), z = cam.zoom;
   const toWorld = b => [(b[0] - W / 2) / z + cam.cx, (b[1] - H / 2) / z + cam.cy, (b[2] - W / 2) / z + cam.cx, (b[3] - H / 2) / z + cam.cy];
   const actors = plan.actorsAt(t, shot.scene).filter(a => a.visible && a.mode !== 'off' && a.alpha > 0.001).map(a => {
     const P = onScreen(a, cam, W, H), r = probe(a.R, P.sx, P.sy + P.sink, P.ss, a.face, { ...a.st, shadow: false });
@@ -611,7 +748,6 @@ export function frameInfo(plan, t) {
     // on a slope the (squashed) drawing turns about the contact point
     if (P.rot) { const T = turner(P.sx, P.sy + P.sink, P.rot); box = T.box(box); head = T.pt(head); }
     const hb = headBox(a, { head }, z);
-    heads.push({ id: a.id, box: hb, speaking: !!a.speaking });
     // wading (or riding a wading carrier): the drawing below the waterline is hidden
     const vis = P.wl == null ? box.slice() : [box[0], Math.min(box[1], P.wl), box[2], Math.min(box[3], P.wl)];
     return {
@@ -621,7 +757,7 @@ export function frameInfo(plan, t) {
       squash: q, sink: a.sink || 0, waterline: P.wl, wade: a.wade, carrier: a.carrier, tilt: a.st.tilt ?? 0, pitch: a.pitch || 0, slope: a.slope || 0,
     };
   });
-  const caps = plan.captionMode === 'none' ? [] : captionLayouts(plan, t, heads);
+  const caps = plan.captionMode === 'none' ? [] : captionLayouts(plan, t);
   return {
     t, shot: shot.id, scene: shot.scene, set: shot.setId, size: shot.size, camera: cam, view: viewRect(cam, W, H), actors,
     captionBox: caps[0]?.L.box ?? null, captions: caps.map(c => ({ text: c.c.text, style: c.c.style, box: c.L.box, top: c.L.top })),

@@ -1,0 +1,34 @@
+{
+ "id": "347f7a64c0cc",
+ "who": "burr",
+ "text": "The last strawberry. Mine!",
+ "voice": "Algenib",
+ "tone": "gruff, low, greedy",
+ "prompt": "[gruff, low, greedy] The last strawberry. Mine!",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 3.76,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0.181,0.862,0.995,0.973,0.951,0.929,0.93,0.999,1,1,0.981,0.97,0.97,0.99,0.896,0.631,0.32,0.109,0,0,0,0,0.063,0.14,0.147,0.059,0.225,0.195,0.819,0.891,0.923,0.923,0.91,0.874,0.74,0.557,0.948,1,0.999,0.976,0.982,0.99,0.952,0.892,0.803,0.675,0.483,0.299,0.24,0.2,0.049,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.056,0.11,0.4,0.597,1,1,1,1,1,1,0.984,0.907,0.782,0.672,0.73,0.774,0.673,0.56,0.628,0.714,0.659,0.589,0.377,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "The last strawberry mine",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "gruff, low, greedy",
+    "wer": 0,
+    "transcript": "The last strawberry mine",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 3.76
+   }
+  ]
+ }
+}

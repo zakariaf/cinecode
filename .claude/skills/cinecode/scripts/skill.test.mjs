@@ -122,3 +122,152 @@ test('the inventory works from another working directory', () => {
   const out = execFileSync(process.execPath, [join(SKILL, 'scripts/inventory.mjs'), 'sets'], { cwd: SKILL, encoding: 'utf8' });
   assert.match(out, /^### village$/m);
 });
+
+test('every lint rule is in docs/lint.md (table and section) and in the review reference\'s lint table', async () => {
+  const { RULES } = await import(join(ROOT, 'engine/lint/lint.mjs'));
+  const lint = readFileSync(join(ROOT, 'docs/lint.md'), 'utf8'), review = readFileSync(join(SKILL, 'references/review.md'), 'utf8');
+  for (const [rule, R] of Object.entries(RULES)) {
+    assert.match(lint, new RegExp(`^\\| \`${rule}\` \\| ${R.severity}`, 'm'), `docs/lint.md rule table is missing ${rule} (${R.severity})`);
+    assert.match(lint, new RegExp(`^### ${rule}$`, 'm'), `docs/lint.md has no section for ${rule}`);
+    assert.match(review, new RegExp(`^\\| ${rule} \\|`, 'm'), `references/review.md lint table is missing ${rule}`);
+  }
+});
+
+test('hovering ("height", enter "fly") and a look\'s "tilt" are valid fields and documented; no doc says fliers can\'t hover', async () => {
+  const { validateFilm } = await import(join(ROOT, 'engine/film/validate.mjs'));
+  const { getRig, listRigs } = await import(join(ROOT, 'engine/cast/index.mjs'));
+  const { getKit, listKits } = await import(join(ROOT, 'engine/set/kits/index.mjs'));
+  const film = {
+    title: 'Hover', cast: { tilly: { rig: 'mouse' }, wren: { rig: 'songbird' }, owl: { rig: 'owl' } }, sets: { meadow: { kit: 'meadow' } },
+    scenes: [{ id: 's01', set: 'meadow', actors: { tilly: { at: 'x:1500' }, wren: { at: 'x:1600', height: 40 }, owl: { offstage: 'left' } },
+      shots: [{ id: '1.1', camera: { size: 'full', on: ['tilly'] }, beats: [
+        { do: 'look', who: 'tilly', to: 'wren', tilt: 0.4 },
+        { do: 'enter', who: 'owl', from: 'left', to: 'x:1300', height: 50, fly: true },
+        { do: 'fly', who: 'wren', to: 'near:tilly', height: 20 },
+        { do: 'place', who: 'owl', to: 'x:1200', height: 30 },
+      ] }] }],
+  };
+  const r = validateFilm(film, { getRig, rigKinds: listRigs(), kits: new Set(listKits()), sets: { meadow: getKit('meadow')({}) }, custom: {}, overlays: {}, sounds: {} });
+  assert.deepEqual(r.problems.map(x => x.message), []);
+  assert.deepEqual(r.warnings.map(x => x.message), []);
+  const quick = readFileSync(join(SKILL, 'references/storyboard-quick.md'), 'utf8'), board = readFileSync(join(ROOT, 'docs/storyboard.md'), 'utf8');
+  for (const [name, text] of [['references/storyboard-quick.md', quick], ['docs/storyboard.md', board]]) {
+    assert.match(text, /^\| `do: look` \|.*`tilt`|^\| `look` \|.*`tilt`/m, `${name}: the look row lists "tilt"`);
+    for (const d of ['fly', 'enter', 'place']) assert.match(text, new RegExp(`^\\| \`(do: )?[a-z /]*\\b${d}\\b[a-z /]*\` \\|.*\`height\``, 'm'), `${name}: the ${d} row lists "height"`);
+    assert.match(text, /`"?fly"?: true`/, `${name}: enter's "fly": true`);
+  }
+  assert.match(board, /^### Hovering$/m);
+  const all = [...docs(), ...readdirSync(join(ROOT, 'docs')).filter(f => f.endsWith('.md')).map(f => ({ p: join(ROOT, 'docs', f), text: readFileSync(join(ROOT, 'docs', f), 'utf8') }))];
+  for (const { p, text } of all) assert.doesNotMatch(text, /fliers can't hover|no rig hovers|nothing is in the air|no point in the air/i, `${p} still says fliers can't hover`);
+});
+
+// A throwaway film folder (removed by the caller): film.json from an object.
+const tmpFilm = (film) => { const dir = mkdtempSync(join(tmpdir(), 'cinecode-skill-')); writeFileSync(join(dir, 'film.json'), JSON.stringify(film)); return dir; };
+const allDocs = () => [...docs(), ...readdirSync(join(ROOT, 'docs')).filter(f => f.endsWith('.md')).map(f => ({ p: join(ROOT, 'docs', f), text: readFileSync(join(ROOT, 'docs', f), 'utf8') })), { p: 'templates/screenplay.md', text: readFileSync(join(ROOT, 'templates/screenplay.md'), 'utf8') }];
+
+test('takes.mjs --all prints every take, with its length against the estimate and the pauses inside it', async () => {
+  const { loadPlan } = await import(join(ROOT, 'engine/render/film-source.mjs'));
+  const { resolveLine } = await import(join(ROOT, 'engine/audio/voice.mjs'));
+  const { encodeWav } = await import(join(ROOT, 'engine/audio/wav.mjs'));
+  const text = readFileSync(join(SKILL, 'references/storyboard-quick.md'), 'utf8');
+  const dir = tmpFilm(JSON.parse(/```json\n([\s\S]*?)\n```/.exec(text)[1]));
+  try {
+    const { film, plan } = await loadPlan(dir), voices = join(dir, 'voices');
+    mkdirSync(voices);
+    const L = resolveLine(film, plan.lines[1]), sr = 48000;
+    // 0.5 s of sound, 0.6 s of silence, 0.5 s of sound: "Mine, I think." (3 words, estimate 1.45 s) at 1.6 s
+    const x = new Float32Array(Math.round(1.6 * sr)).map((_, i) => (i < 0.5 * sr || i >= 1.1 * sr ? 0.2 * Math.sin(i / 7) : 0));
+    writeFileSync(join(voices, `${L.id}.wav`), encodeWav([x], sr, 16));
+    writeFileSync(join(voices, `${L.id}.json`), JSON.stringify({ id: L.id, who: L.who, text: L.text, voice: L.voice, tone: L.tone, prompt: `[${L.tone}] ${L.text}`, qa: { wer: 0, transcript: 'Mine, I think.', leading: 0, pass: true, take: 1, takes: [{ attempt: 1, direction: L.tone, wer: 0, transcript: 'Mine, I think.' }] } }));
+    const quiet = run('takes.mjs', dir), all = run('takes.mjs', dir, '--all');
+    assert.equal(all.status, 0, all.stderr);
+    assert.doesNotMatch(quiet.stdout, new RegExp(`^ {2}${L.id} `, 'm'), 'without --all a clean take is not printed');
+    assert.match(all.stdout, new RegExp(`^ {2}${L.id} `, 'm'), 'with --all it is');
+    assert.match(all.stdout, /heard: Mine, I think\./);
+    assert.match(all.stdout, /length 1\.60 s \(estimate 1\.45 s\); pause 0\.60 s at 0\.50 s/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+  const skill = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+  assert.match(skill, /takes\.mjs films\/<slug> --all/, 'SKILL.md step 4 runs takes.mjs with --all');
+});
+
+test('timeline.mjs prints each beat\'s times, a move that runs past its cut, mark times, and a pose or gesture lost under a move', () => {
+  const dir = tmpFilm({ title: 'T', cast: { a: { rig: 'human' }, d: { rig: 'deer' } }, sets: { m: { kit: 'meadow' } },
+    scenes: [{ id: 's', set: 'm', actors: { a: { at: 'x:900', face: 'right' }, d: { at: 'x:1700', face: 'left' } }, shots: [
+      { id: '1.1', dur: 1.5, camera: { size: 'wide', on: ['a'] }, beats: [{ do: 'walk', who: 'a', to: 'x:1300' }, { mark: 'go', at: 0.5 }] },
+      { id: '1.2', camera: { size: 'wide', on: ['a'] }, beats: [{ do: 'pose', who: 'a', pose: 'sit-ground', at: 0.3 }, { wait: 3 }] },
+      { id: '1.3', camera: { size: 'wide', on: ['d'] }, beats: [{ do: 'walk', who: 'd', to: 'x:1500' }, { do: 'gesture', who: 'd', name: 'jump', with: 'prev', after: 0.3 }] }] }] });
+  try {
+    const r = run('timeline.mjs', dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^1\.1 {2}0:00\.00–0:01\.50 {2}1\.50 s \(fixed dur\)$/m);
+    assert.match(r.stdout, /walk a → x:1300 {3}runs on into 1\.2 \(to \+\d\.\d\d\)/);
+    assert.match(r.stdout, /pose a sit-ground {3}! during a's walk .*end pose replaces it/);
+    assert.match(r.stdout, /gesture d jump {3}! during d's walk .*legs keep the gait/);
+    assert.match(r.stdout, /^marks: go 0:00\.50 \(0\.50 s\)$/m);
+    assert.equal(run('timeline.mjs').status, 2, 'usage error without a film');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('levels.mjs flags a quiet hole under a music cue that a whole-shot mean hides', async () => {
+  const { encodeWav } = await import(join(ROOT, 'engine/audio/wav.mjs'));
+  const dir = tmpFilm({ title: 'L', cast: { a: { rig: 'mouse' } }, sets: { m: { kit: 'meadow' } },
+    scenes: [{ id: 's', set: 'm', music: { mood: 'playful' }, actors: { a: { at: 'x:1000' } }, shots: [
+      { id: '1.1', dur: 4, camera: { size: 'full', on: ['a'] } }, { id: '1.2', dur: 4, camera: { size: 'close', on: ['a'] } }] }] });
+  try {
+    mkdirSync(join(dir, 'out'));
+    const sr = 48000, wav = hole => { const x = new Float32Array(8 * sr).map((_, i) => (hole && i >= 5 * sr && i < 6.5 * sr ? 0 : 0.1 * Math.sin(i / 9))); writeFileSync(join(dir, 'out/music.wav'), encodeWav([x, x], sr, 16)); };
+    wav(true);
+    let r = run('levels.mjs', dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^1\.2 .*! {2}playful {3}quiet 0:05\.0–0:06\.5$/m);
+    assert.match(r.stdout, /1 quiet stretch under a cue\. .*"downbeat": true.*"hold": true/);
+    wav(false);
+    r = run('levels.mjs', dir);
+    assert.match(r.stdout, /^no quiet stretches under a cue$/m);
+    assert.equal(run('levels.mjs').status, 2, 'usage error without a film');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+  assert.match(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'), /scripts\/levels\.mjs films\/<slug>/, 'SKILL.md step 7 uses levels.mjs');
+});
+
+test('the set inventory and reference give every prop\'s painted extent (the hill\'s hawthorn has no anchor)', async () => {
+  const { getKit } = await import(join(ROOT, 'engine/set/kits/index.mjs'));
+  const [x0, y0, x1, y1] = getKit('hill')({}).props.find(p => p.id === 'hawthorn').bounds.map(Math.round);
+  const line = `hawthorn* ${x0}–${x1} × ${y0}–${y1}`;
+  assert.ok(run('inventory.mjs', 'sets').stdout.split('\n').some(l => l.startsWith('Props (painted extent') && l.includes(line)), `inventory prints "${line}"`);
+  assert.ok(readFileSync(join(SKILL, 'references/sets.md'), 'utf8').includes(line), 'references/sets.md is regenerated with the prop extents');
+  const fx = readFileSync(join(ROOT, 'docs/effects.md'), 'utf8');
+  for (const f of ['set.props', 'set.horizon', '`alpha`', 'hands.front']) assert.ok(fx.includes(f), `docs/effects.md documents ${f}`);
+});
+
+test('engine facts the skill teaches: a gesture reads only its name, a move ends standing and replaces a pose under it, a long sfx in params takes no time', async () => {
+  const { loadPlan } = await import(join(ROOT, 'engine/render/film-source.mjs'));
+  const { probe } = await import(join(ROOT, 'engine/film/util.mjs'));
+  const film = extra => ({ title: 'F', cast: { a: { rig: 'human' } }, sets: { m: { kit: 'meadow' } }, scenes: [{ id: 's', set: 'm', actors: { a: { at: 'x:900', face: 'right' } }, shots: [
+    { id: '1.1', dur: 1.5, camera: { size: 'wide', on: ['a'] }, beats: [{ do: 'walk', who: 'a', to: 'x:1300' }, { sfx: 'wind', params: { dur: 9 } }] },
+    { id: '1.2', camera: { size: 'wide', on: ['a'] }, beats: [{ do: 'pose', who: 'a', pose: 'sit-ground', at: 0.3 }, { do: 'gesture', who: 'a', name: 'point', ...extra }, { wait: 3 }] }] }] });
+  const dirs = [tmpFilm(film({})), tmpFilm(film({ to: 'down' }))];
+  try {
+    const [A, B] = await Promise.all(dirs.map(d => loadPlan(d)));
+    const s2 = A.plan.shots[1], st = (P, t) => P.plan.actorsAt(t).find(x => x.id === 'a');
+    assert.ok(Math.abs(A.plan.shots[0].t1 - 1.5) < 1e-6, 'the 9 s wind (dur in params) does not hold its shot');
+    const box = (P, t) => { const a = st(P, t); return probe(a.R, 0, 0, 1, 1, { ...a.st, shadow: false }).bounds; };
+    assert.ok(-box(A, s2.t1 - 0.1)[1] > 130, 'the pose under the carried walk is replaced: she ends standing');
+    const g = s2.t0 + 4.6;   // mid-point
+    assert.deepEqual(box(A, g), box(B, g), 'a "to" on a gesture changes nothing');
+  } finally { for (const d of dirs) rmSync(d, { recursive: true, force: true }); }
+  const quick = readFileSync(join(SKILL, 'references/storyboard-quick.md'), 'utf8'), board = readFileSync(join(ROOT, 'docs/storyboard.md'), 'utf8');
+  for (const [name, text] of [['storyboard-quick', quick], ['docs/storyboard.md', board]]) {
+    assert.match(text, /default `stand`|ends in `stand`/, `${name}: a move ends in stand`);
+    assert.match(text, /move's end pose replaces it|replaced by the move's end pose/, `${name}: a pose under a move is replaced`);
+    assert.match(text, /"params": \{ "dur": 30 \}/, `${name}: a long sound in params takes no time`);
+  }
+  for (const { p, text } of allDocs()) assert.doesNotMatch(text, /`point` aims with `to`/, `${p} says a gesture beat's "to" aims the point`);
+});
+
+test('title cards: no doc recommends a card shorter than the 3 s it takes to be read', () => {
+  for (const { p, text } of allDocs()) {
+    assert.doesNotMatch(text, /2–2\.5 s each|2-2\.5 s/, `${p} recommends 2–2.5 s cards (they never reach full strength)`);
+    for (const m of text.matchAll(/cards? (?:of )?(\d+(?:\.\d+)?) s each|(\d+(?:\.\d+)?) s each \(/g)) assert.ok(Number(m[1] ?? m[2]) >= 3, `${p}: "${m[0]}"`);
+  }
+  assert.match(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'), /^\| about 30 s \| 1 \| 5–6 \|/m, 'SKILL.md has a row for about 30 s');
+});

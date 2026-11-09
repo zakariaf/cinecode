@@ -1,7 +1,8 @@
 # Lint: staging and editing checks
 
 `lint` finds the things that make a film look wrong even when every frame renders: a character standing on air or
-inside a tree, a speaker out of frame, a caption over a face, two near-identical shots cut together.
+inside a tree, a speaker out of frame, a head cut by the frame edge, the moon sitting on a head like a halo, a
+caption over a face, two near-identical shots cut together, a character who changes pose or place across a cut.
 
 ```sh
 node bin/cinecode.mjs lint films/my-film              # → films/my-film/out/lint.json + lint.jpg
@@ -11,21 +12,39 @@ node bin/cinecode.mjs lint films/my-film --step=0.5   # sample less often: faste
 It compiles the film (unvoiced lines use estimated lengths) and samples it on real frame times: every `--step`
 seconds (default 1/6), every beat and line boundary, and the first and last frame of each shot. Teleports are checked
 on every frame. Hits of the same rule, actor and shot less than a second apart merge into one issue spanning their
-time range, reported at its worst moment. The command prints every issue and exits with status 1 when there is at
-least one error (warnings alone exit 0):
+time range, reported at its worst moment. A framing fault (`edge-cut`, `tangent`, `halo`) counts only when it is held
+for 0.5 s in one stretch, so a move sweeping past an edge or a figure turning is not an issue. The command prints every
+issue and exits with status 1 when there is at least one error (warnings alone exit 0):
 
 ```
-lint     2 errors, 3 warnings → films/lintdemo/out/lint.json, lint.jpg    2.9 s
+lint     2 errors, 4 warnings → films/lintdemo/out/lint.json, lint.jpg    3.5 s
   error  offscreen-speaker 1.3        0:17.9  hare speaks "Only me. I was having a nap." from outside the frame (mark the line "vo": true or frame the speaker) (17.9–20.9 s)
   error  offscreen-speaker 1.4        0:21.9  pip speaks "Then wake up! Race you to the pond!" but only 37% of their face is visible: 63% is outside the frame
   warn   cut-jump          1.4        0:21.4  the cut 1.3 → 1.4 joins two nearly identical framings (zoom ×1.00, shift 0% of the frame): change the size, the subject or the angle
   warn   subject-size      1.4        0:21.9  extreme-close shot on pip, but pip's face region is not in frame
+  warn   caption-face      1.4        0:22.4  the caption "Then wake up! Race you to the pond!" sits over pip's face while they speak (86% overlap)
   warn   timing            1.4b       0:26.1  shot 1.4b lasts 0.79 s (shorter than 1.2 s)
 cinecode lint: lint found 2 errors
 ```
 
 That is the starter film broken on purpose: two extreme close-ups of Pip in a row while the hare speaks, and a
-0.8 s shot (`1.4b`). Sampling every 0.5 s, it took 3 s for 40 s of film; at the default step a few-minute film takes minutes.
+0.8 s shot (`1.4b`). Sampling every 0.5 s, it took 3.5 s for 40 s of film; at the default step a few-minute film takes
+minutes.
+
+**Framing faults come with a fix that was tried.** For an `edge-cut`, `tangent` or `halo`, lint recompiles the film
+with a camera change (an `offset`, `size`, `zoom` or `angle`) or with the actor staged a little elsewhere, lints the
+shot again, and prints the change only when the fault is gone and no other framing fault came with it. When nothing
+simple works, the message says so:
+
+```
+  warn   tangent           2.5        0:44.8  hollis's outline ends 2 px above the bottom edge of the frame (a tangent): "offset": [0, 0.042] lets the edge cut it clearly (44.6–49.8 s)
+  warn   edge-cut          2.3        0:36.9  pebble's head is cut by the top edge of the frame, 56 px from its eyes: stage pebble about 25 px nearer (y + 25) for this shot to bring it into frame (36.8–41.1 s)
+  warn   halo              9.9        3:06.2  the moon sits on nell's head like a halo (30 px into it): "offset": [0, 0.108] moves nell down, away from it (184.2–190.2 s)
+  warn   edge-cut          10.3       3:34.7  pebble's head is cut by the right edge of the frame, 13 px from its eyes: no "offset" or simple move of pebble clears it here: re-block the shot so pebble's head stays clear of the right edge (210.5–214.7 s)
+```
+
+A camera change goes into the shot's `camera` block. A staging ("stage pebble about 25 px nearer (y + 25)") moves
+where the actor stands as the shot starts and every place it goes to in the shot.
 
 ## The report
 
@@ -33,12 +52,13 @@ That is the starter film broken on purpose: two extreme close-ups of Pip in a ro
 
 `lint.jpg` has a timeline of the film with the shots and where each issue happens, then one tile per issue (up to
 48): the frame at its worst moment with the offending boxes, footprints and contact points drawn on it (an arrow at
-the edge for anything off frame), its rule, shot, time span and message. Issues about a cut (`cut-jump`, `axis`)
-show the frame after the cut with the frame before it as an inset. **Look at it**: a message tells you what was
-measured, the tile tells you whether it matters.
+the edge for anything off frame), its rule, shot, time span and message. Issues about a cut (`cut-jump`, `axis`,
+`continuity`) show the frame after the cut with the frame before it as an inset. Under the tiles a table lists every
+rule: its severity, how many issues it found, what it catches and how to fix it. **Look at it**: a message tells you
+what was measured, the tile tells you whether it matters.
 
 `lint.json` holds the same issues for scripts: the film's format and duration, counts, the limits used, each rule's
-severity, and `errors` and `warnings` as lists of
+severity (`rules`) and fix (`fixes`), and `errors` and `warnings` as lists of
 `{ rule, severity, t, t0, t1, frame, shot, scene, actor, other, message, box, marks, frames, samples }` (`box` in
 frame pixels, `frames` the two times of a cut issue).
 
@@ -52,12 +72,16 @@ frame pixels, `frames` the two times of a cut issue).
 | `collision` | error (warning when a beat brings them together) | two characters drawn into each other |
 | `offscreen-speaker` | error | a speaker who can't be seen |
 | `subject-size` | warning | a shot's subject too small, too big or missing for the shot size |
+| `edge-cut` | warning | a head cut by the frame edge near the eyes, or a sliver of someone left in frame |
+| `tangent` | warning | an outline just touching a frame edge |
+| `halo` | warning | the sun or moon touching or behind a head |
 | `caption-face` | warning | a caption over a speaker's face |
 | `cut-jump` | warning | two near-identical framings cut together |
+| `continuity` | warning | someone changing pose or place across a cut without it being seen |
 | `axis` | warning | two talking characters swapping sides across a cut |
 | `teleport` | error | someone jumping between two frames |
 | `scale` | warning | someone drawn at the wrong size for where they stand |
-| `timing` | warning | very short shots, overlapping lines, captions too fast to read |
+| `timing` | warning | very short shots (or ones a dissolve leaves too little of), overlapping lines, captions too fast to read |
 
 ### floating
 
@@ -115,10 +139,37 @@ enlarge. Fix: change the size, stage the subjects closer together, or cut betwee
 A `zoom` rarely clears it: the accepted range scales with `zoom` too (`"zoom": 1.12` on a full shot accepts 34%–91%),
 so a zoom only helps when the camera can't reach the size's framing (its closest zoom, or the edge of the set). A
 subject that is too small usually shares the frame with something: a partner, an anchor in `on`, a walk across a
-static shot, or a later moment of its own. A frame is composed for everything its subjects do in the shot, so a mouse
+static shot, or a later moment of its own. A subject that is too big in a static shot usually changes height in it: a
+static shot is sized for the pose a subject holds for most of the shot, so one who sits or lies down early (or stands
+up late) overfills the frame while it is taller. Keep the taller pose for most of the shot or cut on the change; a
+`"zoom": 0.8` restores its headroom but may leave the warning (the range scales with the zoom), so report it. A frame
+is composed for everything its subjects do in the shot, so a mouse
 that sits up halfway through a pull-out (or gets a rider on its head) is framed for that taller figure from the first
 frame and looks small until it happens. Start the shot in the final pose (`{ "do": "set", "who": "tilly", "pose":
 "alert" }` as its first beat, or the pose change at the end of the shot before), or keep the warning and say why.
+
+### edge-cut
+
+The frame edge cuts a head near its eyes (the eyes closer than 0.3 head heights to an edge, or past it with some of
+the head still in), or only a sliver of an actor is in frame (under 25% of its drawing, its head out; a carrier under
+its riders is their ground, not a sliver). Actors walking in or out are judged at the top and bottom only. Held for
+0.5 s. Fix: apply the change in the message: a camera `offset` or `size` that frames the head in or takes the whole
+figure out, or a staging. When the message says no simple change clears it, re-block the shot.
+
+### tangent
+
+An actor's outline ends within 3% of the frame height of an edge, just inside or just outside it: an ear or a tail
+tip against the top, feet just above the bottom. It is measured on the part of the drawing that faces that edge (a
+tail leaving by the side is not at the bottom), for a figure at least half in frame (one walking in or out: at the
+top and bottom only), held for 0.5 s. Fix: the change in the message, an `offset` or `zoom` that clears the edge or
+lets it cut the figure clearly, or a staging.
+
+### halo
+
+The sun or moon disc of the sky touches or stands behind a head (within half a disc radius of the head, or over its
+crown within 0.3 head heights), for 0.5 s, unless the set hides most of the disc. Only the built-in skies have known
+discs; a kit's own sky painter has none. Fix: the change in the message (an `offset`, `angle`, `size` or `zoom`, or a
+staging) moves the head off the disc; else re-block the scene under a clear part of the sky.
 
 ### caption-face
 
@@ -131,6 +182,15 @@ faces under captions on the contact sheet.
 Two consecutive shots in the same set (and the same run of scenes joined by cuts) whose framings differ by a zoom
 ratio under 1.2 and a centre shift under 15% of the frame, unless neither shows anyone. Fix: change the size, the
 subject or the angle.
+
+### continuity
+
+An actor seen on both sides of a cut changes its pose class (lying, low: sitting or crouching, standing, raised:
+sitting or rearing up; its drawn height changed by 1.3× or more) or moves more than half its size, and the change is
+never seen. It checks consecutive shots in one set joined by a cut (inside a scene, or into a scene of the same set and
+time of day that cuts in), and a dissolve into a shot that plays less than 1.2 s on its own (too short to pass time).
+Riders go with their carrier. One issue per cut, at the frame after it. Fix: let the change happen on screen (a walk,
+a pose with a `dur`) before or after the cut, start the shot where the last one left them, or cut away first.
 
 ### axis
 
@@ -152,15 +212,17 @@ a wrong `s`.
 
 ### timing
 
-Shots shorter than 1.2 s, two lines overlapping by more than 0.05 s, and captions that need more than 20 characters a
-second. Fix: hold the shot longer (`hold`, `dur`), space the lines (`after`), shorten the line.
+Shots shorter than 1.2 s; shots long enough on paper that a dissolve or a fade (into or out of the scene, the film's
+opening and closing fades, the shot's own `fadeIn` / `fadeOut`) leaves less than 1.2 s of on their own (the message
+gives the `dur` that fixes it); two lines overlapping by more than 0.05 s; and captions that need more than 20
+characters a second. Fix: hold the shot longer (`hold`, `dur`), space the lines (`after`), shorten the line.
 
 ## When to run it
 
 Lint after the contact sheets look right and again after voicing (real line lengths move the staging). It is not a
 replacement for looking: it measures boxes and points, so it can't see a character hidden in shadow, a confusing
-eyeline, a caption that jumps from the bottom to the top of the frame in the middle of a line, or a dull shot. Some
-warnings are deliberate (a wide shot of a tiny mouse); keep those and say so.
+eyeline or a dull shot. Some warnings are deliberate (a wide shot of a tiny mouse, a tangent you like); keep those and
+say so. Trying the fixes recompiles the film, so a film with many framing faults lints more slowly.
 
 From code, `lintPlan(plan, { step, occlusion, rules })` in `engine/lint/lint.mjs` runs the same checks on a compiled
 plan (`occlusion: false` ignores what hides a speaker; `rules` limits the run to the named rules), and

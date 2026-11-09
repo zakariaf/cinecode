@@ -1,8 +1,9 @@
-// The lint report: lint.json (every issue) and lint.jpg, a contact sheet on paper with a timeline of the film
-// (shots, scenes and where each issue happens) and one numbered tile per issue: the frame at the issue's worst
-// moment with the offending boxes, footprints and contact points outlined (an arrow on the edge for anything
-// off frame, a magnified inset when the marks are small), then its rule, shot, time span and message. Issues
-// about a cut (cut-jump, axis) show the frame after the cut with the frame before it as an inset. Stills skip scene
+// The lint report: lint.json (every issue, each rule's severity and fix) and lint.jpg, a contact sheet on paper with a
+// timeline of the film (shots, scenes and where each issue happens), one numbered tile per issue: the frame at the
+// issue's worst moment with the offending boxes, footprints and contact points outlined (an arrow on the edge for
+// anything off frame, a magnified inset when the marks are small), then its rule, shot, time span and message, and
+// last a table of every rule: severity, issues found, what it catches and how to fix it. Issues about a cut
+// (cut-jump, axis, continuity) show the frame after the cut with the frame before it as an inset. Stills skip scene
 // dissolves and fades, so a tile always shows the scene its boxes were measured in.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -27,7 +28,7 @@ export async function writeLintReport(plan, result, outDir, opts = {}) {
   writeFileSync(json, `${JSON.stringify({
     title: plan.title ?? '', format: { width: plan.W, height: plan.H, fps: plan.fps }, duration: plan.duration, shots: (plan.shots || []).length,
     counts: { errors: errors.length, warnings: warnings.length }, stats: result.stats ?? null, limits: LIMITS,
-    rules: Object.fromEntries(Object.entries(RULES).map(([k, v]) => [k, v.severity])), errors, warnings,
+    rules: Object.fromEntries(Object.entries(RULES).map(([k, v]) => [k, v.severity])), fixes: Object.fromEntries(Object.entries(RULES).map(([k, v]) => [k, v.fix])), errors, warnings,
   }, null, 2)}\n`);
   const all = [...errors, ...warnings];
   const tiles = all.slice(0, opts.maxTiles ?? 48);
@@ -47,7 +48,8 @@ function drawSheet(plan, result, tiles, omitted, opts) {
   const width = Math.max(2 * margin + cols * tw + (cols - 1) * gap, Math.round(1200 * u));
   const rows = Math.ceil(tiles.length / cols);
   const body = tiles.length ? rows * (th + label) + (rows - 1) * gap : Math.round(120 * u);
-  const height = margin + header + timeline + body + (omitted ? Math.round(40 * u) : 0) + margin;
+  const table = ruleTable(createCanvas(4, 4).getContext('2d'), result, { w: width - 2 * margin, u });
+  const height = margin + header + timeline + body + (omitted ? Math.round(40 * u) : 0) + gap + table.h + margin;
   const c = createCanvas(width, height), x = c.getContext('2d');
   paper(x, width, height);
 
@@ -86,9 +88,49 @@ function drawSheet(plan, result, tiles, omitted, opts) {
   });
   if (omitted) {
     x.textAlign = 'left'; x.fillStyle = MUTED; x.font = `italic ${Math.round(17 * u)}px ${SERIF}`;
-    x.fillText(`+ ${omitted} more issue${omitted === 1 ? '' : 's'} in lint.json`, margin, height - margin - Math.round(6 * u));
+    x.fillText(`+ ${omitted} more issue${omitted === 1 ? '' : 's'} in lint.json`, margin, height - margin - table.h - gap - Math.round(6 * u));
   }
+  table.draw(x, margin, height - margin - table.h);
   return c;
+}
+
+// The rule table under the tiles: every rule with its severity, how many issues it found, what it catches and how
+// to fix it. → { h, draw(x, x0, y0) } (laid out with the measuring context mx)
+function ruleTable(mx, result, { w, u }) {
+  const all = [...(result.errors || []), ...(result.warnings || [])], n = r => all.filter(i => i.rule === r).length;
+  mx.font = `bold ${Math.round(16 * u)}px ${MONO}`;
+  const c1 = Math.round(Math.max(...Object.keys(RULES).map(r => mx.measureText(r).width)) + 18 * u), c2 = Math.round(84 * u), c3 = Math.round(64 * u), tx = c1 + c2 + c3, tw = w - tx;
+  const head = Math.round(46 * u), line = Math.round(19 * u), pad = Math.round(9 * u);
+  const fCatch = `${Math.round(15 * u)}px ${SERIF}`, fFix = `italic ${Math.round(15 * u)}px ${SERIF}`;
+  const rows = Object.entries(RULES).map(([rule, R]) => {
+    mx.font = fCatch; const a = wrap(mx, R.catches, tw, 9);
+    mx.font = fFix; const b = wrap(mx, `Fix: ${R.fix ?? '—'}`, tw, 9);
+    return { rule, R, n: n(rule), a, b, h: (a.length + b.length) * line + 2 * pad };
+  });
+  const h = head + rows.reduce((s, r) => s + r.h, 0);
+  const draw = (x, x0, y0) => {
+    x.save(); x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+    x.fillStyle = INK; x.font = `bold ${Math.round(22 * u)}px ${SERIF}`; x.fillText('Rules', x0, y0 + Math.round(26 * u));
+    x.fillStyle = MUTED; x.font = `${Math.round(14 * u)}px ${SERIF}`;
+    x.fillText('rule', x0, y0 + head - Math.round(6 * u)); x.fillText('severity', x0 + c1, y0 + head - Math.round(6 * u)); x.fillText('found', x0 + c1 + c2, y0 + head - Math.round(6 * u));
+    x.fillText('what it catches · how to fix it', x0 + tx, y0 + head - Math.round(6 * u));
+    let y = y0 + head;
+    rows.forEach((r, i) => {
+      if (i % 2 === 0) { x.fillStyle = 'rgba(42,33,48,0.05)'; x.fillRect(x0 - Math.round(6 * u), y, w + Math.round(12 * u), r.h); }
+      const base = y + pad + Math.round(14 * u);
+      x.fillStyle = INK; x.font = `bold ${Math.round(16 * u)}px ${MONO}`; x.fillText(r.rule, x0, base);
+      x.fillStyle = SEV[r.R.severity] || SEV.warning; x.font = `bold ${Math.round(14 * u)}px ${SERIF}`; x.fillText(r.R.severity, x0 + c1, base);
+      x.fillStyle = r.n ? INK : MUTED; x.font = `${r.n ? 'bold ' : ''}${Math.round(16 * u)}px ${SERIF}`; x.fillText(String(r.n), x0 + c1 + c2, base);
+      let ly = base;
+      x.fillStyle = '#3d3340'; x.font = fCatch; for (const L of r.a) { x.fillText(L, x0 + tx, ly); ly += line; }
+      x.fillStyle = MUTED; x.font = fFix; for (const L of r.b) { x.fillText(L, x0 + tx, ly); ly += line; }
+      y += r.h;
+    });
+    x.strokeStyle = INK; x.globalAlpha = 0.25; x.lineWidth = Math.max(1, u);
+    x.beginPath(); x.moveTo(x0, y0 + head); x.lineTo(x0 + w, y0 + head); x.stroke();
+    x.restore();
+  };
+  return { h, draw };
 }
 
 function paper(x, w, h) {

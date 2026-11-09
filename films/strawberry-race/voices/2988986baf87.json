@@ -1,0 +1,34 @@
+{
+ "id": "2988986baf87",
+ "who": "plink",
+ "text": "Not if I get there first!",
+ "voice": "Puck",
+ "tone": "cheeky, quick, teasing",
+ "prompt": "[cheeky, quick, teasing] Not if I get there first!",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 2.69,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0.131,0.994,0.952,0.71,0.395,0.543,1,0.965,0.769,0.6,0.964,0.98,1,0.88,0.501,0.108,0,0,0.311,0.603,0.686,0.793,0.766,0.893,0.819,0.45,0.993,1,0.989,0.861,0.87,0.964,0.753,0.345,0.98,1,1,0.868,0.476,0.19,0.98,1,1,1,1,1,0.957,0.673,0.257,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Not if I get there first.",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "cheeky, quick, teasing",
+    "wer": 0,
+    "transcript": "Not if I get there first.",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 2.69
+   }
+  ]
+ }
+}

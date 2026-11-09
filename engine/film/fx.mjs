@@ -11,18 +11,50 @@ export const ONE_SHOT = new Set(['dust', 'splash', 'sparkle']);
 const FONT = 'Georgia, "Times New Roman", serif';
 const TWOS = t => Math.floor(t * 12 + 1e-6) / 12;        // effects animate on twos, like the drawn animation
 
-// A puff of dust kicked up at (x, y): dabs that grow, rise and fade. dir = direction of travel (puffs trail).
-export function dust(ctx, age, x, y, s = 1, dir = 1, seed = 1, n = 9) {
+const DUST = [224, 207, 166];                            // dust where no ground is known: a pale tan
+
+// A puff of dust kicked up at (x, y): soft dabs that grow, rise and fade. dir = direction of travel (puffs trail).
+// col: the ground it rises from, as dust ([r, g, b], from groundTone), so it takes the scene's light (on a moonlit
+// path a dim grey-blue puff, never a pale glow); its dabs are soft-edged, so overlapping ones never show each other's
+// outlines.
+export function dust(ctx, age, x, y, s = 1, dir = 1, seed = 1, n = 9, col = DUST) {
   if (age < 0 || age > 1.3) return;
   ctx.save();
   for (let k = 0; k < n; k++) {
     const a = age - k * 0.03; if (a <= 0) continue;
     const r = rng(seed * 31 + k), px = x - dir * k * 7 * s + (r() - 0.5) * 18 * s, py = y - 3 * s - a * 26 * s - r() * 8 * s;
-    ctx.globalAlpha = 0.55 * (1 - a / 1.3) ** 1.4; ctx.fillStyle = pick(r, ['#e8d9b2', '#dccb9f', '#f1e6c8', '#d6c49a']);
-    const rad = (5 + 26 * a) * s * (0.7 + r() * 0.6);
-    blob(ctx, px, py, rad, rad * 0.62, 0, r, 8);
+    const al = 0.5 * (1 - a / 1.3) ** 1.4, lift = 1 + 0.12 * r(), rad = (5 + 26 * a) * s * (0.7 + r() * 0.6);
+    const c = col.map(v => Math.min(255, Math.round(v * lift))).join(',');
+    ctx.save(); ctx.translate(px, py); ctx.scale(1, 0.62);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rad);
+    g.addColorStop(0, `rgba(${c},${al.toFixed(3)})`); g.addColorStop(0.5, `rgba(${c},${(al * 0.7).toFixed(3)})`); g.addColorStop(1, `rgba(${c},0)`);
+    ctx.fillStyle = g; ctx.fillRect(-rad, -rad, 2 * rad, 2 * rad);
+    ctx.restore();
   }
   ctx.restore();
+}
+// The colour of dust rising at world (x, y) of set S (s: its scale): the set's back alone (S.drawBack with opts, e.g.
+// { t, haze, sky }, so its night passes and lamp pools are in it), painted in a row just under the contact, so no
+// actor, shadow or prop standing there counts. Of that row, the ground of the contact's own surface (S.surfaceAt: the
+// path, not the water or grass beside it), and of that the pixels between the middle and the 80th percentile of
+// lightness (the dry top, not the cracks, reeds or painted shade in it, nor a stray pale pebble), averaged and turned
+// a little greyer and lighter. It paints the set's back (and so sets the light the set keeps for the sky it is given):
+// call it before a frame draws its own. [r, g, b]; a pale tan where the set paints nothing there.
+export function groundTone(S, x, y, s = 1, opts = {}) {
+  const w = 96, q = w / (80 * s), h = Math.ceil(6 * s * q), [, cx] = canvas(w, h), X0 = x - 40 * s, Y0 = y + 2 * s;
+  cx.setTransform(q, 0, 0, q, -X0 * q, -Y0 * q);
+  S.drawBack(cx, { cx: x, cy: y, zoom: q }, opts);
+  const d = cx.getImageData(0, 0, w, h).data, surf = S.surfaceAt?.(x, y), all = [], own = [];
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+    const o = (j * w + i) * 4; if (d[o + 3] <= 128) continue;
+    const p = [d[o], d[o + 1], d[o + 2], 0.2126 * d[o] + 0.7152 * d[o + 1] + 0.0722 * d[o + 2]];
+    all.push(p); if (surf && S.surfaceAt(X0 + (i + 0.5) / q, Y0 + (j + 0.5) / q) === surf) own.push(p);
+  }
+  const P = (own.length >= 20 ? own : all).sort((a, b) => a[3] - b[3]);
+  if (P.length < 20) return DUST;
+  const top = P.slice(P.length >> 1, Math.ceil(P.length * 0.8)), m = [0, 1, 2].map(k => top.reduce((a, p) => a + p[k], 0) / top.length);
+  const L = 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2];
+  return m.map(v => Math.min(255, (v + (L - v) * 0.35) * 1.15 + 6));
 }
 
 // Rings and droplets when something lands in water.
@@ -204,11 +236,12 @@ export function airShadow(ctx, x, y, w, alt, a = 0.26) {
   ctx.ellipse(x, y + 1, w * lerp(0.45, 1, k), w * 0.18 * lerp(0.45, 1, k), 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
 }
 
-// Draw one fx event at film time t. e: { name, t0, t1, x, y, s, dir, seed }. rect: visible world rect.
-export function drawEvent(ctx, e, t, { rect, zoom, W, H, S }) {
+// Draw one fx event at film time t. e: { name, t0, t1, x, y, s, dir, seed }. rect: visible world rect. tone: a dust
+// event's colour (groundTone).
+export function drawEvent(ctx, e, t, { rect, zoom, W, H, S, tone }) {
   const age = t - e.t0;
   switch (e.name) {
-    case 'dust': return dust(ctx, age, e.x, e.y, e.s, e.dir || 1, e.seed, e.n || 9);
+    case 'dust': return dust(ctx, age, e.x, e.y, e.s, e.dir || 1, e.seed, e.n || 9, tone);
     case 'splash': return splash(ctx, age, e.x, e.y, e.s, e.seed);
     case 'sparkle': return sparkle(ctx, age, e.x, e.y, e.s, e.seed, e.color);
     default: break;

@@ -1,0 +1,34 @@
+{
+ "id": "8a3455109661",
+ "who": "fern",
+ "text": "Sorry. I'll go.",
+ "voice": "Achernar",
+ "tone": "soft, quiet, timid",
+ "prompt": "[soft, quiet, timid] Sorry. I'll go.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.78,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0,0,0,0,0.859,0.954,0.953,1,1,1,0.984,0.981,0.942,0.838,0.753,0.69,0.466,0.111,0,0,0,0,0,0,0,0,0,0.408,1,1,1,0.949,0.71,0.723,0.675,0.609,0.294,0.06,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Sorry, I'll go",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "soft, quiet, timid",
+    "wer": 0,
+    "transcript": "Sorry, I'll go",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.78
+   }
+  ]
+ }
+}

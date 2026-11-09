@@ -2,7 +2,8 @@
 // a hawthorn beyond it, hazy ranges behind. A ridge set: actors walk a band just below the crest line.
 // By night (S.night, 0..1, from the sky given to drawSky / drawBack) the hill re-lights itself for the moon, which
 // stands where the sun did (upper right): the slope sinks into a cool shadow that deepens toward the viewer, the
-// crest keeps a moonlit rim, the far ranges drop back, and the standing stone is washed with moonlight on its
+// crest keeps a moonlit rim, its tussocks take the crest's shade whole (S.tufts: no lighter band across their feet), the
+// far ranges drop back with the trees on their crests (as soft as the frame draws them), and the stone is washed with moonlight on its
 // moonward face — so under the night grade the stone is the brightest shape on the land and the crest still reads.
 import { smooth, clump, path } from '../../core/lib.mjs';
 import { makeSet, resTier, scaleOf } from '../set.mjs';
@@ -37,11 +38,11 @@ export default function hill(params = {}) {
         farHills(x, r, E.x0, E.x1, farA, { pal: ['#a9b0b2', '#b1b8b8', '#b9c0bc', '#a2aaae'], trees: ['#94a09c', '#9ca8a2', '#a6b0aa'], light: L, every: [50, 160] });
         farHills(x, r, E.x0, E.x1, farB, { pal: ['#93a48e', '#9bab94', '#a4b29a', '#8c9e88'], trees: ['#7c8e78', '#86987e', '#90a086'], light: L, every: [40, 120] });
         paper(x, 0.05);
-      }, anim: (ctx, t, S2) => S2._nightFar?.(ctx, 0.4) },
+      }, shade: S2 => S2._farShade?.(0.4) },
       { k: 0.7, paint(x, r, S, E) {
         farHills(x, r, E.x0, E.x1, farC, { pal: ['#7f9a72', '#88a27a', '#92aa82', '#7a946c'], trees: ['#5c7a56', '#66845e', '#729068'], light: L, every: [30, 90], size: [26, 60] });
         paper(x, 0.06);
-      }, anim: (ctx, t, S2) => S2._nightFar?.(ctx, 0.7) },
+      }, shade: S2 => S2._farShade?.(0.7) },
       { k: 1, paint(x, r, S, E) {
         const pts = ridge(x, r, E.x0, E.x1, px => g(px) - 6, { pal: ['#94bc64', '#a2c870', '#88b25c', '#b0d07c'], bottom: E.y1 + 20, strokes: 0.6 });
         const gr = x.createLinearGradient(0, 700, 0, E.y1); gr.addColorStop(0, 'rgba(255,240,190,.18)'); gr.addColorStop(1, 'rgba(40,80,40,.25)');
@@ -55,8 +56,14 @@ export default function hill(params = {}) {
         flowers(x, r, E.x0, E.x1, 720, E.y1, 1100, py => 0.7 + (py - 700) / 600);
         dirtPath(x, r, ...PATH, { col: '#d9c99c', pal: ['#cbb88a', '#e6d8ae', '#bfae80'], grassEdge: GRASS });
         x.restore();
-        // the lit crest: tussocks along the skyline
-        for (let px = E.x0; px < E.x1; px += 26 + r() * 34) clump(x, px, g(px) - 5, 44 + r() * 50, 16 + r() * 14, ['#7aa856', '#94bc68', '#b8d08a', '#d4e2a0'], 12, r, { size: 0.16, light: L });
+        // the lit crest: tussocks along the skyline, painted aside and laid in (the same picture) so the night pass can
+        // shade each one whole (S.tufts)
+        let ya = Infinity, yb = -Infinity; for (let px = E.x0; px <= E.x1; px += 12) { ya = Math.min(ya, g(px)); yb = Math.max(yb, g(px)); }
+        const res = scaleOf(x);
+        S.tufts = worldCanvas([E.x0, Math.floor(ya - 80), E.x1, Math.ceil(yb + 60)], res, t => {
+          for (let px = E.x0; px < E.x1; px += 26 + r() * 34) clump(t, px, g(px) - 5, 44 + r() * 50, 16 + r() * 14, ['#7aa856', '#94bc68', '#b8d08a', '#d4e2a0'], 12, r, { size: 0.16, light: L });
+        });
+        x.drawImage(S.tufts.c, S.tufts.x0, S.tufts.y0, S.tufts.w, S.tufts.h);
         paper(x, 0.06);
       }, anim: (ctx, t, S2) => S2._nightLand?.(ctx) },
       { k: 1.3, front: true, paint(x, r, S, E) { blades(x, r, E.x0, E.x1, px => 1700 + 16 * Math.sin(px / 77), Math.round((E.x1 - E.x0) / 5), { len: [40, 160], w: 7, clumps: 1, pal: ['#4a7a34', '#5a8a3c', '#6a9a44', '#7aa84c'] }); } },
@@ -92,7 +99,8 @@ export default function hill(params = {}) {
 
 // ───────────── night ─────────────
 // S.night (0..1) follows the sky handed to drawSky / drawBack (opts.night overrides it); the passes are painted once,
-// lazily, and laid over the layers (from their anims) and over the stone prop, faded by S.night.
+// lazily, and laid over the ground layer (from its anim), on the far layers' own paint (their shade) and over the stone
+// prop, faded by S.night.
 function addNight(S) {
   const g = hillGround, X0 = S.area.x0 - 900, X1 = S.area.x1 + 900, Y1 = S.area.y1 + 200, cache = {};
   S.nightLevel = nightLevel; S.night = 0;
@@ -105,14 +113,20 @@ function addNight(S) {
     x.filter = 'blur(12px)'; x.fillStyle = '#bcc4e2'; band(x, -20, 90); x.fill(); x.fillStyle = '#d2d8ee'; band(x, -20, 34); x.fill(); x.filter = 'none';
     const v = x.createLinearGradient(0, 950, 0, Y1); v.addColorStop(0, 'rgba(96,104,146,0)'); v.addColorStop(1, 'rgba(96,104,146,.75)');
     x.fillStyle = v; x.fillRect(X0, 950, X1 - X0, Y1 - 950);
+    cutTufts(x);
   });
-  // the tussocks on the skyline: the same shade, but only on what the ground layer painted above the slope
+  // the crest's tussocks reach down over the slope: they take the crest's shade whole (crestK), never the slope's lighter
+  // band or its rim across their feet, which would read as the hill showing through them
+  const cutTufts = x => { const T = S.tufts; if (!T) return; x.save(); x.globalCompositeOperation = 'destination-out'; x.drawImage(T.c, T.x0, T.y0, T.w, T.h); x.restore(); };
+  // the tussocks on the skyline: the same shade, on what the ground layer painted above the slope and on every tussock
   const crestK = () => cache.crest ??= (() => {
-    const ly = S.L.find(l => l.k === 1 && !l.front);
+    const ly = S.L.find(l => l.k === 1 && !l.front), T = S.tufts;
     let ya = 1e9, yb = -1e9; for (let px = X0; px <= X1; px += 12) { ya = Math.min(ya, g(px)); yb = Math.max(yb, g(px)); }
-    return worldCanvas([X0, ya - 90, X1, yb + 8], 1, x => {
+    const R = [X0, ya - 90, X1, Math.max(yb + 8, T ? T.y0 + T.h : 0)];
+    return worldCanvas(R, 1, x => {
       x.fillStyle = '#8e97c2'; band(x, -90, 6); x.fill();
-      x.save(); x.globalCompositeOperation = 'destination-in'; x.drawImage(ly.c, ly.E.x0, ly.E.y0, ly.c.width / ly.res, ly.c.height / ly.res); x.restore();
+      if (T) { x.drawImage(T.c, T.x0, T.y0, T.w, T.h); x.globalCompositeOperation = 'source-atop'; x.fillRect(R[0], R[1], R[2] - R[0], R[3] - R[1]); }
+      x.globalCompositeOperation = 'destination-in'; x.drawImage(ly.c, ly.E.x0, ly.E.y0, ly.c.width / ly.res, ly.c.height / ly.res);
     });
   })();
   // the moonlit rim along the crest (screen): brightest on the skyline, gone a little way down the slope
@@ -120,14 +134,13 @@ function addNight(S) {
     x.save(); path(x, slope()); x.clip();
     x.filter = 'blur(6px)'; x.fillStyle = 'rgba(150,170,220,.5)'; band(x, -8, 14); x.fill(); x.filter = 'none';
     x.restore();
-  });
-  const farK = (k, yAt) => cache[k] ??= worldCanvas([S.layerExtent(k).x0, 500, S.layerExtent(k).x1, S.area.y1 + 400], 0.25, x => {
-    const P = [[S.layerExtent(k).x0, S.area.y1 + 400]]; for (let px = S.layerExtent(k).x0; px <= S.layerExtent(k).x1; px += 16) P.push([px, yAt(px) - 4]); P.push([S.layerExtent(k).x1, S.area.y1 + 400]);
-    x.fillStyle = k < 0.5 ? '#6e78a4' : '#7e88b2'; path(x, P); x.fill();
+    cutTufts(x);
   });
   const lay = (x, K, op, a) => { if (!(a > 0.01)) return; x.save(); x.globalCompositeOperation = op; x.globalAlpha = Math.min(1, a); x.drawImage(K.c, K.x0, K.y0, K.w, K.h); x.restore(); };
   S._nightLand = x => { const n = S.night; if (!(n > 0.01)) return; lay(x, shadeK(), 'multiply', n); lay(x, crestK(), 'multiply', n); lay(x, rimK(), 'screen', n * 0.8); };
-  S._nightFar = (x, k) => lay(x, farK(k, k < 0.5 ? farA : farC), 'multiply', S.night * 0.8);
+  // the far ranges drop back: a cool shade on all they painted, the trees on their crests too (set.mjs lays it on the
+  // layer's own paint, as soft as the layer is drawn), so no tree stands day-bright against the night sky
+  S._farShade = k => (S.night > 0.01 ? { rgb: k < 0.5 ? [110, 120, 164] : [126, 136, 178], a: S.night * 0.8 } : null);
   // the stone washed with moonlight (its foot grass left out), and the crest's night shade for that grass (multiply),
   // as sharp as the stone's own sprite at the scale drawn (1.5 at least)
   const SB = [STONE.x - STONE.w, STONE.base - STONE.h - 30, STONE.x + STONE.w, STONE.base + 40];

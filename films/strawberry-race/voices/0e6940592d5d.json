@@ -1,0 +1,34 @@
+{
+ "id": "0e6940592d5d",
+ "who": "plink",
+ "text": "Too slow!",
+ "voice": "Puck",
+ "tone": "cheeky, quick, delighted",
+ "prompt": "[cheeky, quick, delighted] Too slow!",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 1.63,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0,0,0,0.379,0.522,0.209,0.837,1,0.981,0.872,0.82,0.466,0.089,0,0,0.223,0.866,0.943,0.901,0.897,0.777,0.405,0.07,0,0.764,0.986,1,1,0.999,1,1,1,1,0.994,0.971,0.927,0.774,0.432,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Too slow",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "cheeky, quick, delighted",
+    "wer": 0,
+    "transcript": "Too slow",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 1.63
+   }
+  ]
+ }
+}

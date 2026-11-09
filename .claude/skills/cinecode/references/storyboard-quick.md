@@ -50,10 +50,10 @@ Checked with `check` and `plan` (21 s, 3 shots). Start from `node bin/cinecode.m
 
 ## Structure
 
-- **film**: `title`, `logline`, `format` (`captions`: dialogue = characters' lines burned in | all = also narration and sfx that carry a `caption` | none), `titles` (`open`: title, subtitle, dur; `end`: lines, dur; both count in `plan`'s total: 2–2.5 s each for a film under a minute), `voices`, `cast`, `sets`, `scenes`, optional `score` (`{ "key": "C", "motif": "G4:1 E4:0.5 G4:0.5 A4:2 C5:3" }`: the film's melodic motif, stated by music cues with `motif`), `seed` (the score's seed).
+- **film**: `title`, `logline`, `format` (`captions`: dialogue = characters' lines burned in | all = also narration and sfx that carry a `caption` | none), `titles` (`open`: title, subtitle, dur; `end`: lines, dur; both count in `plan`'s total. 3 s is the shortest card that reads: the title is fully inked 1.4 s in (a subtitle 2.7 s) and dissolves over the last 1 s; the end card's first line is full from 1.3 s and fades to black over the last 1.2 s), `voices`, `cast`, `sets`, `scenes`, optional `score` (`{ "key": "C", "motif": "G4:1 E4:0.5 G4:0.5 A4:2 C5:3" }`: the film's melodic motif, stated by music cues with `motif`), `seed` (the score's seed).
 - **cast entry**: `rig`, `name`, `voice` (a key of `voices`; omit for a silent character), `scale` (multiplies the set's perspective scale), `params` (rig look).
-- **scene**: `id`, `set`, `time` (a sky name or `{ "from": "golden", "to": "twilight" }`), `transition` (cut | fade | dissolve), `music`, `ambience` (auto | a name | none), `actors`, `overlays`, `rim`, `shots`.
-- **scene actor**: `at` (target), `face` (left | right), `pose`, `expr`, `on` (start riding another actor), `offstage` (left | right: not in the scene until an `enter`).
+- **scene**: `id`, `set`, `time` (a sky name or `{ "from": "golden", "to": "twilight" }`), `transition` (cut | fade | dissolve: 0.8 s, at most 40% of the shots either side), `music`, `ambience` (auto | a name | none), `actors`, `overlays`, `rim`, `shots`.
+- **scene actor**: `at` (target), `face` (left | right), `pose`, `expr`, `height` (a flier starts hovering that high above `at`), `on` (start riding another actor), `offstage` (left | right: not in the scene until an `enter`). There is no hidden start: a stand-in faded by a `fade` beat is still drawn in a shot's first frame (and in the opening card's dissolve into shot 1.1).
 - **shot**: `id` (`<scene>.<shot>` like the screenplay: `2.3`), `camera`, `beats`, `hold` (seconds after the last beat, default 0.5) or `dur` (fixed length), `fadeIn` / `fadeOut`, `time` / `grade` / `gradeTo` (override the scene's light), `music` (a cue at the shot start), `note`.
 - **Every object accepts `note`**: write the intent there ("he lands and sits before 2.2"); reviewers read it.
 
@@ -65,33 +65,33 @@ Beats run in sequence. Modifiers: `"with": "prev"` (start with the previous beat
 
 | beat | fields | lasts |
 |---|---|---|
-| `say` | `say` (cast id or narrator), `text` (caption), `tone`, `expr`, `vo`, `tts` (what is spoken), `trimEnd` | the voiced take |
-| `do: walk / run / hop / fly` | `who`, `to`, `speed` (a multiplier, 1 = the rig's speed), `wade` + `depth` (cross water), `pose` (hop: land in it) | route length / speed |
-| `do: enter / exit` | `who`, `from` / `to` (left, right, or a target), `run: true`, `speed` | as walk |
-| `do: place` | `who`, `to`, `face`: put an actor somewhere instantly (between shots; a cut hides it) | 0 |
-| `do: pose` | `who`, `pose`, `dur` (the blend; 1–2.5 s for a slow body), `expr` | `dur` |
-| `do: gesture` | `who`, `name` | the gesture |
-| `do: look` | `who`, `to` (actor, anchor, left, right, up, sky, down; the beetle, butterfly and songbird don't tilt) | 0.3 (tortoise 1.0) |
+| `say` | `say` (cast id or narrator), `text` (caption), `tone`, `expr` (a mood holds until changed; surprised, laugh, laughing, scared pass 0.4 s after the line), `vo`, `tts` (what is spoken), `trimEnd` | the voiced take |
+| `do: walk / run / hop / fly` | `who`, `to`, `speed` (a multiplier, 1 = the rig's speed), `wade` + `depth` (cross water), `pose` (the pose it ends in; default `stand`, so a held pose is dropped), `height` (fly: end hovering) | route length / speed; a stepping stone 0.7–1.5 s whatever the `speed` |
+| `do: enter / exit` | `who`, `from` / `to` (left, right, or a target), `run: true`, `speed`, `fly: true` (a flier flies in from above), `height` (enter: end hovering) | as walk |
+| `do: place` | `who`, `to`, `face`, `height` (hovering): put an actor somewhere instantly (between shots; a cut hides it) | 0 |
+| `do: pose` | `who`, `pose`, `dur` (the blend; 1–2.5 s for a slow body), `expr`; started while the actor still moves (a move carried from the last shot too), the move's end pose replaces it | `dur` |
+| `do: gesture` | `who`, `name` (nothing else is read: the human's `point` follows its look, `point-up` / `point-down` aim outright). Over a walk or run the legs keep the gait, so a `jump` or `stamp` shows only after the move | the gesture |
+| `do: look` | `who`, `to` (actor, anchor, left, right, up, sky = a moderate look up, down), `tilt` (−1..1: the head's pitch, outright, + up, − down); the beetle, butterfly and songbird don't tilt, and the deer's head barely drops | 0.3 (tortoise 1.0) |
 | `do: turn` / `emote` / `blink` | `who`, `face` / `expr` | 0.25 / 0 / 0.2 |
 | `do: sit / stand / lie / sleep / wake` | `who` (`wake` may keep a `pose`) | 0.6 |
 | `do: set` | `who`, `params`, `pose`, `expr`: change look or state instantly (wet fur, a star's opacity) | 0 |
 | `do: fade` | `who`, `to` (opacity 0..1), `dur` | `dur` |
 | `do: custom` | `name` (in custom.mjs `custom`), `dur`, any params | `dur` |
-| `sfx` | name, `gain`, `pan`, `params`, `dur`, `caption` | 0 |
-| `fx` | dust, splash, sparkle (one-shots at `at` / `on`); leaves, rain, fireflies, motes, mist (fields over the whole frame, `n` = density per world area: a close shot of a small rig shows few); `dur`, `n` | 0 |
-| `music` | `{ "music": { "mood": "tender", "intensity": 0.3 } }` or `{ "music": "sting", "name": "plunk" }`; cue extras `motif`, `motifVoice`, `hold`, `downbeat`, `tempo` | 0 |
+| `sfx` | name, `gain`, `pan`, `params`, `dur`, `caption`. A long sound under a scene: its length in `params` (`"params": { "dur": 30 }`), not the beat's `dur`; it plays on across cuts | 0, or the beat's `dur` |
+| `fx` | dust, splash, sparkle (one-shots at `at` / `on`; `size` scales a sparkle but it is always 14 stars: a single glint is a custom beat); leaves, rain, fireflies, motes, mist (fields over the whole frame, `n` = density per world area: a close shot of a small rig shows few); `dur`, `n` | 0 |
+| `music` | `{ "music": { "mood": "tender", "intensity": 0.3 } }` or `{ "music": "sting", "name": "plunk" }`; cue extras `motif`, `motifVoice`, `hold`, `downbeat`, `tempo`. A mood change on a cut: `downbeat: true` (else it may open near-silent); the last cue: `hold: true` to sound under the end card | 0 |
 | `title` | `title`, `sub`, `dur`, `place` (top, upper, center, lower, bottom, auto, or a fraction) | `dur` |
 | `mark` | a unique name; `plan.marks[name]` = its film time (custom effects key off it) | 0 |
 | `wait` | seconds | the value |
 
-**Targets** (`to`, `at`): an anchor name, `x:1500`, `x:1500,y:1060`, `near:<actor>`, `left-of:<actor>`, `right-of:<actor>`, `front-of:<actor>`, `behind:<actor>`, `on:<actor>` (ride its mount point; hop or place only), `left` / `right` (enter and exit only). `x:` alone is the main lane. Every target is somewhere to stand: fliers can't hover, a flight ends on the ground, a surface, a perch, a hollow or `on:<actor>`. `near:` leaves only a few pixels between small rigs; land a small flier with an explicit `x:`.
+**Targets** (`to`, `at`): an anchor name, `x:1500`, `x:1500,y:1060`, `near:<actor>`, `left-of:<actor>`, `right-of:<actor>`, `front-of:<actor>`, `behind:<actor>`, `on:<actor>` (ride its mount point; hop or place only), `left` / `right` (enter and exit only). `x:` alone is the main lane. A flight ends on the ground, a surface, a perch, a hollow or `on:<actor>`, or, with `"height": N` on a fly, enter or place, hovering N units above the target (taken as given, over water too; a songbird is 24 units tall). `near:` and `left-of:` / `right-of:` keep clear of the other's head and tail and of a hoverer's wings.
 
 ## Camera
 
 | field | values |
 |---|---|
 | `size` | establishing (whole view), wide (subject ≈ 18% of the frame height), full (whole body ≈ 60%), medium (waist up), close (head and shoulders), extreme-close (face) |
-| `on` | actor ids and/or anchor names; the union of their bounds is framed |
+| `on` | actor ids and/or anchor names (not `x:…,y:…` points: frame a point in the air with a stand-in actor hovering there); the union of their bounds is framed |
 | `move` | static, push-in, pull-out, pan (from `on[0]` to `on[1]`), track, tilt-up, tilt-down, handheld |
 | `angle` | eye, low (subjects lower, more sky), high |
 | `zoom` | a multiplier on the size's framing (0.8 = looser, 1.3 = tighter) |
@@ -100,7 +100,7 @@ Beats run in sequence. Modifiers: `"with": "prev"` (start with the previous beat
 | `moveAt`, `moveDur` | confine the move to a window of the shot (eased, holding before and after) |
 | `dof` | true blurs the far layers (close-ups default to true) |
 
-A static shot is composed once for everything its subjects do in the shot: if someone walks across, the frame holds the whole walk (and gets loose); if they stand up later, it is framed for their standing height from the start. To tighten as subjects come together, use a push-in with `to`. Close-ups frame the resting head, not a gesture's peak (use the pose of the same name). An anchor in `on` is framed as a box about a standing hare's size.
+A static shot is composed once for everything its subjects do in the shot: if someone walks across, the frame holds the whole walk (and gets loose). Its size is set by the pose a subject holds for most of the shot: one who sits or lies down early (or stands up late) is too big while taller, so keep the taller pose for most of the shot, cut on the change, or `"zoom": 0.8`. To tighten as subjects come together, use a push-in with `to`. A static or handheld `close` shot eases out while a gesture holds the head out of frame (0.5 s or more) and back after; extreme close-ups and moves frame the resting head only (use the pose of the same name). An anchor in `on` is framed as a box about a standing hare's size. Depth of field keeps everything in `on` and `toOn` sharp.
 
 ## Names valid today
 

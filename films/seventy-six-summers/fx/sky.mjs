@@ -119,6 +119,7 @@ const sceneOf = api => api.scene?.id ?? api.shot?.scene;
 const actorsOf = api => (api.plan.actorsAt ? api.plan.actorsAt(api.t, sceneOf(api)) : []).filter(a => a.visible && a.mode !== 'off' && a.alpha > 0.02);
 // An actor's silhouette in screen space (the context carries any extra scale).
 function drawActor(x, a, api) {
+  if (api.silhouette) { x.save(); x.globalAlpha = clamp(a.alpha ?? 1); api.silhouette(x, a); x.restore(); return; }  // the frame's own placement (slope pitch on a rider, too)
   const { cam, W, H } = api, z = cam.zoom, sx = (a.x - cam.cx) * z + W / 2, sy = (a.y - cam.cy) * z + H / 2;
   x.save();
   if (a.squash != null && a.squash !== 1) { x.translate(sx, sy); x.scale(a.squash, 1); x.translate(-sx, -sy); }
@@ -246,9 +247,10 @@ export const SKIN = [0.12, 0.24, 0.75];
 const TORN = 0.14;
 // The mist once the bloomed comet lights it: its colour (before the grade) and how much of it takes that colour, how
 // much of the mist's veil is left (lit mist glows rather than hides: the land shows through), the gain of the gold
-// glow screened onto it, how far its light turns it toward gold (a hue shift at its own value), and how much less of it veils a
-// figure (× through; all at the full bloom).
-export const MIST_LIT = { col: [255, 234, 196], tint: 0.6, veil: 0.45, glow: 0.42, warm: 0.7, through: 0.6 };
+// glow screened onto it, how far its light turns it toward gold (a hue shift at its own value: a tint; more turns the thin
+// mist lying on the dark slope into an orange-tan streak), and how much less of it veils a figure (× through; all at the
+// full bloom).
+export const MIST_LIT = { col: [255, 234, 196], tint: 0.6, veil: 0.45, glow: 0.42, warm: 0.4, through: 0.6 };
 // The mist's parameters for a scene: its hill-mist overlay params with the defaults, the parting time, and the drifts
 // round any figure fading in or out in it (emergeVeils).
 export function mistParams(api, params) {
@@ -456,6 +458,8 @@ const MODES = {
   dim: { B: 0.34, L: 0.3, glow: 0.42, stars: 0, key: 0.12 }, faint: { B: 0.42, L: 0.24, glow: 0.2, stars: 0, key: 0 },
 };
 export const BLOOM_RISE = 1.5;
+// the share of the ion tail's length, from the head, that lies over the dust tail and is painted warm (paintComet)
+export const ION_WARM = 0.24;
 // The comet's key light at full, on the land toward it: + v (a + b v) × gain for a paint value v (0..1): the lit paint
 // gains more than the dark (the night keeps its darks), about +50% on the lit land.
 const KEY = { gain: 0.62, a: 0.5, b: 1.2 };
@@ -528,20 +532,23 @@ function paintComet(x, P, k, tone) {
     for (let q = 0; q <= 20; q++) { const [qx, qy] = curvePt(c, (q / 20) * len); if (q) x.lineTo(qx, qy); else x.moveTo(qx, qy); }
     x.stroke();
   }
-  // ion tail: straight streamers fanning a little above the dust tail, with knots drifting out
+  // ion tail: straight streamers fanning a little above the dust tail, with knots drifting out. Near the head, where
+  // they lie over the dust tail, they are the coma's cream and thinner (blue over the thinning gold would mix into
+  // parallel pink and blue-white bands); they turn blue as they leave it (ION_WARM: the share of the length that is warm)
   for (let i = 0; i < 6; i++) {
     const d = -0.06 + (r() - 0.5) * 0.035, len = Li * (0.7 + r() * 0.3), w = i ? 12 + r() * 26 : 6, a = i ? 0.08 + r() * 0.1 : 0.22;
     x.save(); x.rotate(d);
-    const g = x.createLinearGradient(0, 0, len, 0);
-    g.addColorStop(0, rgbStr(mixRGB(ION, NUC, 0.5), a)); g.addColorStop(0.3, rgbStr(ION, a * 0.8)); g.addColorStop(0.7, rgbStr(ION, a * 0.3)); g.addColorStop(1, rgbStr(ION, 0));
+    const g = x.createLinearGradient(0, 0, len, 0), wu = ION_WARM * Li / len;
+    g.addColorStop(0, rgbStr(CREAM, a * 0.5)); g.addColorStop(wu * 0.6, rgbStr(mixRGB(CREAM, ION, 0.25), a * 0.45)); g.addColorStop(wu, rgbStr(mixRGB(CREAM, ION, 0.7), a * 0.6));
+    g.addColorStop(Math.max(wu + 0.05, 0.4), rgbStr(ION, a * 0.7)); g.addColorStop(0.7, rgbStr(ION, a * 0.3)); g.addColorStop(1, rgbStr(ION, 0));
     x.fillStyle = g; x.beginPath(); x.moveTo(0, -1.2); x.quadraticCurveTo(len * 0.5, -w * 0.32, len, -w / 2); x.lineTo(len, w / 2); x.quadraticCurveTo(len * 0.5, w * 0.32, 0, 1.2); x.closePath(); x.fill();
     x.restore();
   }
   for (let i = 0; i < 6; i++) {
     const r2 = rng(seed * 7 + i), f = (r2() + tq * (0.02 + r2() * 0.015)) % 1, px = f * Li, a = 0.2 * (1 - f) ** 1.3 * smooth(0, 0.06, f);
     x.save(); x.rotate(-0.06); x.translate(px, 0); x.scale(1, 0.18);
-    const R = 40 + f * 90, g = x.createRadialGradient(0, 0, 0, 0, 0, R);
-    g.addColorStop(0, rgbStr(ION, a)); g.addColorStop(1, rgbStr(ION, 0));
+    const R = 40 + f * 90, g = x.createRadialGradient(0, 0, 0, 0, 0, R), kc = mixRGB(CREAM, ION, smooth(0.6 * ION_WARM, ION_WARM, f));
+    g.addColorStop(0, rgbStr(kc, a)); g.addColorStop(1, rgbStr(kc, 0));
     x.fillStyle = g; x.fillRect(-R, -R, 2 * R, 2 * R); x.restore();
   }
   // coma (adds light) and the nucleus

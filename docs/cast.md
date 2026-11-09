@@ -33,21 +33,28 @@ lists as Markdown: `node .claude/skills/cinecode/scripts/inventory.mjs cast`.
 | speeds | world units per second at scale 1, per gait. A beat's `speed` multiplies it. |
 | poses | named still poses: `"pose": "sit"` on a scene actor, `{ "do": "pose", "pose": "alert" }`. Pose changes blend smoothly. |
 | gaits | walk cycles used by moves: `walk`, `run`, and rig-specific ones (`trot`, `hop`, `scurry`, `fly`, `glide`), chosen with a move's `gait`. Feet plant on the ground while the body moves. |
-| gestures | short motions with a fixed length: `{ "do": "gesture", "who": "fox", "name": "bow" }` |
+| gestures | short motions with a fixed length: `{ "do": "gesture", "who": "fox", "name": "bow" }`. They layer in the order they start (one started during another takes over from the pose at that moment). |
 | expressions | `expr` on a scene actor, a `say` line, an `emote`, `pose` or `set` beat |
 | params | the look: colours (any CSS hex colour) and a few rig-specific switches |
 
 Every actor also gets **idle life** without being asked: it breathes, blinks every few seconds (seeded, so every render is
-the same), glances at whoever starts speaking, and moves its mouth from the voice's loudness while it speaks.
+the same), glances at whoever starts speaking (and keeps looking at them if it was never told where to look), and
+moves its mouth from the voice's loudness while it speaks. An expression change happens behind a quick blink while the
+mouth eases between the two faces, except at a cut; a line's `expr` holds until a beat changes it, unless it is a
+reaction (`surprised`, `laugh`, `laughing`, `scared`), which passes 0.4 s after the line
+([expressions](storyboard.md#do-actions)).
 
 `perch` rigs (owl, songbird, squirrel, butterfly) can stand on a set's `perch` anchors (branches); `flies` rigs (owl,
-songbird, butterfly) can `fly`. A flight always ends standing somewhere (the ground, a surface, a perch, a hollow, or
-riding another actor): no rig hovers ([fliers](storyboard.md#do-actions)). Any actor can carry a rider
+songbird, butterfly) can `fly`. A flight ends standing somewhere (the ground, a surface, a perch, a hollow, or riding
+another actor), or, with `"height"`, hovering in the air, flapping, where it can talk and gesture
+([hovering](storyboard.md#hovering)). Any actor can carry a rider
 ([riding](storyboard.md#riding)); the tortoise has a riding point on its shell, other rigs carry riders on the top
 centre of their drawing. In water, only the frog may stand without wading (lint `in-water`).
 
-`look` `to` `up`, `sky` or `down` tilts the head of every rig except the beetle, the butterfly and the songbird. On a
-small rig in a wide or full shot the tilt is only a few pixels: a pose reads better there (the mouse's `alert`).
+`look` tilts the head of every rig except the beetle, the butterfly and the songbird: `up` all the way up, `down` all
+the way down, `sky` a moderate look up (about 16°), an actor or a place along the line to it, and a look's `"tilt"`
+(−1..1; + up, − down) sets the pitch outright. On a small rig in a wide or full shot the tilt is only a few pixels: a
+pose reads better there (the mouse's `alert`). The deer's long neck stays up, so its head barely drops even at −1.
 
 **An animal the engine doesn't have.** Writing a rig is a big job ([adding a rig](#adding-a-rig)); for a short film,
 reskin the nearest rig with `params` and cast `scale`, and draw what it lacks as an overlay that follows the actor
@@ -55,7 +62,8 @@ reskin the nearest rig with `params` and cast `scale`, and draw what it lacks as
 substitutions that read well: a firefly is a small butterfly with dark wings and a yellow body (`scale` 0.6) plus a
 glow overlay; a crow a near-black songbird (`scale` 1.3; loosely, a bat); a rabbit a hare at `scale` 0.7; a rat a
 mouse; a wolf or a dog a grey or brown fox; a ladybird a red beetle (no spots); a turtle a tortoise. Look at it on a
-contact sheet before you commit, and name the substitution in the screenplay.
+contact sheet before you commit, and name the substitution in the screenplay. A prop (a strawberry, a kite, a
+lantern) is built the same way: a small static rig or a hidden stand-in with an overlay ([effects.md](effects.md#props)).
 
 **Cast scale vs. size.** Use the cast's `scale` (0.1–10) to make one actor bigger or smaller than the rig's default.
 The framing, routing and lint all account for it.
@@ -78,6 +86,12 @@ The animal rigs share eleven expressions:
 | `scared` | eyes wide, small pupils, mouth open |
 | `determined` | brows down, set mouth |
 
+Seen side-on some faces read differently from their names. On the hedgehog, the mouse and the badger, `sad` (a
+heavy lid slanted up toward the snout, the frown hidden in profile) reads as a scowl, close to `angry`: `worried`
+reads anxious and `sleepy` weary, and a pose or the music can carry the sadness. Talking opens the badger's mouth to a
+dark red gape with fangs and shows the fox's teeth, which read as a snarl on a gentle line in a close-up (frame those
+lines medium), and the deer's dropped white jaw reads as a grin. Draw the faces with `cast-sheet` before a close-up.
+
 The owl adds `one-eye`. The human has its own set: `neutral`, `happy`, `sad`, `surprised`, `angry`, `sleepy`,
 `worried`, `laughing`, `curious` (note `laughing`, not `laugh`). An expression a rig doesn't have is a `check`
 problem on `emote`, `pose` and `set` beats, and a warning on `say` lines and scene actors.
@@ -98,9 +112,10 @@ stooped). Speeds depend on age and build (a child walks about 92 units/s; an eld
 - **gaits:** `walk`, `run`
 - **gestures** (seconds): `wave` 1.8, `nod` 0.9, `shake-head` 1.1, `shrug` 1.2, `laugh` 1.8, `jump-for-joy` 1.3
   (leaves the ground), `point` 1.3 (follows her eyeline: look `up` first to point at the sky, or at someone to point
-  at them), `point-up` 1.3, `point-down` 1.3, `bow` 1.7, `gasp` 1.1, `beckon` 1.7, `clap` 1.4
+  at them; a gesture beat passes only its `name`, so a `to` on it is ignored), `point-up` 1.3, `point-down` 1.3,
+  `bow` 1.7, `gasp` 1.1, `beckon` 1.7, `clap` 1.4
 - **expressions:** `neutral`, `happy`, `sad`, `surprised`, `angry`, `sleepy`, `worried`, `laughing`, `curious`
-- **head pitch:** `look` `to` `up` / `sky` / `down` tilts the head; the eyes follow.
+- **head pitch:** `look` `to` `up` / `sky` / `down` (or a look's `tilt`) tilts the head; the eyes follow.
 
 **Params.** Colours accept hex (`#3b2a20`) or a name: `red`, `blue`, `green`, `yellow`, `orange`, `pink`, `purple`,
 `brown`, `black`, `white`, `grey`, `blonde`, `ginger`, `navy`, `teal`, `cream`, `brass`, `gold`, `silver`, `copper`,
@@ -186,7 +201,8 @@ Height 83 units, length 92. Speeds (units/s at scale 1): walk 52, trot 148, run 
 
 ### frog
 
-Height 19 units, length 24. Speeds (units/s at scale 1): walk 26, hop 26, run 92.
+Height 19 units, length 24. Speeds (units/s at scale 1): walk 26, hop 26, run 92. `walk` and `hop` are the same small
+hops (slow: 300 world px take about 9 s); `run` is big leaps, the way to move a frog quickly.
 
 - **poses:** `stand`, `alert`, `sit`, `sleep`, `croak`, `rest`
 - **gaits:** `walk`, `hop`, `run`
@@ -334,10 +350,24 @@ How it fits together:
 - `pose` is the current pose object: one of `poses`, a gait frame (`gaits.walk(phase)` for phase 0..1 over one
   stride), a gesture frame (`gestures.nod.at(u, base)` for u 0..1), or a blend of them. Pose fields are plain numbers
   that only your `paint` reads. A pose may set `lift` (units above the ground, e.g. a jump).
+- A gesture's `at(u, base)` should start and end on the pose it is given (`base`). If it doesn't, the actor eases it
+  in or out over 0.15–0.3 s (longer for a bigger move). A gesture may list `keys`, the u of its key drawings
+  (`{ dur, at, keys: [0.1, 0.4, 0.7, 1] }`; the cast sheet draws them). One whose `keys` include 1 is one-way: it ends
+  on purpose away from the pose (the squirrel's `drop` leaves the acorn on the ground) and is not eased out.
 - `F` is the face for this frame, from the expression, blink and lip sync: `F.eye` (`open`, `wide`, `happy`),
   `F.lid` (0..1), `F.open` (mouth, 0..1; it follows the voice while talking), `F.smile` (−1..1), `F.browY`,
   `F.browT`, `F.tilt`, `F.look` (−1..1 head turn), `F.pitch` (−1..1 head tilt). `eye()`, `brow()`, `cel()` and
-  `line()` in `engine/core/style.mjs` draw them in the house style.
+  `line()` in `engine/core/style.mjs` draw them in the house style. The helpers, all in local units and taking `T`
+  first: `cel(T, pts, colour, shade = 2.2, ink = 1.15, seed)` fills a closed outline, shades the side away from the
+  light by `shade` units and inks it (`ink` 0: no outline); `line(T, pts, width, { seed, taper, color, closed })` an
+  inked stroke; `fillP(T, pts, colour)` a flat fill; `dot(T, x, y, r, colour)`; `smoothPts(T, pts, { closed, px,
+  corner })` rounds a polygon into a smooth outline; `eye(T, x, y, rx, ry, F.eye, iris, look, F.lid, F.tilt)` and
+  `brow(T, x, y, w, F.browY, F.browT)`; `darken(hex, f)`, `lighten(hex, f)`, `rgba(hex, a)`. From
+  `engine/core/lib.mjs`: `ell(cx, cy, rx, ry, seed, wobble = 1.5, rot)` a hand-drawn ellipse as points, `rpoly(pts,
+  r, { seed })` a rounded polygon, `rng(seed)` a seeded generator.
+- A prop is a rig too (a strawberry that splits and is eaten): no gaits or gestures to speak of (`gaits: { walk: () =>
+  stand }`, `speeds: { walk: 1 }`), a pose per state (`split`) and params for the rest (`left: 1` → 0 as a half is
+  eaten), `shadowW` to size its ground shadow. See [effects.md](effects.md#props) for what comes with it.
 - `o.P` holds the params (the rig's `params` merged with the cast's), `o.t` the scene time for secondary motion.
   Set `o.out.head` and `o.out.mouth` with `T.map(x, y)`: the camera composes close-ups on the head, captions avoid
   it, and the mouth is where talking happens.

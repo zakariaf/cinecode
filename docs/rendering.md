@@ -54,7 +54,10 @@ node bin/cinecode.mjs plan films/my-film
 `check` lists every problem with its path in `film.json` ([storyboard.md](storyboard.md#checking-a-storyboard)).
 `plan` compiles the film and prints its length and the shot list: id, set, size, start, length and the first line of
 each shot. Unvoiced lines use an estimate, marked `~`. Neither prints warnings; the Claude Code skill's
-`node .claude/skills/cinecode/scripts/warnings.mjs films/my-film` does.
+`node .claude/skills/cinecode/scripts/warnings.mjs films/my-film` does. Nor does `plan` print when each beat starts
+and ends: `node .claude/skills/cinecode/scripts/timeline.mjs films/my-film [shot ids]` prints every beat's start and
+end (in the shot and in the film), a move that runs on past its cut and into which shot, every mark's film time (for
+`sheet --t=`), and a pose or gesture that starts while its actor is still moving (where it is lost).
 
 ```
 compile  0:38.8, 6 shots, 0/5 lines voiced                        0.4 s
@@ -74,7 +77,8 @@ shot      set       size             start    dur   lines
 ```
 
 The first shot starts at 0:04 because the opening title card comes first; the total (0:38.8) includes both title
-cards, 4 s each here, so for a short film they are a big share of its length.
+cards, 4 s each here, so for a short film they are a big share of its length. Don't cut them below 3 s: a shorter card
+never reaches full strength ([titles](storyboard.md#format-and-titles)).
 
 ### voice
 
@@ -118,7 +122,10 @@ footprints and the caption box. `--frame` writes full-size stills instead of a s
 
 `music` composes the score to `out/music.wav`. `mix` composes it and mixes it with the cached dialogue, the
 effects and the ambience, mastering to −16 LUFS in `out/mix.wav` ([sound.md](sound.md#the-mix)). Unvoiced lines are
-left out with a warning.
+left out with a warning. To check the score without listening, the skill's
+`node .claude/skills/cinecode/scripts/levels.mjs films/my-film [music|mix]` prints its level per shot in 0.5 s
+windows and flags a second or more of near-silence under a cue (a whole-shot average hides it); it reads the WAV
+itself, no ffmpeg needed.
 
 ### animatic
 

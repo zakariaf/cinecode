@@ -28,8 +28,16 @@ the walk region in green, water and a route](images/set-sheet-meadow.jpg)
 Each anchor is labelled with its name, the first letter of its type and the actor scale there (`s1.38`); the tick
 above it is a standing hare's height at that spot. Red ellipses are solid footprints, the dashed green line bounds
 the walkable region, blue outlines are water, teal ellipses are stepping stones, and a yellow polyline is the kit's
-sample route when it has one. The skill's inventory script prints the anchors as Markdown tables:
-`node .claude/skills/cinecode/scripts/inventory.mjs sets`.
+sample route when it has one. The skill's inventory script prints the anchors as Markdown tables, and every prop's
+painted extent (its world box, e.g. the hill's `hawthorn` 2900–3340 × 436–770):
+`node .claude/skills/cinecode/scripts/inventory.mjs sets`. Custom drawing code reads the same boxes from
+`api.set.props` ([effects.md](effects.md#props)).
+
+Two things the sheet doesn't show. A prop's painted extent beyond its footprint: a tree's crown has no anchor, so read
+its box from the inventory to stage something in it. And the front layer (foreground grass blades, ferns, low branches),
+which is drawn over the actors with its own parallax: in a low or close shot of a small actor near the bottom of the
+frame, blades can cross it. Check those shots on a contact sheet and move the actor up the ground, or change the
+framing.
 
 ## Coordinates and scale
 
@@ -114,12 +122,15 @@ A dirt path winding left to right between big trunks, misty depths behind; an ol
 
 ### hill
 
-A long grassy slope rising left to right to a crest with an old standing stone, a hawthorn beyond it, hazy ranges behind. At night the hill re-lights itself for the moon: the slope sinks into cool shadow, the crest keeps a moonlit rim and the standing stone is the brightest shape on the land.
+A long grassy slope rising left to right to a crest with an old standing stone, a hawthorn beyond it, hazy ranges behind. At night the hill re-lights itself for the moon: the slope sinks into cool shadow, the crest keeps a moonlit rim (its tussocks shaded whole), the far ranges drop back with the trees on their crests, and the standing stone is the brightest shape on the land.
 
 - **size:** 3300 × 1500 world px; camera centre x 800–2900, y 350–1250; a ridge set: the ground follows the slope, so give `x:` only
 - **default time:** `golden`; **ambience:** `wind-hill` by day, `meadow-night` at twilight and night
 - **ground:** grass, dirt
 - **solid props** (actors route around them; lint flags standing inside one): `standing_stone`, `rock_low`, `rock_mid`, `rock_high`, `hawthorn`
+- **the hawthorn's crown** (no anchor): about x 2990–3330, y 440–650 (centre 3160, 545). The ground under its middle
+  is at y 757, scale 1.3, so a flier hovering there needs `"to": "x:3160", "height": 160` (height = (ground y − y) ÷
+  scale): that is how a kite or a bird gets stuck in it
 
 | anchor | type | x | y | scale |
 |---|---|---|---|---|
@@ -325,7 +336,7 @@ The description:
 | `view` | where the camera centre may go |
 | `refX`, `refY` | the reference camera centre: parallax offsets are measured from it |
 | `horizon`, `laneY`, `baseS`, `lane(x)` | perspective: the actor scale is `baseS` on the lane y and 0 at the horizon. `lane(x)` gives the main lane's y at x (default `laneY`). `scaleAt(x, y)` may replace the formula. |
-| `layers` | `[{ k, paint(ctx, rnd, S, E), front, outline, anim }]`. `k` is the parallax factor (0.5 = far, 1 = the ground, > 1 or `front: true` = drawn in front of the actors). `paint` draws once in world coordinates inside the extent `E` (`{ x0, x1, y0, y1 }`) with the seeded random `rnd()`; the result is cached. `outline: { w, color, alpha }` inks the layer's silhouette. `anim(ctx, t)` draws moving parts every frame (water shimmer). |
+| `layers` | `[{ k, paint(ctx, rnd, S, E), front, outline, anim, shade }]`. `k` is the parallax factor (0.5 = far, 1 = the ground, > 1 or `front: true` = drawn in front of the actors). `paint` draws once in world coordinates inside the extent `E` (`{ x0, x1, y0, y1 }`) with the seeded random `rnd()`; the result is cached. `outline: { w, color, alpha }` inks the layer's silhouette. `anim(ctx, t)` draws moving parts every frame (water shimmer). `shade(S)` → `{ rgb, a }` or `null` shades the layer's own paint: it is multiplied by `rgb` (0..255 each) and crossfaded in by `a` (before haze), so it never darkens what lies behind the layer and blurred edges take it too (the hill shades its far ranges by night this way). |
 | `props` | `[{ id, x, y, solid: { rx, ry }, bounds: [x0, y0, x1, y1], paint(ctx, rnd, S), anchors, top }]`: things that sort in depth with the actors by `y`. `solid` is the footprint ellipse actors route around. `bounds` is a hint of where it paints. `anchors` on a prop belong to it (a surface on its top). |
 | `anchors` | `{ name: { x, y, type, depth, face, clip, branch, at, s, surface } }`; type defaults to `ground`, `y` to the lane. For a `perch`, `branch: { pts, w0, w1 }` and `at` (0..1 along it). For a `hollow`, `clip` is the opening's polygon. `face` is the facing an actor placed there takes; `s` overrides the scale there; `surface` the footstep sound. |
 | `walk` | `{ region, ground, band, water, stones, paths }`: `region` the walkable polygon (default: the whole area); `ground(x)` and `band` make a ridge set; `water` a list of polygons; `stones` prop ids whose `top` ellipse (`{ x, y, rx, ry }`) can be stood on in water; `paths` `[{ poly, surface }]`: ground with its own footstep sound (`surface` defaults to `dirt`). |

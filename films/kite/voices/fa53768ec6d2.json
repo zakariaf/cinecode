@@ -1,0 +1,34 @@
+{
+ "id": "fa53768ec6d2",
+ "who": "grandpa",
+ "text": "Mind that tree, now.",
+ "voice": "Algenib",
+ "tone": "old, warm, amused",
+ "prompt": "[old, warm, amused] Mind that tree, now.",
+ "model": "gemini-3.8-flash-lite-tts",
+ "qaModel": "gemini-3.8-flash",
+ "sampleRate": 48000,
+ "dur": 2.18,
+ "fps": 24,
+ "envVersion": 1,
+ "env": [0,0.066,0.994,0.991,0.879,0.593,0.192,0,0,0,0,0.996,0.893,0.525,0.132,0.314,1,1,0.883,0.503,0.108,0.043,0.339,0.876,1,1,1,1,0.993,0.953,0.914,0.988,0.998,1,0.978,0.708,0.366,0.177,0.679,0.989,0.978,0.995,0.999,0.975,0.957,0.959,0.936,0.895,0.943,0.996,0.947,0.5,0],
+ "qa": {
+  "wer": 0,
+  "transcript": "Mind that tree now",
+  "leading": 0,
+  "trailing": 0,
+  "pass": true,
+  "take": 1,
+  "takes": [
+   {
+    "attempt": 1,
+    "direction": "old, warm, amused",
+    "wer": 0,
+    "transcript": "Mind that tree now",
+    "leading": 0,
+    "trailing": 0,
+    "dur": 2.18
+   }
+  ]
+ }
+}

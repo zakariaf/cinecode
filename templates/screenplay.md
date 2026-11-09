@@ -15,7 +15,8 @@ later with a new meaning (a line said early that pays off at the end).>
 
 ### <Name>, <what they are> (lead)
 - **Rig:** `<rig>` <!-- hare, tortoise, fox, owl, squirrel, songbird, mouse, hedgehog, badger, deer, frog, beetle, butterfly, human.
-     No rig for the animal? The nearest one reskinned, plus an overlay for what it lacks (docs/cast.md). -->
+     No rig for the animal? The nearest one reskinned, plus an overlay for what it lacks (docs/cast.md).
+     A prop the story turns on (a kite, a strawberry)? docs/effects.md, "Props". -->
 - **Look:** <colours as hex, size (cast `scale`), rig params: e.g. human `age`, `hairStyle`, `glasses`, `scarf`>
 - **Personality:** <how they move and talk; what they want; how they change>
 - **Voice:** `<Gemini voice>`, tone "<two or three delivery adjectives>" <!-- adjectives only: nouns in a tone get read aloud -->
@@ -36,8 +37,9 @@ later with a new meaning (a line said early that pays off at the end).>
 | 1 | <place> (`meadow`) | `morning` | `stump_front`, `pond_edge` | <what happens here> | 30 s |
 | 2 | <place> (`<kit>`) | `<time>` | `<anchor>`, `<anchor>` | <…> | <seconds> |
 
-**Length target:** <total, title cards included>. <About 15 shots and 15 lines a minute; shots average 4 s. Under
-30 s: 5–7 shots, 3–5 lines, title cards of 2–2.5 s.>
+**Length target:** <total, title cards included>. <Shots average 4 s; a title card needs 3 s to be read. About 30 s:
+5–6 shots, 3–5 lines, cards of 3 s; a minute: 12–14 shots, cards of 4 s. A slow voice can take twice the estimate:
+aim about 10% under.>
 
 <!-- kits: forest, hill, meadow, stream, valley, village, wayside. times: dawn, morning, noon, afternoon, golden,
      sunset, twilight, night (or a change across a scene: from golden to twilight). -->

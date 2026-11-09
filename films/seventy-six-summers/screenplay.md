@@ -271,7 +271,7 @@ The audience hears the complete five-note tune exactly once at the start, hummed
 **1.2 — MEDIUM ("PROMISE TWO-SHOT", locked composition 2) — static — 4.5 s**
 - Action: YOUNG NELL sits against the stone, her scarf trailing in the grass. YOUNG PEBBLE rests beside her: amber, bright, no bigger than a loaf of bread, his star crisp. She points up at the comet as she speaks, then turns to him.
 - YOUNG NELL [small, earnest]: "When it comes back, will you be here?"
-- Action: Pebble looks at the comet, then at her.
+- Action: Pebble turns round to look up at the comet, high behind him, then back to her.
 - (pad 0.7 s)
 - YOUNG PEBBLE [steady]: "I'll be here."
 
@@ -507,7 +507,7 @@ The audience hears the complete five-note tune exactly once at the start, hummed
 *Grade: early night, full colour. Moon key from upper right, a faint afterglow low at frame left, the comet a dim smudge. The stone's very tip still holds a thread of gold. Music: night.*
 
 **8.1 — MEDIUM, PROMISE TWO-SHOT (identical to 1.2) — static — 4.0 s**
-- Action: NELL, 82, sits against the stone exactly where the girl sat, in her glasses and the same moss-green scarf. Beside her, where the little tortoise sat, there is only grass. She looks up at the sky and hums four notes, stopping on A as she always does [hums]. The hum is synthesised and her mouth stays closed.
+- Action: NELL, 82, sits against the stone exactly where the girl sat, in her glasses and the same moss-green scarf. Beside her, where the little tortoise sat, there is only grass. She looks up at the comet, low over the land, and hums four notes, stopping on A as she always does [hums]. The hum is synthesised and her mouth stays closed.
 
 **8.2 — FULL — 3.0 s**
 - Action: Fidget bursts out of the mist onto the crest. He pulls up hard in a lean, with a spray of dust, panting.
@@ -595,8 +595,8 @@ The audience hears the complete five-note tune exactly once at the start, hummed
 ### SCENE 10 — HILL CREST — NIGHT (3:06.0–3:28.0)
 *Light: the comet is the key, rim-lighting every figure. Music: night, then triumph and wonder.*
 
-**10.1 — WIDE, slope — dissolve in — 2.0 s**
-- Action: Under the comet, the three of them climb the rest of the way together. Nell matches her small steps to Pebble's, and Fidget lies flat across the shell.
+**10.1 — WIDE, slope — dissolve in — 3.0 s**
+- Action: Under the comet, the three of them climb the rest of the way together. Nell matches her small steps to Pebble's, and Fidget lies flat across the shell. At the stone she turns and lowers herself to sit where the girl sat, and Pebble settles beside her, so 10.2 opens on them as they are.
 
 **10.2 — MEDIUM, PROMISE TWO-SHOT (identical to 1.2 and 8.1) — static — 6.0 s**
 - Action: Nell sits against the stone where the girl sat. Pebble rests beside her, belly to the grass, where the young tortoise sat. Fidget lies flopped on the shell. The comet is in the same place in the sky as in the prologue, now in full colour.

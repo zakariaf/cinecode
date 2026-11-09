@@ -9,7 +9,19 @@
 // Wading: a wade route carries a sink (world px) that grows with the distance travelled into the water.
 // Eyelines: a look at an actor runs from this head to that head (an anchor or point: to the point), so it has a
 // horizontal part (st.look) and a vertical one (st.tilt, the pitch of that line as a share of PITCH); "up" / "sky" /
-// "down" only pitch the head and keep the horizontal target of the look before them.
+// "down" only pitch the head (up: all the way; sky: SKY, a moderate look up; down: all the way) and keep the horizontal
+// target of the look before them; a look beat's own tilt sets the pitch outright. An actor keeps its last look until
+// a beat changes it: a glance at a speaker turns the head for the line and then back to the explicit look in force, or,
+// with none, stays on the speaker (listening never resets the head); an explicit look eases from wherever the head is.
+// Gestures layer in the order they start, each on the pose under it (an earlier gesture still running included), and
+// one that doesn't start or end on that pose is eased in and out over GEST_MIN..GEST_MAX s (longer for a bigger move);
+// a one-way gesture (its key drawings end on its last frame, keys include 1: the squirrel's dropped acorn) ends as the
+// rig drew it.
+// Expressions hold until a beat changes them, except a line's reaction (REACTIONS: a take, not a mood), which lasts the
+// line and REACT_HOLD s after it (or to the cut, if that comes first) and then gives way to the expression under it. A
+// change (except at a cut) happens behind a quick blink, and talk carries the mouth's openness across it (closing after
+// the switch, opening before it), so the face never pops; a pose face hint crossing 0.5 (FACE_HINTS: a laugh's closed
+// eyes, a gasp) switches the face too, so it gets the same blink. Changes whose blinks would overlap share one.
 // A turn (a face flip) squashes the drawing through a narrow card over about six frames, so it reads as a turn.
 // Slopes: on a set whose ground has a profile (S.groundAt: ridge / path sets like the hill; or a set whose def says
 // laneSlope: true, its lane), a grounded actor's drawing is pitched about its contact point to the angle of the ground
@@ -19,14 +31,39 @@
 // kinds, or rig.upright === true) stay vertical; rig.upright === false makes any rig follow. A rider takes its
 // carrier's pitch, and the riding point turns with the carrier. Flat ground gives exactly 0. `slope` (the ground's own
 // angle under the actor, upright or not) lays shadows on the slope.
+// Hovering: a flier can end a flight (or be placed) in the air; it holds there flapping, its feet at the hover's height
+// with a gentle bob, and talks, gestures and is framed there; its next move flies on (see "hovering" below).
 import { noise1 } from '../core/lib.mjs';
-import { idle } from '../cast/index.mjs';
-import { clamp, lerp, ease, rigPose, mixFor, contactKeys, rigSizes, hash32, mountPoint, profile as rigProfile } from './util.mjs';
+import { idle, FACES } from '../cast/index.mjs';
+import { clamp, lerp, ease, rigPose, mixFor, contactKeys, rigSizes, hash32, mountPoint, profile as rigProfile, probe } from './util.mjs';
 
 const BLEND_IN = 0.22, BLEND_OUT = 0.28, LOOK_BLEND = 0.28;
 // an eyeline's pitch: the angle (rad) that makes a full tilt, and the most a look at someone uses (the extremes stay
-// for an explicit "up" / "down")
-export const PITCH = 0.8, PITCH_MAX = 0.9;
+// for an explicit "up" / "down"); "sky": a moderate look up (about 16° on the eyeline's scale, where a comet or the
+// stars low over the land are), not the full tilt of "up"
+export const PITCH = 0.8, PITCH_MAX = 0.9, SKY = 0.35;
+// gestures: the shortest and longest ease (s) the actor gives a gesture that jumps away from the pose under it, the
+// move (in rig heights) that takes the longest, and the least move (rig heights) that counts as one
+export const GEST_MIN = 0.15, GEST_MAX = 0.3;
+const GEST_FAR = 0.3, GEST_STILL = 0.004;
+// an expression change: the blink that hides it (s: closing before the change, shut either side of it, opening after)
+// and the time the mouth takes to ease to the new face's openness (talk carries it)
+const SWAP_CLOSE = 0.0625, SWAP_HOLD = 0.021, SWAP_OPEN = 0.1, SWAP_MOUTH = 0.125;
+// a line's reaction: an expression that is a take, not a mood; it lasts the line and REACT_HOLD s after it
+export const REACTIONS = new Set(['surprised', 'laugh', 'laughing', 'scared']), REACT_HOLD = 0.4;
+// pose face hints a rig switches the face on at 0.5 (rig.mjs faceOf: eh, closed laughing eyes; the human: laugh, gasp,
+// joy), so a gesture or pose blend crossing 0.5 changes the face
+const FACE_HINTS = ['eh', 'laugh', 'gasp', 'joy'];
+// how open each expression's mouth is (the shared face table; the human's "laughing" is the table's "laugh")
+const mouthOpen = e => FACES[e]?.open ?? FACES[{ laughing: 'laugh' }[e]]?.open ?? 0;
+// the blink over an expression change, d s from it: shut from −SWAP_HOLD to +SWAP_HOLD, eased either side
+function swapBlink(d) {
+  if (d <= -SWAP_CLOSE || d >= SWAP_OPEN) return 0;
+  if (Math.abs(d) <= SWAP_HOLD) return 1;
+  return d < 0 ? ease((d + SWAP_CLOSE) / (SWAP_CLOSE - SWAP_HOLD)) : 1 - ease((d - SWAP_HOLD) / (SWAP_OPEN - SWAP_HOLD));
+}
+// the index of the last entry of a list sorted by t at or before t (−1 if none)
+function lastAt(list, t) { let i = -1; for (let j = 0; j < list.length; j++) if (list[j].t <= t) i = j; else break; return i; }
 // a turn: the squash's half-width (s) and its depth (the drawing's width at the flip = 1 − TURN_DEPTH)
 export const TURN_HALF = 0.14, TURN_DEPTH = 0.7;
 const VERTICAL = new Set(['up', 'sky', 'down']);
@@ -183,10 +220,11 @@ export class JumpLeg {
     const A = this.Afn ? this.Afn(τ) : this.A, B = this.Bfn ? this.Bfn(τ) : this.B, w = this.w(τ), u = τ / this.T;
     const air = u > 0.27 && u < 0.78, landed = u >= 0.78, P = landed ? B : A;
     const x = lerp(A.x, B.x, w), y = lerp(A.y, B.y, w), s = lerp(A.s, B.s, w);
-    const alt = this.arc * Math.sin(Math.PI * w);
+    // (from a hover, the jump starts at the hover's height)
+    const alt = this.arc * Math.sin(Math.PI * w) + (1 - w) * (A.lift || 0) * A.s;
     // onto / off a carrier: behind it on the way up from behind, in front of it on the way down
     const key = air && (this.Afn || this.Bfn) ? (w < 0.5 ? A.key : B.key) : landed ? B.key : A.key;
-    const p = { x, y, s, key, mode: air ? 'air' : P.mode, anchor: P.anchor, clip: landed ? B.clip : null, lift: alt / s, face: this.face1, airborne: air, surface: P.surface, ground: y };
+    const p = { x, y, s, key, mode: air ? 'air' : P.mode, anchor: P.anchor, clip: landed ? B.clip : null, lift: alt / s, face: this.face1, airborne: air || (!landed && A.hover != null), surface: P.surface, ground: y };
     if (air) p.jump = { A, B, w };                        // (an airborne body turns from its take-off pitch to its landing's)
     if (!air && P.mode === 'mount') Object.assign(p, { carrier: P.carrier, ground: P.ground, waterY: P.waterY, slope: P.slope });
     return p;
@@ -199,17 +237,22 @@ export class JumpLeg {
   airborne(τ) { const u = τ / this.T; return u > 0.27 && u < 0.78; }
 }
 
-// Flight: the ground track goes from A's depth line to B's; altitude = height above that track.
+// Flight: the ground track goes from A's depth line to B's; altitude = height above that track (a place's own lift
+// counts: a flight may start or end hovering). A flight that ends hovering (B.hover) flaps on time all the way and
+// settles into the hover instead of gliding down to land.
 export class FlyLeg {
   constructor({ A, B, rig, sz, speed }) {
     this.type = 'fly'; this.A = A; this.B = B; this.rig = rig;
     this.gA = A.mode === 'ground' ? A.y : A.depth ?? A.key; this.gB = B.mode === 'ground' ? B.y : B.depth ?? B.key;
-    this.altA = this.gA - A.y + (A.lift || 0) * A.s; this.altB = this.gB - B.y;
+    this.altA = this.gA - A.y + (A.lift || 0) * A.s; this.altB = this.gB - B.y + (B.lift || 0) * B.s;
     const d = Math.hypot(B.x - A.x, this.gB - this.gA) + Math.abs(this.altB - this.altA) * 0.5;
     this.arc = clamp(d * 0.22, 30, 240) * (A.s + B.s) / 2 / 1.3;
+    // into a hover the arc is a gentle swoop, never a climb far above where it stops
+    if (B.hover != null) this.arc = Math.min(this.arc, d * 0.12);
     const v = speed * (A.s + B.s) / 2;
     this.T = d / Math.max(1, v) + 0.7;
     this.d = d; this.stride = (rig.stride?.fly || 60) * (A.s + B.s) / 2;
+    this.rate = flapRate(rig, sz);
     this.face1 = Math.abs(B.x - A.x) > 2 ? Math.sign(B.x - A.x) : (A.face || 1);
     this.gait = rig.gaits?.fly ? 'fly' : rig.gaits?.glide ? 'glide' : null;
   }
@@ -218,11 +261,13 @@ export class FlyLeg {
     const u = this.u(τ), A = this.A, B = this.B;
     const x = lerp(A.x, B.x, u), gy = lerp(this.gA, this.gB, u), s = lerp(A.s, B.s, u);
     const alt = lerp(this.altA, this.altB, u) + this.arc * Math.sin(Math.PI * u);
-    const done = τ >= this.T;
-    if (done) return { ...B, face: this.face1, airborne: false };
+    const done = τ >= this.T - 1e-9;              // (a move's end, t1 − t0, may come back a hair short of T)
+    if (done) return { ...B, face: this.face1, airborne: B.hover != null };
     return { x, y: gy, s, key: gy, mode: 'air', anchor: null, clip: null, lift: alt / s, face: this.face1, airborne: true, ground: gy };
   }
   pose(τ, rig) {
+    // into a hover: flapping on time, the gait's wing-clearance lift fading out as it settles (hoverPose)
+    if (this.B.hover != null && rig.gaits?.fly) return hoverPose(rig, τ * this.rate, ease(clamp((τ / this.T - 0.7) / 0.3)));
     const u = clamp(τ / this.T), ph = (u * this.d) / this.stride;
     const fly = this.gait ? rig.gaits[this.gait](frac(ph)) : rig.poses.stand;
     const glide = rig.gaits?.glide ? rig.gaits.glide(frac(ph)) : fly;
@@ -235,6 +280,52 @@ export class FlyLeg {
   airborne() { return true; }
 }
 
+// ───────────── hovering ─────────────
+// A flier can hold still in the air (a place with "height": pos.hover is the lift it holds, in units of its scale;
+// y stays the ground line under it, like a flight). It flaps its fly gait on time at flapRate (the cadence of its
+// flight: fly speed / fly stride); the lift the gait carries is centred on the hover point (its mean taken out, so the
+// feet hover where the place says) and calmed to HOVER_FLUTTER of its swing per beat, and the whole bird bobs gently:
+// HOVER_BOB × its height, a slow seeded swell, eased in over HOVER_EASE s after it arrives.
+export const HOVER_BOB = 0.04, HOVER_FLUTTER = 0.3, HOVER_EASE = 0.8;
+export const canHover = rig => !!(rig?.flies && rig.gaits?.fly);
+export const flapRate = (rig, sz = rig) => (sz.speeds?.fly ?? rig.speeds?.fly ?? 150) / (sz.stride?.fly || rig.stride?.fly || 60);
+const MEAN_LIFT = new WeakMap();
+function meanFlyLift(rig) {
+  if (!MEAN_LIFT.has(rig)) { let m = 0; for (let i = 0; i < 16; i++) m += rig.gaits.fly(i / 16).lift || 0; MEAN_LIFT.set(rig, m / 16); }
+  return MEAN_LIFT.get(rig);
+}
+// The fly gait at phase ph (cycles), k of the way from flying to hovering: its lift (wing clearance) going from the
+// gait's own to HOVER_FLUTTER of its swing about 0.
+export function hoverPose(rig, ph, k = 1) {
+  const p = { ...rig.gaits.fly(frac(ph)) }, m = meanFlyLift(rig), l = p.lift || 0;
+  p.lift = lerp(l, (l - m) * HOVER_FLUTTER, k);
+  return p;
+}
+// What a hovering flier's drawing covers, to frame it: like util.profile (units, scale 1, facing right; head: { tilt,
+// look } poses the head, quantized the same way), but box is the union of its boxes over a wing beat, grown by the bob
+// either way (the camera holds still while the wings beat); head and mouth are where the beat starts.
+const HOVER_PROFILES = new WeakMap();
+export function hoverProfile(rig, params = {}, head = null) {
+  let m = HOVER_PROFILES.get(rig); if (!m) HOVER_PROFILES.set(rig, (m = new Map()));
+  const tilt = Math.round((head?.tilt || 0) * 8) / 8, look = Math.round((head?.look || 0) * 4) / 4, key = `${JSON.stringify(params)}|${tilt}|${look}`;
+  if (m.has(key)) return m.get(key);
+  let p = null;
+  for (let i = 0; i < 16; i++) {
+    const r = probe(rig, 0, 0, 1, 1, { pose: hoverPose(rig, i / 16), params, shadow: false, t: 0, ...(tilt ? { tilt } : {}), ...(look ? { look } : {}) }), b = r.bounds;
+    if (!p) p = { box: b.slice(), head: r.head.slice(), mouth: (r.mouth || r.head).slice() };
+    else p.box = [Math.min(p.box[0], b[0]), Math.min(p.box[1], b[1]), Math.max(p.box[2], b[2]), Math.max(p.box[3], b[3])];
+  }
+  const bob = HOVER_BOB * rigSizes(rig, params).height;
+  p.box[1] -= bob; p.box[3] += bob;
+  m.set(key, p);
+  return p;
+}
+// The hover's slow bob (units of lift) at t, for a body `height` units tall.
+function hoverBob(t, height, seed) {
+  const a = (seed % 997) / 997 * Math.PI * 2;
+  return HOVER_BOB * height * (0.8 * Math.sin(Math.PI * 2 * t / 1.9 + a) + 0.2 * Math.sin(Math.PI * 2 * t / 0.83 + 2 * a));
+}
+
 // ───────────── the actor ─────────────
 export class Actor {
   constructor({ id, rig, castDef = {}, S, sceneActors, seed }) {
@@ -244,7 +335,7 @@ export class Actor {
     this.seed = seed ?? hash32(id);
     this.mix = mixFor(rig);
     this.others = sceneActors;                   // Map id → Actor (for looks and relative targets)
-    this.moves = []; this.poseEv = []; this.gest = []; this.exprEv = []; this.exprTmp = []; this.lookEv = [];
+    this.moves = []; this.poseEv = []; this.gest = []; this.exprEv = []; this.lookEv = [];
     this.glances = []; this.faceEv = []; this.talk = []; this.visEv = []; this.alphaEv = []; this.sleepEv = [];
     this.paramEv = []; this.blinks = []; this.place0 = null;
     this.pitches = followsSlope(rig) && !!groundLine(S);       // the drawing follows the ground's slope here
@@ -271,12 +362,20 @@ export class Actor {
     const mv = this.moveAt(t);
     if (!mv) return this.place0.mount ? this.place0.mount.mountAt(t, this) : { ...this.place0.pos };
     if (mv.mount && (!mv.legs.length || t >= this.end(mv))) return mv.mount.mountAt(t, this);
-    if (mv.place) return { ...mv.place };
+    if (mv.place) return this.hovering({ ...mv.place }, t, -Infinity);
     const tt = Math.min(t, this.end(mv)), r = this.legAt(mv, tt);
     const p = r.L.at(r.τ);
     if (t >= mv.t1 && mv.final) return { ...mv.final };
+    return this.hovering(p, t, mv.t1);
+  }
+  // A hovering position bobs about its hover lift (eased in from `since`, the arrival).
+  hovering(p, t, since) {
+    if (p.hover == null) return p;
+    p.lift = p.hover + ease(clamp((t - since) / HOVER_EASE)) * hoverBob(t, this.sz.height, this.seed);
     return p;
   }
+  // Hovering at t (holding still in the air, not on a move).
+  hoverAt(t) { return canHover(this.rig) && !this.moving(t) && this.posAt(t).hover != null; }
   moving(t) { const mv = this.moveAt(t); return !!(mv && !mv.place && t < this.end(mv)); }
   // The actor this one is riding at t (an Actor), or null.
   carrierAt(t) {
@@ -392,39 +491,122 @@ export class Actor {
     if (i > 0 && r.τ < 0.16) { const prev = mv.legs[i - 1]; p = this.mix(prev.pose(prev.T, this.rig), p, ease(r.τ / 0.16)); }
     return p;
   }
-  poseAt(t) {
+  // The pose at rest: the base pose, or while hovering the fly gait flapping on, in step with the flight that brought
+  // it there (hoverPose).
+  restPoseAt(t) {
+    if (!this.hoverAt(t)) return this.basePoseAt(t);
     const mv = this.moveAt(t);
-    let p = this.basePoseAt(t), moving = false, gait = null;
+    return hoverPose(this.rig, (t - (mv ? mv.t0 : 0)) * flapRate(this.rig, this.sz));
+  }
+  // upto: the pose under that gesture (the gestures that start before it only)
+  poseAt(t, upto = null) {
+    const mv = this.moveAt(t);
+    let p = this.restPoseAt(t), moving = false, gait = null;
     if (mv && !mv.place && mv.legs.length) {
       const e = this.end(mv);
       if (t < e) {
         moving = true;
         p = this.legPose(mv, t);
         const r = this.legAt(mv, t); gait = r.L.type === 'route' && !r.L.hops ? r.L.gait : null;
-        if (t - mv.t0 < BLEND_IN) p = this.mix(this.basePoseAt(mv.t0), p, ease((t - mv.t0) / BLEND_IN));
+        if (t - mv.t0 < BLEND_IN) p = this.mix(this.hoverAt(mv.t0 - 1e-6) ? this.restPoseAt(mv.t0 - 1e-6) : this.basePoseAt(mv.t0), p, ease((t - mv.t0) / BLEND_IN));
       } else if (t - e < BLEND_OUT && !mv.noBlendOut) {
         const last = this.legPose(mv, e);
         p = this.mix(last, p, ease((t - e) / BLEND_OUT));
       }
     }
-    const g = this.gest.find(G => t >= G.t0 && t < G.t1);
-    if (g) {
+    // gestures, in the order they start, each on the pose under it (so one that starts while another is on takes over
+    // from that pose, and the first ending under it changes nothing), eased in and out where the rig's doesn't
+    for (const g of this.gest) {
+      if (g === upto) break;
+      if (t < g.t0 || t >= g.t1) continue;
       const G = this.rig.gestures[g.name], u = (t - g.t0) / (g.t1 - g.t0);
       const q = G.at(clamp(u), p);
       if (moving && gait) { const keep = contactKeys(this.rig, gait); for (const k of keep) if (k in p) q[k] = p[k]; }
-      p = q;
+      const b = this.gestBlend(g), w = Math.min(b.tin > 0 ? ease((t - g.t0) / b.tin) : 1, b.tout > 0 ? ease((g.t1 - t) / b.tout) : 1);
+      p = w >= 1 ? q : this.mix(p, q, w);
     }
     return p;
+  }
+  // How a gesture is eased in and out by the actor: { tin, tout } (s). A rig's gesture normally starts and ends on the
+  // pose it is given (its own envelope): 0. One that jumps away from the pose under it at its start (or doesn't come
+  // back to it at its end) is eased over GEST_MIN..GEST_MAX s, the longer the further the drawing has to move. A
+  // one-way gesture, whose key drawings end on its last frame (keys include 1), ends as the rig drew it (tout 0): its
+  // end is meant to differ from the pose (an acorn let go lies on the ground), and easing it back would undo it.
+  gestBlend(g) {
+    const ver = `${this.poseEv.length}|${this.moves.length}|${this.gest.length}|${this.paramEv.length}`;
+    if (g.blend?.ver === ver) return g.blend;
+    const G = this.rig.gestures[g.name], a = this.poseAt(g.t0, g), b = this.poseAt(g.t1 - 1e-6, g);
+    const time = d => (d > GEST_STILL ? GEST_MIN + (GEST_MAX - GEST_MIN) * clamp((d - GEST_STILL) / GEST_FAR) : 0);
+    const oneWay = (G.keys || []).includes(1);
+    g.blend = { ver, tin: time(this.poseGap(a, G.at(0, a), g.t0)), tout: oneWay ? 0 : time(this.poseGap(b, G.at(1, b), g.t1)) };
+    return g.blend;
+  }
+  // How far the drawing moves (in rig heights) from pose p to pose q: the largest shift of its head, mouth, hands and
+  // bounds.
+  poseGap(p, q, t) {
+    const pts = pose => {
+      const r = probe(this.rig, 0, 0, 1, 1, { pose, params: this.paramsAt(t), shadow: false, t: 0 }), B = r.bounds;
+      return [r.head, r.mouth, ...(r.hands ? [r.hands.front, r.hands.back] : []), [B[0], B[1]], [B[2], B[3]]].filter(Boolean);
+    };
+    const A = pts(p), B = pts(q);
+    let d = 0; for (let i = 0; i < Math.min(A.length, B.length); i++) d = Math.max(d, Math.hypot(A[i][0] - B[i][0], A[i][1] - B[i][1]));
+    return d / Math.max(1, this.sz.height);
   }
   // ── expression, talk, look ──
   exprAt(t) {
     if (this.asleep(t)) return 'sleepy';
-    for (const e of this.exprTmp) if (t >= e.t0 && t < e.t1) return e.expr;
-    let x = 'neutral'; for (const e of this.exprEv) if (e.t <= t) x = e.expr;
-    return x;
+    const L = this.exprLine(), i = lastAt(L, t);
+    return i < 0 ? 'neutral' : L[i].expr;
+  }
+  // The face's expression over time: { t, expr, cut } in time order. Each exprEv entry sets the expression; one with
+  // `until` (a line's reaction) gives way at that time to the expression held under it (cut: e.untilCut), unless
+  // another expression came first.
+  exprLine() {
+    if (this._expr?.n === this.exprEv.length) return this._expr.list;
+    const ev = [];
+    for (const e of this.exprEv) { ev.push({ t: e.t, e, end: false }); if (e.until != null) ev.push({ t: e.until, e, end: true }); }
+    ev.sort((a, b) => a.t - b.t || b.end - a.end);   // at one instant: a reaction ends, then the next expression starts
+    const list = []; let held = 'neutral', on = null;
+    for (const { t, e, end } of ev) {
+      if (end) { if (on === e) { on = null; list.push({ t, expr: held, cut: !!e.untilCut }); } continue; }
+      if (e.until == null) held = e.expr;
+      on = e.until == null ? null : e;
+      list.push({ t, expr: e.expr, cut: !!e.cut });
+    }
+    this._expr = { n: this.exprEv.length, list };
+    return list;
+  }
+  // The expression changes a viewer sees happen: { t, from, to } (not at a cut, where e.cut, nor asleep); changes at
+  // the same instant are one.
+  exprChanges() {
+    const out = []; let x = null;
+    for (const e of this.exprLine()) {
+      if (x !== null && e.expr !== x && !e.cut && !this.asleep(e.t)) {
+        const last = out[out.length - 1];
+        if (last && Math.abs(last.t - e.t) < 1e-6) { last.to = e.expr; if (last.to === last.from) out.pop(); }
+        else out.push({ t: e.t, from: x, to: e.expr });
+      }
+      x = e.expr;
+    }
+    return out;
+  }
+  // The mouth across an expression change (as talk): from the old face's openness to the new one's over SWAP_MOUTH s,
+  // after the switch when it closes, before it when it opens (talk only ever opens a mouth further), so the switch
+  // itself (behind the blink) never changes how open the mouth is.
+  swapMouthAt(t) {
+    let m = 0;
+    for (const c of this.exprChanges()) {
+      const a = mouthOpen(c.from), b = mouthOpen(c.to), d = t - c.t;
+      if (Math.abs(a - b) < 0.15) continue;
+      if (a > b && d >= 0 && d < SWAP_MOUTH) m = Math.max(m, lerp(a, b, ease(d / SWAP_MOUTH)));
+      else if (a < b && d < 0 && d > -SWAP_MOUTH) m = Math.max(m, lerp(a, b, ease((d + SWAP_MOUTH) / SWAP_MOUTH)));
+    }
+    return m;
   }
   asleep(t) { let a = false; for (const e of this.sleepEv) if (e.t <= t) a = e.asleep; return a; }
-  talkAt(t, fps) {
+  // the mouth: lip sync, and the ease across an expression change
+  talkAt(t, fps) { return Math.max(this.lipAt(t, fps), this.swapMouthAt(t)); }
+  lipAt(t, fps) {
     for (const L of this.talk) {
       if (t < L.t0 || t >= L.t1) continue;
       const τ = t - L.t0;
@@ -466,10 +648,11 @@ export class Actor {
     const dx = p[0] - (typeof target === 'object' ? pos.x : this.headAt(t)[0]);
     return clamp(0.8 * Math.tanh(dx / (90 * pos.s)), -0.85, 0.85);
   }
-  // Head pitch toward a target: "up" / "sky" +1, "down" −1, an actor or a point the angle of the line from this head
-  // to it (± PITCH_MAX at most), other keywords 0.
+  // Head pitch toward a target: "up" +1, "sky" SKY (a moderate look up), "down" −1, an actor or a point the angle of the
+  // line from this head to it (± PITCH_MAX at most), other keywords 0. (A look beat's own tilt overrides it.)
   pitchValue(target, t) {
-    if (target === 'up' || target === 'sky') return 1;
+    if (target === 'up') return 1;
+    if (target === 'sky') return SKY;
     if (target === 'down') return -1;
     const p = this.lookPoint(target, t); if (!p || p[1] == null) return 0;
     const [hx, hy] = this.headAt(t);
@@ -485,45 +668,61 @@ export class Actor {
     const gl = this.glances.find(g => t >= g.t0 && t < g.t1 && !(ev && ev.t > g.t0));
     return { ev, gl };
   }
+  // The look timeline: each change of where the head is aimed, in time order: { t, h (the horizontal target), p (the
+  // pitch target), tilt (a look beat's own pitch, or undefined), glance }. An explicit look holds until the next one
+  // and ends the glances still running; a glance at a speaker turns the head for the line, then back to the explicit
+  // look in force, or, with none (never told where to look), it stays on the speaker: listening never resets the head.
+  // "up" / "sky" / "down" keep the horizontal target the head rests on (the explicit look's, else the last glance's).
+  // glances = false: the explicit looks only.
+  lookChanges(glances = true) {
+    const key = `${this.lookEv.length}|${this.glances.length}`, slot = glances ? 'all' : 'told';
+    if (this._looks?.key !== key) this._looks = { key };
+    if (this._looks[slot]) return this._looks[slot];
+    const ev = this.lookEv.map(e => ({ t: e.t, k: 1, e }));
+    if (glances) for (const g of this.glances) ev.push({ t: g.t0, k: 2, g }, { t: g.t1, k: 0, g });
+    ev.sort((a, b) => a.t - b.t || a.k - b.k);   // at one instant: a glance ends, then a look, then a glance starts
+    const list = [], on = [];
+    let hold = null, rest = null;                 // the explicit look in force; with none, the target the head rests on
+    for (const x of ev) {
+      if (x.k === 1) {
+        const tg = x.e.target;
+        hold = { h: VERTICAL.has(tg) ? (hold ? hold.h : rest) : tg, p: tg, tilt: x.e.tilt };
+        on.length = 0;
+        list.push({ t: x.t, ...hold, glance: false });
+      } else if (x.k === 2) {
+        on.push(x.g); if (!hold) rest = x.g.target;
+        list.push({ t: x.t, h: x.g.target, p: x.g.target, glance: true });
+      } else {
+        const j = on.indexOf(x.g); if (j < 0) continue;   // ended by an explicit look
+        on.splice(j, 1);
+        const top = on[on.length - 1];
+        if (top) { if (!hold) rest = top.target; list.push({ t: x.t, h: top.target, p: top.target, glance: true }); }
+        else if (hold) list.push({ t: x.t, ...hold, glance: true });
+      }
+    }
+    this._looks[slot] = list;
+    return list;
+  }
+  // A channel of the head along the look timeline at t: change i eases from the value the head had at its own time
+  // (wherever it was, mid-change or not) to value(change, t) over T(change) s.
+  lookChain(list, i, t, value, T) {
+    if (i < 0) return 0;
+    const c = list[i], u = ease((t - c.t) / T(c)), to = value(c, t);
+    return u >= 1 ? to : lerp(this.lookChain(list, i - 1, c.t, value, T), to, u);
+  }
+  // Head turn (lookValue of the horizontal target): an explicit look eases over rig.lookTime (default LOOK_BLEND), a
+  // glance and the way back from it over LOOK_BLEND.
   lookAt(t, pos) {
     if (this.asleep(t)) return 0;
-    const val = (tgt, tt) => this.lookValue(tgt, tt, pos);
-    // persistent target with an eased change (slow lookers take rig.lookTime)
-    let i = -1; for (let j = 0; j < this.lookEv.length; j++) if (this.lookEv[j].t <= t) i = j;
-    let base = 0;
-    if (i >= 0) {
-      const e = this.lookEv[i], prev = i > 0 ? this.hTarget(i - 1) : null;
-      const u = ease((t - e.t) / (this.rig.lookTime ?? LOOK_BLEND));
-      base = lerp(val(prev, t), val(this.hTarget(i), t), u);
-    }
-    // glances at a speaker (ease in and out) unless an explicit look came later
-    for (const g of this.glances) {
-      if (t < g.t0 || t >= g.t1 + LOOK_BLEND) continue;
-      if (i >= 0 && this.lookEv[i].t > g.t0) continue;
-      const w = Math.min(ease((t - g.t0) / LOOK_BLEND), 1 - ease((t - g.t1) / LOOK_BLEND));
-      base = lerp(base, val(g.target, t), w);
-    }
-    return base;
+    const list = this.lookChanges(), T = this.rig.lookTime ?? LOOK_BLEND;
+    return this.lookChain(list, lastAt(list, t), t, (c, tt) => this.lookValue(c.h, tt, tt === t ? pos : this.posAt(tt)), c => (c.glance ? LOOK_BLEND : T));
   }
-  // Head pitch (pitchValue of the look target); each change blends from where the head was then over rig.lookTime
-  // (default 0.3 s), and glances at a speaker pitch toward them the same way (glances = false: the explicit looks only).
+  // Head pitch (the look's tilt, else pitchValue of its target), eased over rig.lookTime (default 0.3 s), glances
+  // included (glances = false: the explicit looks only).
   tiltAt(t, glances = true) {
     if (this.asleep(t)) return 0;
-    const T = this.rig.lookTime ?? 0.3, ev = this.lookEv;
-    const chain = (i, tt) => {
-      if (i < 0) return 0;
-      const e = ev[i], u = ease((tt - e.t) / T), to = this.pitchValue(e.target, tt);
-      return u >= 1 ? to : lerp(chain(i - 1, e.t), to, u);
-    };
-    let i = -1; for (let j = 0; j < ev.length; j++) if (ev[j].t <= t) i = j;
-    let v = chain(i, t);
-    if (glances) for (const g of this.glances) {
-      if (t < g.t0 || t >= g.t1 + T) continue;
-      if (i >= 0 && ev[i].t > g.t0) continue;
-      const w = Math.min(ease((t - g.t0) / T), 1 - ease((t - g.t1) / T));
-      v = lerp(v, this.pitchValue(g.target, t), w);
-    }
-    return v;
+    const list = this.lookChanges(glances), T = this.rig.lookTime ?? 0.3;
+    return this.lookChain(list, lastAt(list, t), t, (c, tt) => c.tilt ?? this.pitchValue(c.p, tt), () => T);
   }
   // A rider is seen only while its carrier is (it leaves with a carrier that exits, and comes back with it).
   visibleAt(t) {
@@ -539,10 +738,43 @@ export class Actor {
     return C ? a * C.alphaAt(t) : a;
   }
   paramsAt(t) { let p = this.params0; for (const e of this.paramEv) if (e.t <= t) p = { ...p, ...e.params }; return p; }
+  // idle blinks, blink beats, and the quick blink an expression change happens behind
   blinkAt(t, idleBlink) {
     let b = idleBlink;
     for (const e of this.blinks) { const u = (t - e) / 0.16; if (u >= 0 && u <= 1) b = Math.max(b, Math.sin(Math.PI * u)); }
+    // (changes whose blinks would overlap make one blink, shut from the first to the last: no flutter)
+    const T = [...this.exprChanges().map(c => c.t), ...this.faceSwitches()].sort((x, y) => x - y);
+    for (let i = 0, j = 0; i < T.length; i = ++j) {
+      while (j + 1 < T.length && T[j + 1] - T[j] < SWAP_CLOSE + SWAP_OPEN) j++;
+      b = Math.max(b, swapBlink(t < T[i] ? t - T[i] : t > T[j] ? t - T[j] : 0));
+    }
     return b;
+  }
+  // The times the pose switches the face: a face hint (FACE_HINTS) crossing 0.5 during a gesture or a pose blend (a
+  // laugh's closed eyes, a gasp), found to the frame (sampled at twice the frame rate) and refined by bisection.
+  faceSwitches() {
+    const ver = `${this.poseEv.length}|${this.moves.length}|${this.gest.length}|${this.paramEv.length}`;
+    if (this._switches?.ver === ver) return this._switches.list;
+    const on = t => { const p = this.poseAt(t); return FACE_HINTS.map(k => (p[k] || 0) > 0.5); }, found = [];
+    const spans = [...this.gest.map(g => [g.t0, g.t1]), ...this.poseEv.filter(e => e.blend > 0 && e.t > -1e8).map(e => [e.t, e.t + e.blend])];
+    for (const [a, b] of spans) {
+      const n = Math.ceil((b - a) * 48) + 1;
+      let t0 = a - 1e-3, s0 = on(t0);
+      for (let i = 0; i <= n; i++) {
+        const t1 = i === n ? b + 1e-3 : a + ((b - a) * i) / n, s1 = on(t1);
+        s0.forEach((v, k) => {
+          if (v === s1[k]) return;
+          let lo = t0, hi = t1;
+          for (let j = 0; j < 14; j++) { const m = (lo + hi) / 2; if (on(m)[k] === v) lo = m; else hi = m; }
+          found.push(hi);
+        });
+        t0 = t1; s0 = s1;
+      }
+    }
+    found.sort((x, y) => x - y);
+    const list = found.filter((t, i) => i === 0 || t - found[i - 1] > 0.02);   // (spans that overlap find one twice)
+    this._switches = { ver, list };
+    return list;
   }
   actionAt(t) {
     const mv = this.moveAt(t);

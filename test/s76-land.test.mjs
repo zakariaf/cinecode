@@ -17,6 +17,11 @@ import { compile } from '../engine/film/compile.mjs';
 import { drawFrame, frameInfo } from '../engine/film/frame.mjs';
 import { loadPlan, loadVoiceCache } from '../engine/render/film-source.mjs';
 import { getKit } from '../engine/set/kits/index.mjs';
+import rigHuman from '../engine/cast/human.mjs';
+import { probe } from '../engine/film/util.mjs';
+import { PITCH } from '../engine/film/actor.mjs';
+import * as sky from '../films/seventy-six-summers/fx/sky.mjs';
+import { blended } from '../engine/lint/lint.mjs';
 
 const DIR = fileURLToPath(new URL('../films/seventy-six-summers/', import.meta.url));
 const W = 960, H = 540;                      // the film at half size: framings scale with the frame
@@ -190,6 +195,35 @@ test('fireflyPoints: staggered, rising from the bottom of the frame, mostly behi
   }
   const all = land.fireflyPoints(head, -1, 4.5, W, H);
   assert.ok(all.every(q => q.x > 0 && q.x < W && q.y < 1.1 * H && q.a > 0 && q.a <= 1));
+});
+
+test('firefly-fill: her silhouette is cut cleanly out of the fireflies, and inside it only the fill\'s tint shows', () => {
+  // Nell seated in a close-up, the beat drawn on black: her shading (the rig's multiply passes) must not paint into
+  // the firefly layer as pale patches (9.11's white band under the nose, the strap down the jaw)
+  const R = rigHuman, params = { age: 'elder', build: 'slight', skin: '#c99a72', hairStyle: 'bun', hair: '#d9d6d0', glasses: '#b08a3a', scarf: '#5e7b3f', shirt: '#cdbfa3', bottom: 'skirt', dress: '#5f6f8c' };
+  const st = { pose: R.poses['sit-ground'], params, t: 1.3, expr: 'happy', talk: 0.4 }, X = 690, Y = 640, s = 3, face = -1;
+  const a = { R, x: X, y: Y, s, face, st, head: probe(R, X, Y, s, face, { ...st, shadow: false }).head };
+  const run = fill => {
+    const api = { W, H, cam: { zoom: 1, cx: W / 2, cy: H / 2 }, params: { who: 'nell', fill }, bt: 4.5, t: 100, dur: 6.7, shot: { t1: 200 }, actor: () => a, toScreen: p => p };
+    const c = createCanvas(W, H), x = c.getContext('2d'); x.fillStyle = '#000'; x.fillRect(0, 0, W, H);
+    land.custom['firefly-fill'].draw(x, null, api);
+    return x.getImageData(0, 0, W, H).data;
+  };
+  const m = createCanvas(W, H).getContext('2d'); R.draw(m, X, Y, s, face, { ...st, shadow: false });
+  const M = m.getImageData(0, 0, W, H).data, solid = (x, y) => x >= 0 && y >= 0 && x < W && y < H && M[(y * W + x) * 4 + 3] === 255;
+  const lit = run(0), filled = run(1);
+  let n = 0, pale = 0, bright = 0, peak = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!solid(x, y) || !solid(x - 2, y - 2) || !solid(x + 2, y - 2) || !solid(x - 2, y + 2) || !solid(x + 2, y + 2)) continue;
+    const i = (y * W + x) * 4; n++;
+    if (lit[i] + lit[i + 1] + lit[i + 2] > 24) pale++;                      // the fireflies' layer shows through her
+    if (filled[i + 2] > 70) bright++;                                         // more than the fill's tint (B 150 at 0.38 at most)
+    peak = Math.max(peak, filled[i + 1]);
+  }
+  assert.ok(n > 20000, `her silhouette is large (${n} px)`);
+  assert.equal(pale, 0, `${pale} px of her silhouette show the firefly layer (her shading painted into it)`);
+  assert.equal(bright, 0, `${bright} px inside her are paler than the fill's tint`);
+  assert.ok(peak > 25, `the fill tints her (G ${peak})`);
 });
 
 test('nearFigure: the actor at a frame point, its rig height a share of the frame, facing its own way', () => {
@@ -368,6 +402,61 @@ test('the cut runs 3:30-3:45 on the measured takes; the protected beats keep the
   for (const x of a) assert.ok(Math.hypot(x.x - actor(b, x.id).x, x.y - actor(b, x.id).y) < 0.5, `9.1: ${x.id} holds still`);
 });
 
+test('the looks at the comet aim at it: on its side and at its height (the Nells 10-18° up, not straight up)', async () => {
+  const p = await voiced(), deg = r => (r * 180) / Math.PI;
+  // [shot, who, how far the eyeline may miss the comet (deg)]; the little tortoise (null) has it nearly 60° up, past
+  // what his neck can lift, so he turns to it and lifts his head nearly all the way
+  for (const [id, who, tol] of [['1.2', 'young_nell', 2.5], ['1.5', 'young_nell', 2.5], ['8.1', 'nell', 2.5], ['1.2', 'young_pebble', null]]) {
+    const s = p.shots.find(x => x.id === id), tiltAt = t => p.actorsAt(t, s.scene).find(a => a.id === who).st.tilt || 0;
+    let held = 0;
+    for (let t = s.t0 + 0.2; t < s.t1 - 0.2; t += 1 / 12) {
+      const a = p.actorsAt(t, s.scene).find(q => q.id === who), tilt = a.st.tilt || 0, cam = s.cameraAt(t);
+      const F = sky.skyFrame({ W: p.W, H: p.H, cam, set: s.set }), cx = F.x0 + sky.COMET.head[0] * F.s, cy = F.y0 + sky.COMET.head[1] * F.s;
+      const [hx, hy] = actor(frameInfo(p, t).actors, who).head;
+      // a held look up toward the comet's side of the frame
+      if (tilt < 0.15 || Math.sign(cx - hx) !== a.face || Math.abs(tiltAt(t - 0.15) - tilt) > 0.01 || Math.abs(tiltAt(t + 0.15) - tilt) > 0.01) continue;
+      held++;
+      const eye = deg(tilt * PITCH), el = deg(Math.atan2(hy - cy, Math.abs(cx - hx)));
+      if (tol === null) { assert.ok(tilt >= 0.85 && el > eye, `${id} ${who} at ${t.toFixed(2)}: tilt ${tilt.toFixed(2)}, the comet ${el.toFixed(1)}° up`); continue; }
+      assert.ok(Math.abs(eye - el) <= tol, `${id} ${who} at ${t.toFixed(2)}: eyeline ${eye.toFixed(1)}°, the comet ${el.toFixed(1)}° up`);
+      assert.ok(eye >= 10 && eye <= 18, `${id} ${who}: ${eye.toFixed(1)}° up`);
+    }
+    assert.ok(held >= 6, `${id}: ${who} looks up at the comet (${held} frames)`);
+  }
+});
+
+test('9.12 → 10.1 → 10.2: the climb passes time, then she sits where the girl sat on screen; 10.2 opens on them as they are', async () => {
+  const p = await voiced(), s12 = p.shots.find(s => s.id === '9.12'), s1 = p.shots.find(s => s.id === '10.1'), s2 = p.shots.find(s => s.id === '10.2');
+  // the dissolve from 9.12 leaves 10.1 long enough on its own to read as time passing (the lint's 1.2 s)
+  const clean = blended(p, s1).clean;
+  assert.ok(clean >= 1.2, `10.1 plays ${clean.toFixed(2)} s on its own`);
+  // drawn height in rig units, and the place, either side of the cut 10.1 → 10.2: the same
+  const at = t => Object.fromEntries(frameInfo(p, t).actors.map(a => [a.id, { x: a.x, y: a.y, h: (a.worldBox[3] - a.worldBox[1]) / a.s }]));
+  const A = at(s1.t1 - 1 / 48), B = at(s2.t0 + 1 / 48);
+  for (const id of ['nell', 'pebble', 'fidget']) {
+    assert.ok(A[id] && B[id], `${id} in both`);
+    assert.ok(Math.hypot(A[id].x - B[id].x, A[id].y - B[id].y) < 12, `${id} stays put across the cut (${A[id].x.toFixed(0)} → ${B[id].x.toFixed(0)})`);
+    assert.ok(Math.abs(A[id].h / B[id].h - 1) < 0.12, `${id} keeps its pose across the cut (${A[id].h.toFixed(0)} → ${B[id].h.toFixed(0)} units tall)`);
+  }
+  // and she is seated at the end of 10.1 as she was at the end of 9.12 (low: well under her standing height)
+  const C = at(s12.t1 - 1 / 48);
+  assert.ok(Math.abs(A.nell.h / C.nell.h - 1) < 0.15, `seated in 9.12 (${C.nell.h.toFixed(0)} units tall) and at the end of 10.1 (${A.nell.h.toFixed(0)})`);
+});
+
+test('after the bloom the comet tints the mist on the slope gold, not into an orange streak (9.6, 9.9, 9.12)', async () => {
+  const p = await voiced(), view = n => { const v = Object.create(p); v.overlays = p.overlays.filter(o => o.name !== n); return v; };
+  const frame = (q, t) => { const c = createCanvas(p.W, p.H), x = c.getContext('2d'); drawFrame(x, q, t); return x.getImageData(0, 0, p.W, p.H).data; };
+  for (const [id, u] of [['9.6', 0.5], ['9.9', 0.5], ['9.12', 0.5]]) {
+    // the warmth (R − B) the comet adds where the mist lies, against the same frame without the comet
+    const t = shotT(p, id, u), a = frame(p, t), m0 = frame(view('hill-mist'), t), c0 = frame(view('comet'), t), L = [];
+    for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - m0[i]) + Math.abs(a[i + 2] - m0[i + 2]) > 24) L.push(a[i] - a[i + 2] - (c0[i] - c0[i + 2]));
+    L.sort((x, y) => x - y);
+    const p50 = L[Math.floor(0.5 * L.length)], p99 = L[Math.floor(0.99 * L.length)];
+    assert.ok(L.length > 5000 && p50 > 25, `${id}: the mist still takes the comet's warmth (median ${p50})`);
+    assert.ok(p99 < 95, `${id}: the warmest mist is a tint, not a streak (99th percentile ${p99})`);
+  }
+});
+
 test('every speaker is in frame while speaking', async () => {
   const p = await voiced();
   for (const l of p.lines) {
@@ -445,7 +534,9 @@ test('4.5: Pebble turns and walks on; Fidget runs after him and falls in at his 
 test('the walk to the stone, then the crane from PROMISE WIDE into the sky, with the title in the same shot', async () => {
   const p = await voiced();
   const a = actorsAt(p, '10.1', 0.01), b = actorsAt(p, '10.1', 0.99);
-  for (const id of ['pebble', 'nell']) assert.ok(actor(a, id).face === 1 && actor(b, id).face === 1 && actor(b, id).x > actor(a, id).x + 5, `10.1: ${id} walks toward the stone`);
+  // (she ends turned round and seated against the stone, facing him, as 10.2 opens)
+  for (const id of ['pebble', 'nell']) assert.ok(actor(a, id).face === 1 && actor(b, id).x > actor(a, id).x + 5, `10.1: ${id} walks toward the stone`);
+  assert.ok(actor(b, 'pebble').face === 1 && actor(b, 'nell').face === -1, '10.1: they end facing each other');
   const cam = (id, u) => { const s = p.shots.find(s => s.id === id); return s.cameraAt(s.t0 + (s.t1 - s.t0) * u); };
   const same = (c, d, what) => assert.ok(Math.abs(c.cx - d.cx) < 1 && Math.abs(c.cy - d.cy) < 1 && Math.abs(c.zoom - d.zoom) < 1e-3, `${what}: ${[c.cx, c.cy, c.zoom]} vs ${[d.cx, d.cy, d.zoom]}`);
   same(cam('10.4', 0), cam('1.6', 0.5), '10.4 opens on PROMISE WIDE');

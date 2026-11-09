@@ -344,6 +344,27 @@ test('the comet lights its patch of sky after the grade; the bloom is brighter t
   assert.ok(memL > noneA + 20);
 });
 
+test('where the ion tail lies over the dust tail near the head it stays cream and gold: no pink or blue-white band', async () => {
+  // the bloomed comet at full size (scene b of the small film, 1920 × 1080): along the ion tail's axis, out to where it
+  // leaves the dust tail (u: the share of its length), the picture is a warm cream: never magenta (green below both red
+  // and blue) and clearly redder than it is blue (not the blue-white of blue paint over the gold)
+  const json = film(); json.format = { ...json.format, width: 1920, height: 1080 };
+  const p = compile(await loadFilm(json, { custom: SKY })), t = p.marks.bloom + 3, shot = p.shotAt(t), WW = 1920, HH = 1080;
+  const c = createCanvas(WW, HH), x = c.getContext('2d'); drawFrame(x, p, t); const d = x.getImageData(0, 0, WW, HH).data;
+  const F = sky.skyFrame({ W: WW, H: HH, cam: shot.cameraAt(t), set: shot.set }), hx = F.x0 + sky.COMET.head[0] * F.s, hy = F.y0 + sky.COMET.head[1] * F.s;
+  const a = sky.COMET.ang - 0.06, Li = sky.COMET.ion.len * F.s;
+  for (const u of [0.06, 0.08, 0.1, 0.13]) {
+    const m = [0, 0, 0]; let n = 0;
+    for (let q = -4; q <= 4; q++) for (let e = -3; e <= 3; e++) {
+      const px = Math.round(hx + Math.cos(a) * (u * Li + e) - Math.sin(a) * q), py = Math.round(hy + Math.sin(a) * (u * Li + e) + Math.cos(a) * q), i = (py * WW + px) * 4;
+      for (let k = 0; k < 3; k++) m[k] += d[i + k]; n++;
+    }
+    const [r, g, b] = m.map(v => v / n);
+    assert.ok(g >= Math.min(r, b) - 2, `u ${u}: ${[r, g, b].map(Math.round).join('/')} is pink`);
+    assert.ok(r - b >= 20, `u ${u}: ${[r, g, b].map(Math.round).join('/')} is blue-white, not cream`);
+  }
+});
+
 test('the stone keeps its gold until the mark, then it is gone; the mist veils the upper slope', async () => {
   const p = await plan(), tm = p.marks.bloom, shot = p.shotAt(tm), cam = shot.cameraAt(tm), z = cam.zoom, st = shot.set;
   const stone = st.props.find(q => q.id === 'standing_stone'), top = st.anchor('stone_top');
