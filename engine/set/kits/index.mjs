@@ -28,3 +28,5 @@ for (const f of readdirSync(dir).filter(f => f.endsWith('.mjs') && f !== 'index.
     registerKit(name, () => { throw new Error(`set kit "${name}" failed to load: ${err.message}`, { cause: err }); });
   }
 }
+// The names of the kits above (a film's or project's kit of the same name replaces one: engine/film/load.mjs says so).
+export const BUILTIN_KITS = Object.freeze(listKits());

@@ -5,8 +5,10 @@ import { dirname } from 'node:path';
 import { canvas } from '../core/lib.mjs';
 import { clampCamera, MIN_ZOOM } from './set.mjs';
 import { getKit } from './kits/index.mjs';
+import { grade as filmGrade, mixGrade } from '../film/grade.mjs';
 
-// A small preview grade so night sheets read as night (the film module applies its own grade).
+// A small preview grade so night sheets read as night (the film module applies its own grade). A time a kit declares
+// (makeSet times) is previewed under its own light, as the film grades it; a name with no light is an error.
 const GRADE = {
   dawn: { sl: [255, 196, 160, 0.3], mul: [248, 238, 242], vig: 0.3 },
   morning: { sl: [255, 232, 190, 0.18], mul: [255, 255, 255], vig: 0.26 },
@@ -18,7 +20,9 @@ const GRADE = {
   night: { sl: [90, 110, 210, 0.4], mul: [104, 114, 168], vig: 0.5 },
 };
 export function previewGrade(ctx, time) {
-  const g = GRADE[time] || GRADE.morning, W = ctx.canvas.width, H = ctx.canvas.height;
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  if (!Object.hasOwn(GRADE, time)) return filmGrade(ctx, mixGrade([[time, 1]]), 0, W, H);
+  const g = GRADE[time];
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalCompositeOperation = 'soft-light'; ctx.fillStyle = `rgba(${g.sl.slice(0, 3).join(',')},${g.sl[3]})`; ctx.fillRect(0, 0, W, H);
   ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = `rgb(${g.mul.join(',')})`; ctx.fillRect(0, 0, W, H);
@@ -62,9 +66,13 @@ function overlay(ctx, S, cam, W, H) {
   }
 }
 
-// Render one set to a W×H canvas. cam defaults to the widest allowed view centred in the set's view.
-export function renderSet(S, { W = 1920, H = 1080, cam = null, sky = 'morning', t = 0, debug = false, grade = true, dof = 0, haze = true } = {}) {
+// Render one set to a W×H canvas. cam defaults to the widest allowed view centred in the set's view; sky to morning, or
+// for a kit with times of its own (makeSet times) its default, which it also shows for a time it doesn't have (its sky,
+// haze and grade). → { canvas, cam, sky: the time shown }
+export function renderSet(S, { W = 1920, H = 1080, cam = null, sky = null, t = 0, debug = false, grade = true, dof = 0, haze = true } = {}) {
   S.build();
+  const has = n => (!S.def.times || S.skyNames.includes(n) ? n : S.defaultSky);
+  sky = sky == null ? (S.def.times ? S.defaultSky : 'morning') : typeof sky === 'string' ? has(sky) : sky.map(([n, a]) => [has(n), a]);
   const v = S.view, c0 = cam || { cx: (v.x0 + v.x1) / 2, cy: (v.y0 + v.y1) / 2, zoom: MIN_ZOOM * (W / 1920) };
   const k = clampCamera(S, c0, W, H);
   const [c, ctx] = canvas(W, H);
@@ -78,23 +86,24 @@ export function renderSet(S, { W = 1920, H = 1080, cam = null, sky = 'morning', 
   if (grade) previewGrade(ctx, typeof sky === 'string' ? sky : sky[0][0]);
   if (debug) overlay(ctx, S, k, W, H);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  return { canvas: c, cam: k };
+  return { canvas: c, cam: k, sky };
 }
 
-// A labelled grid of kits. Returns the output path.
-export function setSheet(kitNames, outPath, { debug = true, sky = 'morning', cols = 2, cellW = 960, params = {} } = {}) {
+// A labelled grid of kits, each under `sky` (default: morning, or a kit's own default time: renderSet). Returns the
+// output path.
+export function setSheet(kitNames, outPath, { debug = true, sky = null, cols = 2, cellW = 960, params = {} } = {}) {
   const names = kitNames && kitNames.length ? kitNames : [];
   const cellH = Math.round((cellW * 9) / 16), rows = Math.ceil(names.length / cols);
   const [c, ctx] = canvas(cellW * Math.min(cols, names.length), cellH * rows);
   ctx.fillStyle = '#16141c'; ctx.fillRect(0, 0, c.width, c.height);
   names.forEach((name, i) => {
     const S = getKit(name)(params[name] || {});
-    const { canvas: img, cam } = renderSet(S, { sky, debug });
+    const { canvas: img, cam, sky: shown } = renderSet(S, { sky, debug });
     const x = (i % cols) * cellW, y = Math.floor(i / cols) * cellH;
     ctx.drawImage(img, x, y, cellW, cellH);
     ctx.fillStyle = 'rgba(10,10,20,.7)'; ctx.fillRect(x, y, cellW, 30);
     ctx.fillStyle = '#fff'; ctx.font = '18px sans-serif'; ctx.textBaseline = 'middle';
-    ctx.fillText(`${name} · ${sky} · zoom ${cam.zoom.toFixed(2)} · ${S.anchorNames.length} anchors · ambience ${S.ambience.day} / ${S.ambience.night}`, x + 10, y + 15);
+    ctx.fillText(`${name} · ${shown} · zoom ${cam.zoom.toFixed(2)} · ${S.anchorNames.length} anchors · ambience ${S.ambience.day} / ${S.ambience.night}`, x + 10, y + 15);
   });
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, c.toBuffer(outPath.endsWith('.png') ? 'image/png' : 'image/jpeg', 88));

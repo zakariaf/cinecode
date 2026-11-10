@@ -10,11 +10,16 @@
 // beats' place (a TITLE_PLACES name, "auto" or a fraction of the frame height). Hovering: "height" on a fly / enter /
 // place of a rig that flies (not with "on:"), or on a scene actor's starting place; a hoverer takes no sit / lie /
 // sleep / pose until a move without "height" lands it; "fly" (true / false) on an enter of a flier. A look may give "tilt" (a
-// head pitch, -1..1); DO_KEYS lists the fields only one action takes.
+// head pitch, -1..1); DO_KEYS lists the fields only one action takes. Camera (round 6): "on" / "toOn" may name world points
+// ("x:…" or "x:…,y:…", inside the set); "focus" is [x, y] in 0..1, "head" or a world point "x:…,y:…".
+// Depth (DESIGN §10): the overlay layer "depth"; a scene actor's "z" and a beat's "z" (DEPTH_DO: the actions that
+// take one) are world px; camera "z" / "zTo" stay under (1 − NEAR_FADE) × the set's lens.
 import * as SFX from '../audio/sfx.mjs';
 import * as MUSIC from '../audio/music.mjs';
 import { parseTarget, rigPose, poseNames } from './util.mjs';
 import { TITLE_PLACES } from './text.mjs';
+import { hasLight } from './grade.mjs';
+import { LENS, NEAR_FADE } from '../set/set.mjs';
 
 export const SIZES = ['establishing', 'wide', 'full', 'medium', 'close', 'extreme-close'];
 export const MOVES = ['static', 'push-in', 'pull-out', 'pan', 'track', 'tilt-up', 'tilt-down', 'handheld'];
@@ -29,7 +34,7 @@ export const sfxNames = () => [...(SFX.SFX_NAMES || []), ...Object.keys(SFX.SFX_
 export const MUSIC_EXTRAS = ['motif', 'motifVoice', 'hold', 'downbeat', 'tempo'];
 export const FX = ['dust', 'splash', 'leaves', 'sparkle', 'rain', 'fireflies', 'motes', 'mist'];
 export const FIELD_FX = ['leaves', 'rain', 'fireflies', 'motes', 'mist'];        // built-in effects that work as overlays
-export const OVERLAY_LAYERS = ['sky', 'back', 'world', 'front', 'grade', 'screen'];
+export const OVERLAY_LAYERS = ['sky', 'back', 'depth', 'world', 'front', 'grade', 'screen'];
 export const RIM_DIRS = ['left', 'right', 'top', 'upper-left', 'upper-right'];
 export const RIM_DEFAULTS = { dir: 'upper-left', color: '#fff1d6', strength: 0.8, rise: 0, width: 3 };
 const LOOK_SPECIAL = ['none', 'left', 'right', 'camera', 'sky', 'up', 'down'];
@@ -38,18 +43,20 @@ export const GRADES = ['memory', 'dream', 'none'];
 export const CAPTION_MODES = ['dialogue', 'all', 'none'];
 export const MOVE_DO = ['walk', 'run', 'hop', 'fly'];
 export const POSTURE_DO = ['sit', 'stand', 'lie', 'sleep', 'wake'];
+// the actions whose "z" (or an anchor's) changes an actor's depth (DESIGN §10)
+export const DEPTH_DO = [...MOVE_DO, 'enter', 'exit', 'place', 'set'];
 export const DO = [...MOVE_DO, 'enter', 'exit', 'pose', 'gesture', 'look', 'turn', 'emote', ...POSTURE_DO, 'custom', 'place', 'fade', 'set', 'blink'];
 const KINDS = ['say', 'do', 'sfx', 'fx', 'music', 'wait', 'title', 'mark'];
 const COMMON = ['id', 'with', 'after', 'at', 'note', 'comment', 'touch', 'contact'];
 const BEAT_KEYS = {
   say: ['say', 'text', 'tone', 'expr', 'vo', 'voice', 'dur', 'caption', 'to', 'tts', 'trimEnd'],
-  sfx: ['sfx', 'gain', 'pan', 'params', 'seed', 'caption', 'dur', 'who', 'on'],
+  sfx: ['sfx', 'gain', 'pan', 'params', 'seed', 'caption', 'dur', 'who', 'on', 'hold'],
   fx: ['fx', 'dur', 'on', 'who', 'size', 'n', 'dir', 'color'],
   music: ['music', 'mood', 'intensity', 'sting', 'name', 'key', ...MUSIC_EXTRAS],
   wait: ['wait'],
   title: ['title', 'sub', 'subtitle', 'dur', 'place'],
   mark: ['mark'],
-  do: ['do', 'who', 'to', 'from', 'speed', 'gait', 'pose', 'dur', 'expr', 'name', 'face', 'params', 'run', 'look', 'end', 'over', 'height', 'alpha', 'wade', 'depth', 'fly'],
+  do: ['do', 'who', 'to', 'from', 'speed', 'gait', 'pose', 'dur', 'expr', 'name', 'face', 'params', 'run', 'look', 'end', 'over', 'height', 'alpha', 'wade', 'depth', 'fly', 'z'],
 };
 // fields only one action takes (on top of BEAT_KEYS.do)
 const DO_KEYS = { look: ['tilt'] };
@@ -172,12 +179,15 @@ export function validateFilm(film, ctx) {
     if (!isStr(sc.set) || !sets[sc.set]) P(`${sp}.set`, `"${sc.set}" is not one of the film's sets (have: ${Object.keys(sets).join(', ')})`);
     const skyNames = S?.skyNames || ['dawn', 'morning', 'noon', 'afternoon', 'golden', 'sunset', 'twilight', 'night'];
     const anchors = new Set(S?.anchorNames || []);
-    const checkTime = (v, p) => { if (!skyNames.includes(v)) P(p, `unknown time "${v}" (one of ${skyNames.join(', ')})`); };
+    // a time is one the set has, with a light: Earth's eight, or one its kit declares (a sky a kit paints under a name
+    // of its own without declaring its grade and sun has none)
+    const unlit = v => `the kit paints a "${v}" sky but declares no light for it: give the kit times: { "${v}": { grade, sun } } (sun null: no sun)`;
+    const checkTime = (v, p) => { if (!skyNames.includes(v)) P(p, `unknown time "${v}" (one of ${skyNames.join(', ')})`); else if (!hasLight(v)) P(p, `time "${v}": ${unlit(v)}`); };
     if (sc.time !== undefined) {
       if (typeof sc.time === 'string') checkTime(sc.time, `${sp}.time`);
       else if (isObj(sc.time) && sc.time.from && sc.time.to) { checkTime(sc.time.from, `${sp}.time.from`); checkTime(sc.time.to, `${sp}.time.to`); }
       else P(`${sp}.time`, 'must be a time name or { "from": …, "to": … }');
-    }
+    } else if (isStr(S?.defaultSky) && !hasLight(S.defaultSky)) P(`${sp}.time`, `no time, and the set's default time "${S.defaultSky}" has no light: ${unlit(S.defaultSky)}`);
     const checkGrade = (g, p) => { if (!(GRADES.includes(g) || skyNames.includes(g))) P(p, `unknown grade ${JSON.stringify(g)} (one of ${[...GRADES, ...skyNames].join(', ')})`); };
     if (sc.grade !== undefined) checkGrade(sc.grade, `${sp}.grade`);
     if (sc.transition !== undefined && !['cut', 'fade', 'dissolve'].includes(sc.transition)) P(`${sp}.transition`, 'must be cut | fade | dissolve');
@@ -189,11 +199,17 @@ export function validateFilm(film, ctx) {
       else sc.fx.forEach((n, i) => { if (!FX.includes(n)) Wn(`${sp}.fx[${i}]`, `unknown world effect "${n}" (known: ${FX.join(', ')}); ignored`); });
     }
     if (sc.overlays !== undefined) {
-      if (!Array.isArray(sc.overlays)) P(`${sp}.overlays`, 'must be an array of overlay names or { "name", "params" }');
+      if (!Array.isArray(sc.overlays)) P(`${sp}.overlays`, 'must be an array of overlay names or { "name", "params", "shots" }');
       else sc.overlays.forEach((o, i) => {
         const op = `${sp}.overlays[${i}]`, name = typeof o === 'string' ? o : isObj(o) ? o.name : undefined;
-        if (!isStr(name)) { P(op, 'must be an overlay name or { "name": …, "params": { … } }'); return; }
+        if (!isStr(name)) { P(op, 'must be an overlay name or { "name": …, "params": { … }, "shots": [ … ] }'); return; }
         if (isObj(o) && o.params !== undefined && !isObj(o.params)) P(`${op}.params`, 'must be an object');
+        // "shots": the overlay draws only in these shots of the scene
+        if (isObj(o) && o.shots !== undefined) {
+          const here = (Array.isArray(sc.shots) ? sc.shots : []).filter(isObj).map(s => s.id).filter(isStr);
+          if (!(Array.isArray(o.shots) && o.shots.length && o.shots.every(isStr))) P(`${op}.shots`, `must be a non-empty list of shot ids of this scene (${here.join(', ')})`);
+          else for (const id of o.shots) if (!here.includes(id)) P(`${op}.shots`, `"${id}" is not a shot of scene ${sc.id} (shots: ${here.join(', ')})`);
+        }
         if (!(overlayDefs[name] || FIELD_FX.includes(name))) P(op, `unknown overlay "${name}" (built in: ${FIELD_FX.join(', ')}; ${Object.keys(overlayDefs).length ? `custom.mjs overlays: ${Object.keys(overlayDefs).join(', ')}` : 'custom.mjs exports no overlays'})`);
       });
     }
@@ -236,6 +252,8 @@ export function validateFilm(film, ctx) {
       if (a.face !== undefined && !faceOK(a.face)) P(`${ap}.face`, 'must be "left" or "right"');
       if (a.pose !== undefined && rigOf[id] && !rigPose(rigOf[id], a.pose)) P(`${ap}.pose`, `rig "${rigOf[id].kind}" has no pose "${a.pose}" (poses: ${poseNames(rigOf[id]).join(', ')})`);
       if (a.expr !== undefined && rigOf[id] && !(rigOf[id].expressions || []).includes(a.expr)) Wn(`${ap}.expr`, `rig "${rigOf[id].kind}" has no expression "${a.expr}"`);
+      // depth: world px off the stage (positive: farther from the lens); a rider has its carrier's
+      if (a.z !== undefined) { if (!isNum(a.z)) P(`${ap}.z`, 'must be a depth in world px off the stage (positive: farther from the lens, negative: nearer)'); else if (a.on !== undefined) Wn(`${ap}.z`, `ignored: a rider has the depth of what it rides ("${a.on}")`); }
       // starting in the air: "height" above its place ("at"), a flier only
       if (a.height !== undefined) {
         if (a.at === undefined) P(`${ap}.height`, 'only an actor starting at a place ("at") can start in the air');
@@ -258,10 +276,17 @@ export function validateFilm(film, ctx) {
         if (cam.size !== undefined && !SIZES.includes(cam.size)) P(`${hp}.camera.size`, `must be one of ${SIZES.join(', ')} (got ${JSON.stringify(cam.size)})`);
         if (cam.move !== undefined && !MOVES.includes(cam.move)) P(`${hp}.camera.move`, `must be one of ${MOVES.join(', ')} (got ${JSON.stringify(cam.move)})`);
         if (cam.angle !== undefined && !ANGLES.includes(cam.angle)) P(`${hp}.camera.angle`, `must be one of ${ANGLES.join(', ')}`);
+        // a subject: a cast member, an anchor of the set, or a world point "x:…" / "x:…,y:…" (inside the set)
+        const subject = (n, p) => {
+          if (cast[n] || anchors.has(n)) return;
+          const T = parseTarget(n);
+          if (T.kind === 'x' || T.kind === 'xy') checkTarget(n, p, { anchors, cast, S, P, allowSide: false });
+          else P(p, `"${n}" is neither a cast member, an anchor of set "${sc.set}", nor a point "x:…" / "x:…,y:…"`);
+        };
         if (cam.on !== undefined) {
           const on = typeof cam.on === 'string' ? [cam.on] : cam.on;
-          if (!Array.isArray(on)) P(`${hp}.camera.on`, 'must be an array of actor ids and/or anchor names');
-          else on.forEach((n, i) => { if (!(cast[n] || anchors.has(n))) P(`${hp}.camera.on[${i}]`, `"${n}" is neither a cast member nor an anchor of set "${sc.set}"`); });
+          if (!Array.isArray(on)) P(`${hp}.camera.on`, 'must be an array of actor ids, anchor names and/or points "x:…,y:…"');
+          else on.forEach((n, i) => subject(n, `${hp}.camera.on[${i}]`));
           if (cam.move === 'pan' && (!Array.isArray(on) || on.length < 2)) P(`${hp}.camera.on`, 'a pan needs two subjects: "on": [from, to]');
         }
         if (cam.dof !== undefined && !(typeof cam.dof === 'boolean' || isNum(cam.dof))) P(`${hp}.camera.dof`, 'must be true/false or a blur radius');
@@ -270,14 +295,27 @@ export function validateFilm(film, ctx) {
         if (cam.to !== undefined) { if (!SIZES.includes(cam.to)) P(`${hp}.camera.to`, `must be one of ${SIZES.join(', ')} (got ${JSON.stringify(cam.to)})`); else if (!zoomMove) P(`${hp}.camera.to`, 'only a push-in or pull-out can end at another size'); }
         if (cam.toOn !== undefined) {
           const on = typeof cam.toOn === 'string' ? [cam.toOn] : cam.toOn;
-          if (!Array.isArray(on) || !on.length) P(`${hp}.camera.toOn`, 'must be an array of actor ids and/or anchor names');
-          else on.forEach((n, i) => { if (!(cast[n] || anchors.has(n))) P(`${hp}.camera.toOn[${i}]`, `"${n}" is neither a cast member nor an anchor of set "${sc.set}"`); });
+          if (!Array.isArray(on) || !on.length) P(`${hp}.camera.toOn`, 'must be an array of actor ids, anchor names and/or points "x:…,y:…"');
+          else on.forEach((n, i) => subject(n, `${hp}.camera.toOn[${i}]`));
           if (!zoomMove) P(`${hp}.camera.toOn`, 'only a push-in or pull-out can end on other subjects');
         }
         if (cam.zoomTo !== undefined) { if (!(isNum(cam.zoomTo) && cam.zoomTo > 0)) P(`${hp}.camera.zoomTo`, 'must be a positive multiplier of the starting zoom'); else if (!zoomMove) P(`${hp}.camera.zoomTo`, 'only for push-in / pull-out moves'); else if (cam.to !== undefined) Wn(`${hp}.camera.zoomTo`, 'ignored: "to" sets where the move ends'); }
         if (cam.moveAt !== undefined && !(isNum(cam.moveAt) && cam.moveAt >= 0)) P(`${hp}.camera.moveAt`, 'must be seconds from the shot start (≥ 0)');
         if (cam.moveDur !== undefined && !(isNum(cam.moveDur) && cam.moveDur > 0)) P(`${hp}.camera.moveDur`, 'must be a positive number of seconds');
         if (cam.offset !== undefined && !(Array.isArray(cam.offset) && cam.offset.length === 2 && cam.offset.every(isNum))) P(`${hp}.camera.offset`, 'must be [x, y]: frame fractions (|v| ≤ 2) or world pixels');
+        // focus: the point framed (at the frame's centre): in the subjects' box, their head, or a world point
+        if (cam.focus !== undefined) {
+          const T = isStr(cam.focus) ? parseTarget(cam.focus) : null;
+          if (Array.isArray(cam.focus) ? !(cam.focus.length === 2 && cam.focus.every(v => isNum(v) && v >= 0 && v <= 1)) : !(cam.focus === 'head' || T?.kind === 'xy')) P(`${hp}.camera.focus`, `must be [x, y] (a point in the subjects' box, each 0..1 from its left / top), "head", or a world point "x:…,y:…" (got ${JSON.stringify(cam.focus)})`);
+          else if (T?.kind === 'xy') checkTarget(cam.focus, `${hp}.camera.focus`, { anchors, cast, S, P, allowSide: false });
+        }
+        // depth: the camera's at the start ("z") and at the move's end ("zTo"), world px toward the stage; it stays more than
+        // NEAR_FADE of the set's lens in front of the stage, so the stage never fades
+        for (const k of ['z', 'zTo']) if (cam[k] !== undefined) {
+          const D = S?.lens ?? LENS, lim = (1 - NEAR_FADE) * D;
+          if (!isNum(cam[k])) P(`${hp}.camera.${k}`, 'must be a depth in world px (positive: nearer the stage, a dolly in; negative: pulled back)');
+          else if (cam[k] >= lim) P(`${hp}.camera.${k}`, `must stay under ${Math.round(lim)} (3/4 of set "${sc.set}"'s lens, ${D} world px), or the stage would pass the lens: put what the camera flies past in front of the stage (a negative z) and what it flies toward behind it, or give the kit a longer lens`);
+        }
       }
       if (sh.time !== undefined) {
         if (typeof sh.time === 'string') checkTime(sh.time, `${hp}.time`);
@@ -338,6 +376,7 @@ export function validateFilm(film, ctx) {
           else if (!SFX_OK.has(b.sfx)) P(`${bp}.sfx`, `unknown sound "${b.sfx}" (known: ${sfxList()})`);
           if (b.gain !== undefined && !(isNum(b.gain) && b.gain >= 0)) P(`${bp}.gain`, 'must be a number ≥ 0');
           if (b.pan !== undefined && !(isNum(b.pan) && b.pan >= -1 && b.pan <= 1)) P(`${bp}.pan`, 'must be a number in -1..1');
+          if (b.hold !== undefined && typeof b.hold !== 'boolean') P(`${bp}.hold`, 'must be true or false (false: the next beat and the shot don\'t wait for it)');
         } else if (kind === 'fx') {
           if (!FX.includes(b.fx)) P(`${bp}.fx`, `unknown effect "${b.fx}" (one of ${FX.join(', ')})`);
           const where = b.on ?? b.who ?? (typeof b.at === 'string' ? b.at : undefined);
@@ -356,6 +395,8 @@ export function validateFilm(film, ctx) {
             if (!isStr(b.name)) P(`${bp}.name`, 'the name of a function exported by custom.mjs is required');
             else if (!ctx.custom[b.name]) Wn(`${bp}.name`, `custom.mjs has no "${b.name}" (have: ${Object.keys(ctx.custom).join(', ') || 'no custom.mjs'}); the beat only takes time`);
             if (b.dur !== undefined && !(isNum(b.dur) && b.dur >= 0)) P(`${bp}.dur`, 'must be a number of seconds ≥ 0');
+            if (b.scope !== undefined && !['shot', 'scene'].includes(b.scope)) P(`${bp}.scope`, `must be "shot" or "scene" (got ${JSON.stringify(b.scope)}): "shot" ends it at its shot's cut, "scene" lets it last its dur on into the next shots of the scene`);
+            if (b.hold !== undefined && typeof b.hold !== 'boolean') P(`${bp}.hold`, 'must be true or false (false: the next beat and the shot don\'t wait for it)');
             return;
           }
           if (b.who !== undefined && riding.has(b.who) && ['walk', 'run', 'exit'].includes(d)) P(`${bp}.do`, `"${b.who}" is riding "${riding.get(b.who)}": it can only hop off (a hop to a place) or be placed`);
@@ -430,6 +471,7 @@ export function validateFilm(film, ctx) {
           if (b.who !== undefined && (d === 'hop' || d === 'place' || d === 'fly')) { const T = parseTarget(b.to ?? b.at); if (T.kind === 'on' && d !== 'fly' && cast[T.who] && T.who !== b.who) riding.set(b.who, T.who); else riding.delete(b.who); }
           if (d === 'fade' && !(isNum(b.to) && b.to >= 0 && b.to <= 1)) P(`${bp}.to`, 'must be an opacity 0..1');
           if (d === 'set' && b.params !== undefined && !isObj(b.params)) P(`${bp}.params`, 'must be an object');
+          if (b.z !== undefined) { if (!isNum(b.z)) P(`${bp}.z`, 'must be a depth in world px off the stage (positive: farther from the lens)'); else if (!DEPTH_DO.includes(d)) Wn(`${bp}.z`, `ignored: only ${DEPTH_DO.join(', ')} change an actor's depth`); }
           if (b.face !== undefined && d !== 'turn' && !faceOK(b.face)) P(`${bp}.face`, 'must be "left" or "right"');
         }
       });

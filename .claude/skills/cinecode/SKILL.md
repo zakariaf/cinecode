@@ -13,9 +13,9 @@ cinecode turns `films/<slug>/film.json` (a storyboard) into a film: painted sets
 
 **cinecode's own folder** (engine, docs, worked examples) is `${CLAUDE_SKILL_DIR}/../../..`, written CINECODE below; this skill's folder is `${CLAUDE_SKILL_DIR}` (the references write it as `<skill>`). Where things are:
 
-- `CINECODE/docs/storyboard.md`: every storyboard field (`CINECODE/DESIGN.md` §2–4 and §9 are the contracts). `CINECODE/docs/effects.md`: custom effects; `docs/cast.md` and `docs/sets.md`: adding a rig or a kit.
-- `${CLAUDE_SKILL_DIR}/references/`: `storyboard-quick.md` (a valid skeleton, beats, camera, every valid name), `cast.md` (every rig: speeds, poses, gestures, params, what rigs can't do, substitutes for missing animals), `sets.md` (every kit: anchors with x, y and scale, props' extents; hollows), `voices.md` (the 30 voices, writing tones, fixing takes), `review.md` (rendering stills and strips, the per-frame checklist, lint rules, reviewer lenses).
-- `${CLAUDE_SKILL_DIR}/scripts/`: `inventory.mjs` (live rig and kit tables), `warnings.mjs` (warnings `check` and `plan` don't print), `timeline.mjs` (every beat's start and end, marks, moves that run past a cut), `takes.mjs` (what each voice take says), `levels.mjs` (the score's level per shot, and quiet holes in it).
+- `CINECODE/docs/storyboard.md`: every storyboard field (`CINECODE/DESIGN.md` §2–4 and §9–11 are the contracts). `CINECODE/docs/effects.md`: custom effects; `docs/cast.md` and `docs/sets.md`: adding a rig or a kit.
+- `${CLAUDE_SKILL_DIR}/references/`: `storyboard-quick.md` (a valid skeleton, a space scene, beats, camera, every valid name), `cast.md` (every rig: speeds, poses, gestures, params, what rigs can't do, substitutes for missing animals), `sets.md` (every kit: anchors with x, y and scale, props' extents, times; hollows), `effects.md` (the built-in effects: what each draws, its params, its layer), `voices.md` (the 30 voices, writing tones, fixing takes), `review.md` (rendering stills and strips, the per-frame checklist, lint rules, reviewer lenses).
+- `${CLAUDE_SKILL_DIR}/scripts/`: `inventory.mjs` (live rig, kit and effect tables), `warnings.mjs` (warnings `check` and `plan` don't print), `timeline.mjs` (every beat's start and end, marks, moves that run past a cut), `takes.mjs` (what each voice take says), `levels.mjs` (the score's level per shot, and quiet holes in it).
 - `CINECODE/films/seventy-six-summers/` is the worked example: `screenplay.md`, `film.json`, `custom.mjs` + `fx/`. `CINECODE/films/_test/custom.mjs` is a small custom-effects example, `CINECODE/films/strawberry-race/rigs/strawberry.mjs` a film-local rig (a prop).
 - The build skills, for anything the engine doesn't have: `build-rig` (a character or a prop), `build-kit` (a place), `build-effect` (weather, light, a swarm, a sound). Each ends in a gate: `cinecode verify-rig`, `verify-kit`, `verify-effect`.
 
@@ -64,16 +64,18 @@ PEBBLE (slow): "The standing stone. Tonight."
 - `frog`: sits, croaks (throat sac), catches with its tongue; small hops (`walk`, `hop`: 26, slow) or big leaps (`run`: 92).
 - `beetle`: tiny, six-legged, slow.
 - `butterfly`: flies and glides, perches with folded wings.
+- `planet`: a planet, moon or the Sun (`body`: saturn, jupiter, earth, mars, venus, mercury, uranus, neptune, moon, titan, sun); no face, holds at a perch anchor, throws no shadow. For space films (below).
+- `telescope`: a prop on a tripod; a child stands at its eyepiece (`references/cast.md`).
 
 **What isn't there: reuse, adapt, build.** For every character, prop, place and effect the story needs, in this order:
 
-1. **Reuse** a rig, kit or built-in effect that is the thing (a fox is the fox; a lantern-lit cottage is the village at dusk).
+1. **Reuse** a rig, kit or built-in effect that is the thing (a fox is the fox; a lantern-lit cottage is the village at dusk; a view through a telescope is the `eyepiece` beat). The library is more than the lists here: `inventory.mjs` prints every rig, kit and effect, and `references/effects.md` says what each built-in effect draws (`skydot`, `sunglow`, `starstream`, `eyepiece`, `lightpulse`, `orbit`, `sizerow`, `moonlets`, `debris`).
 2. **Adapt** one: `params` (coat colours, antlers, tail size, clothes), cast `scale`, a kit's time of day, plus at most a small overlay that follows the actor, and only when the result reads as the thing at the film's framing. A firefly is a dark-winged, yellow-bodied butterfly at `scale` 0.6 with a glow overlay (`CINECODE/films/glim/`). The substitutes in `references/cast.md` are this step: a fallback when they truly read, not the answer.
 3. **Build** it when an adaptation wouldn't read (a wolf in a close-up, a crow that must be a crow, a kite the story turns on, a strawberry that splits, a harbour, a thunderstorm): a new rig (`build-rig` skill; props on the ground or in the air are rigs too), a new kit (`build-kit`) or an effect (`build-effect`). Each lives in `films/<slug>/rigs|kits|effects/` and loads like a built-in once its gate passes (`cinecode verify-rig|verify-kit|verify-effect`) and you have looked at its review images.
 
 Decide at the checkpoint what you will build: a rig or a kit costs real time, an adaptation that reads is better spent effort. Never tell the person a thing isn't available; say what you reused, adapted or built.
 
-**Places: start from the existing kits** (anchors in `references/sets.md`; drawn with anchors: `cinecode set-sheet <kit> -o out/set-<kit>.jpg`); a place none of them can be is built (`build-kit`). Skies: dawn, morning, noon, afternoon, golden, sunset, twilight, night.
+**Places: start from the existing kits** (anchors in `references/sets.md`; drawn with anchors: `cinecode set-sheet <kit> -o out/set-<kit>.jpg`); a place none of them can be is built (`build-kit`). Times: Earth's eight (dawn, morning, noon, afternoon, golden, sunset, twilight, night) on every kit but `space`, which has one of its own, `space`; a time a kit doesn't have is a `check` error.
 
 - `meadow`: forest edge; the owl's hollow tree with a low branch (perches), an old stump (`stump_top`), rocks, a lily pond.
 - `forest`: a dirt path between big trunks; an oak with a mouse-sized den (`den`, a hollow), a fallen log (`log_top`), a boulder; extra wide.
@@ -82,6 +84,7 @@ Decide at the checkpoint what you will build: a rig or a kit costs real time, an
 - `valley`: a lookout knoll above a wide valley; far `view_*` landmarks for journeys seen from afar.
 - `hill`: a ridge set; a long slope rising left to right to a crest with a standing stone (`stone_top`) and a hawthorn.
 - `village`: a cottage with door and windows, picket fence and gate, well, bench (`bench_seat`), lantern, lane, a tree with perches; windows and lantern light up at dusk.
+- `space`: a starfield with the Milky Way; no ground, no sun, no shadows; perch anchors (`centre`, `west`, `east`, `far*`, `near*`) to hold planets.
 
 **Write for what the rigs can do.** Every view is side-on. Characters don't touch or hug, and hold only what you draw for them: tell the story with positions, walks, looks, poses, gestures, expressions, timing and the camera. Keep lines short (most under ten words), one emotion per line. Every scene needs a turn you can see with the sound off.
 
@@ -112,13 +115,27 @@ Look fields up in `CINECODE/docs/storyboard.md`; the short version with every va
 - **One action per beat.** Walk, then talk; `"with": "prev"` only when two things truly happen together (a gesture on its line). Pauses are `"after": 0.6`, never "…" in the text.
 - **Tones are short delivery adjectives**: "dry", "soft, tender", "squeaky, disbelieving". The voices-block tone (2–3 words) is joined with every line's tone, and only the last three descriptors are sent (`references/voices.md`).
 - **Vary the framing.** Establish a place wide, then go in; don't cut between two near-identical framings; a two-shot only when the two are close together at a similar height (see the pitfalls).
+- **Part of a subject.** `zoom` multiplies the size's zoom, but while a subject has a face the frame keeps its head in frame and above the captions (an `offset` can't push it out). When no subject has a face (a planet, a prop) a zoom above 1 crops into the framing and the `offset` moves it as given: `"zoom": 1.6, "offset": [-0.3, 0.1]` frames part of Saturn. `"focus": [0.9, 0.5]` puts that point of the subjects' box (or `"head"`, or a point `"x:…,y:…"`) at the frame's centre, for any subject; `"on": ["x:1840,y:886"]` frames a point of the set. No hidden stand-in needed.
+
+### Space and depth
+
+Films in space, or with things in front of and behind each other, are supported. To start one:
+
+- **Set and cast.** The `space` kit, `"time": "space"`, `"ambience": "none"`; a `planet` actor per world (`"params": { "body": "saturn" }`) at a perch anchor, sized with cast `scale` (true relative sizes: multiply by the ratio of radii, `references/cast.md`). An Earth side (a child at a `telescope` on the `hill` at night, a `skydot` overlay where it points) cuts to it.
+- **Depth.** A scene actor's `"z"` (world px; positive farther, negative nearer) draws it smaller or bigger and behind or in front of everything on the stage: a moon at `"z": 2400` is about half size and drawn behind Saturn. `place`, `walk`, `run`, `hop`, `fly`, `enter`, `exit` and `set` take a `"z"` too. Depth is for things in the air and sets with no painted ground: a figure standing on the hill stays at z 0 (`warnings.mjs` says when one doesn't).
+- **The camera moves through depth.** `"z"` (its depth at the shot's start, positive toward the stage) and `"zTo"` (at the move's end, over `moveAt` / `moveDur`) dolly in or out, the near things growing faster than the far; both stay under 1728 (3/4 of the lens). A `push-in` `to` a size with a `zTo` holds its subject while the rest changes (a dolly-zoom).
+- **Effects.** The built-in space effects above; `debris` drifts at many depths, so a dolly flies through it. Frame parts of a planet with `zoom` and `focus` (above).
+- **Lint** judges a crop, a focus or a dolly like a whole-subject shot, so `subject-size` can warn there: keep it with `"lint": { "allow": ["subject-size"], "note": "a crop into the rings" }` on the shot.
+- **Cut, don't dissolve, into a full-frame effect.** A scene in another set dissolves in by default, and the last scene shows through the eyepiece's black: give it `"transition": "cut"`.
+
+`references/storyboard-quick.md` has a valid space scene to start from.
 
 ## 3. Check and plan
 
 ```bash
 cinecode check films/<slug>      # validate; lists every problem with its path
 cinecode plan films/<slug>       # shot list: start, length, first line (~ = estimated, not voiced yet)
-node ${CLAUDE_SKILL_DIR}/scripts/warnings.mjs films/<slug>   # misspelled fields `check` ignores; two-shots staged too far apart; an actor dwarfed by an anchor or a bigger actor in "on"; blocked routes
+node ${CLAUDE_SKILL_DIR}/scripts/warnings.mjs films/<slug>   # misspelled fields `check` ignores; two-shots staged too far apart; an actor dwarfed by an anchor or a bigger actor in "on"; blocked routes; a custom beat drawn on past its shot; your piece replacing a built-in
 node ${CLAUDE_SKILL_DIR}/scripts/timeline.mjs films/<slug> 1.4 1.5   # each beat's start and end, moves that run on past a cut, mark times; "!" = a pose or gesture lost under a move
 ```
 
@@ -164,11 +181,11 @@ cinecode sheet films/<slug> --shots=3.3@0.1,3.3@0.3,3.3@0.5,3.3@0.7,3.3@0.9 --co
 1. Render a scene's sheet and **look at every tile**. List what's wrong, as `shot: problem → fix`: framing (size, lead room, headroom, cut-off heads), floating (feet above their own shadow when nobody is jumping, a shadow on nothing), hidden subjects (behind a trunk, a front layer, mist, an overlay, the dark), eyes (shut, looking at the wrong person), overlap (two characters drawn into each other), captions (over a face, too long, in a band someone walks into), continuity across cuts.
 2. Middle frames hide motion. For every shot with a walk, hop, entrance, camera move, gesture or pose change, render a strip of 4–6 frames and check the whole move: where it starts, that it ends where the next shot begins, that nobody slides or pops.
 3. Fix `film.json`, re-render only those shots and their neighbours, look again. Repeat until a whole pass finds nothing.
-4. `cinecode lint films/<slug> --step=0.5` (about a minute for 3½ minutes of film, seconds for a short; run long ones in the background). Read `films/<slug>/out/lint.jpg`. Fix every error and every warning that is a real problem; a warning you keep on purpose goes in the report. `edge-cut`, `tangent` and `halo` messages end with a camera change or staging that lint tried on the recompiled film: apply it and look again. A `subject-size` warning that `zoom` doesn't clear means the frame holds something besides the subject: see the lint table in `references/review.md`. One exception: a static shot is framed for the pose its subject holds for most of the shot, so one who sits or lies down early (or stands up late) overfills it while taller: keep the taller pose for most of the shot, cut on the change, or `"zoom": 0.8` (lint may still warn: keep it and say so).
+4. `cinecode lint films/<slug> --step=0.5` (about a minute for 3½ minutes of film, seconds for a short; run long ones in the background). Read `films/<slug>/out/lint.jpg`. Fix every error and every warning that is a real problem; a warning you keep on purpose gets `"lint": { "allow": ["<rule>"], "note": "why" }` on its shot (lint then lists it as kept, in green on `lint.jpg`, with no fix tried) and goes in the report. `edge-cut`, `tangent` and `halo` messages end with a camera change or staging that lint tried on the recompiled film: apply it and look again. A `subject-size` warning that `zoom` doesn't clear means the frame holds something besides the subject: see the lint table in `references/review.md`. One exception: a static shot is framed for the pose its subject holds for most of the shot, so one who sits or lies down early (or stands up late) overfills it while taller: keep the taller pose for most of the shot, cut on the change, or `"zoom": 0.8` (lint may still warn: keep it and say so).
 
 ## 6. Building what the engine lacks
 
-Small, film-only drawing (a glow on a reskinned rig, a comet, mist that parts, a reflection, a new sound) goes in `films/<slug>/custom.mjs`: it may export `custom` (custom beats, `{ "do": "custom", "name": … }`), `overlays` (whole-scene drawings on a layer: sky, back, world, front, grade, screen), `sounds`, `rigs` and `kits` (`CINECODE/docs/effects.md`). A piece worth its own file goes in the film's folders, loaded like a built-in:
+Small, film-only drawing (a glow on a reskinned rig, a comet, mist that parts, a reflection, a new sound) goes in `films/<slug>/custom.mjs`: it may export `custom` (custom beats, `{ "do": "custom", "name": … }`), `overlays` (whole-scene drawings on a layer: sky, back, depth, world, front, grade, screen), `sounds`, `rigs` and `kits` (`CINECODE/docs/effects.md`). A piece worth its own file goes in the film's folders, loaded like a built-in:
 
 ```
 films/<slug>/rigs/<kind>.mjs      export default makeRig({ kind: '<kind>', … })     build-rig skill
@@ -177,12 +194,14 @@ films/<slug>/effects/<name>.mjs   export const overlays / custom / sounds       
 cinecode/rigs|kits|effects/       the same, shared by every film in the project
 ```
 
-Film code imports the engine as `cinecode/<name>` wherever the film lives: `cinecode/lib` (rng, noise, ink, ell, rpoly, clump…), `cinecode/style` (cel, line, eye, brow…), `cinecode/rig` (makeRig, footAt, gest…), `cinecode/set` (makeSet), `cinecode/paint/<name>` (scenery, nature, water, structures…), `cinecode/engine/<path>` for anything else. Never a relative path into cinecode's folder.
+Film code imports the engine as `cinecode/<name>` wherever the film lives: `cinecode/lib` (rng, noise, ink, ell, rpoly, clump…), `cinecode/style` (cel, line, eye, brow…), `cinecode/rig` (makeRig, footAt, gest…), `cinecode/set` (makeSet), `cinecode/paint/<name>` (scenery, nature, water, structures, planets…), `cinecode/engine/<path>` for anything else. Never a relative path into cinecode's folder.
 
 - Use the build skill: it has the contract, a starter that passes its gate, and the house-style helpers. **The gate is not optional**: `cinecode verify-rig <file>` / `verify-kit <file>` / `verify-effect films/<slug> <name>` must pass, and you must look at every review image it writes, before the piece goes into `film.json`. Fix and rerun until both are good.
 - Match the style: inked wobbly outlines, gouache dabs, cel shading, light from the upper left. Emitted light (a lamp, a comet, a firefly) goes on the `grade` layer, after the night grade, or it turns grey.
-- To follow an actor, draw at `api.toScreen` of `api.actor(id).box` (null while it is off stage), sized by `api.cam.zoom`. A prop's painted extent is `api.set.props` (the hawthorn's crown has no anchor), the horizon `api.set.horizon`, a human's hand in `CINECODE/docs/effects.md`.
+- To follow an actor, draw at `api.toScreen` of `api.actor(id).box` (null while it is off stage), sized by `api.cam.zoom`; for one off the stage (its `z`), at `api.project([x, y, a.z])`, sized by the scale it returns. A prop's painted extent is `api.set.props` (the hawthorn's crown has no anchor), the horizon `api.set.horizon`, a human's hand in `CINECODE/docs/effects.md`.
 - A sound under a whole scene (rain): a custom sound that takes its length from `params`, `{ "sfx": "rain-bed", "params": { "dur": 30 } }` with no beat `dur`. The beat then takes no time and the sound plays on across the cuts (a beat `dur` would hold the shot that long).
+- A custom beat takes its `dur` in the timeline: laid `"with": "prev"` over a line, a long one holds the next line back. `"hold": false` lets the next beats go on while it plays. It also lasts its whole `dur` into the next shots (a `warnings.mjs` warning): `"scope": "shot"` ends it at its cut. A scene overlay can keep to some shots: `"shots": ["2.1", "2.4"]`.
+- Name your pieces apart from the built-in ones: a rig, kit or effect named like one replaces it for the whole film (`check` lists the file with "replaces the built-in …").
 - Deterministic and stateless: draw only from `api.t`, `api.seed`, the params and a seeded `rng()`, never from state kept between calls (workers draw frames out of order). Key timed events off `mark` beats (`api.marks`), not hard-coded seconds.
 - The built-in `fireflies` field is spread thinly over the whole world (3–6 × `n` per 420 px square): a shot of a small rig shows few even at `n: 6`. For a swarm, write an overlay around an anchor, keyed to a `mark`.
 - Run `check` (it lists the extension files it loaded), then a strip across the shots that use the piece. Make sure it never covers a character's face or makes a speaker unreadable.
@@ -221,7 +240,7 @@ cinecode render films/<slug> --from=1:20 --to=1:40  # a full-quality sequence �
 
 ## Pitfalls we hit
 
-- **Tone words read aloud.** `[quick, bright, cheeky, sincere, low, slow] Don't stop…` came back as the six adjectives; "wondering" alone came back as "Mm, wondering." Long lists, nouns ("grumpy old badger") and stage directions ("voice catching") get spoken, and no adjective is safe every time (`references/voices.md` lists the ones seen). Two or three short adjectives, the line's own delivery last; when one is read, change the word.
+- **Tone words read aloud.** `[quick, bright, cheeky, sincere, low, slow] Don't stop…` came back as the six adjectives; "wondering" alone came back as "Mm, wondering."; `[warm, gentle, soft]` was read aloud (with "tender" for "soft" it took). Long lists, nouns ("grumpy old badger") and stage directions ("voice catching") get spoken, and no adjective is safe every time (`references/voices.md` lists the ones seen). Two or three short adjectives, the line's own delivery last; when one is read, change the word.
 - **Takes that pass but are wrong.** A take can say the direction instead of the line, insert "Huh," or "Um", turn a laugh into "Oh", or (`TONE-CUT`) keep the words with no direction at all. Never trust a take you haven't read the transcript of (`takes.mjs --all`).
 - **The slow tortoise.** 15 units/s is about 20–30 world px/s: a few hundred pixels is a whole scene. Move it a small step per shot, cut instead of walking (a `place` between shots or scenes hides the distance), and let the quick characters carry the action while it plods. `speed` multipliers above about 1.5 make a slow rig scurry.
 - **Loose two-shots.** A static shot frames everything its subjects do, so two characters far apart (or one walking across) make both tiny. `warnings.mjs` catches two actors staged too far apart and a small actor dwarfed by a big one or by an anchor (`"on": ["tilly", "den"]`); lint's `subject-size` catches the rest. Stage them within a body length or two, cut between singles, or push in with `"to"` as they meet.

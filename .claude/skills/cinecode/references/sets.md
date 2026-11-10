@@ -6,7 +6,7 @@ Anchor types: ground (stand here), surface (stand on a prop top: walk there and 
 
 ### forest
 
-4400×1400 world px, camera centre x 700–3700, horizon 720, lane y 1062; ambience forest-day / forest-night.
+4400×1400 world px, camera centre x 700–3700, horizon 720, lane y 1062; Earth's eight times (default morning); ambience forest-day / forest-night.
 
 Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): oak* 800–2000 × -560–1040, elm* 2700–3850 × -560–1030, log* 2210–2600 × 1042–1134, boulder* 750–890 × 1098–1178, brambles* 3470–3770 × 960–1150.
 
@@ -26,7 +26,7 @@ Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go roun
 
 ### hill
 
-3300×1500 world px, camera centre x 800–2900, horizon 600, ridge set (ground follows a slope: give x only); ambience wind-hill / meadow-night.
+3300×1500 world px, camera centre x 800–2900, horizon 600, ridge set (ground follows a slope: give x only); Earth's eight times (default golden); ambience wind-hill / meadow-night.
 
 Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): standing_stone* 2330–2510 × 471–781, rock_low* 864–936 × 1049–1093, rock_mid* 1672–1728 × 798–838, rock_high* 2858–2942 × 716–764, hawthorn* 2900–3340 × 436–770.
 
@@ -46,7 +46,7 @@ Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go roun
 
 ### meadow
 
-2800×1500 world px, camera centre x 500–2300, horizon 700, lane y 1040; ambience meadow-day / meadow-night.
+2800×1500 world px, camera centre x 500–2300, horizon 700, lane y 1040; Earth's eight times (default morning); ambience meadow-day / meadow-night.
 
 Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): owl_tree* -280–1040 × -600–1060, stump* 1915–2185 × 860–1040, rock_a* 1162–1238 × 1142–1186, rock_b* 2301–2359 × 1068–1106, rock_c* 736–824 × 1220–1268, bush* 2560–2880 × 740–960.
 
@@ -69,9 +69,36 @@ Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go roun
 | branch_tip | perch (owl_tree) | 780 | 652 | 1.20 | wood |
 | stump_top | surface (stump) | 2050 | 901 | 1.20 | wood |
 
+### space
+
+3200×1800 world px, camera centre x -200–3400, horizon -3000, lane y 1000; its own times: space (default space); no ground, so no shadows; ambience wind-hill / wind-hill.
+
+Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): none.
+
+| anchor | type | x | y | s | surface |
+|---|---|---|---|---|---|
+| centre | perch | 1600 | 1000 | 1.00 | wood |
+| west | perch | 900 | 1000 | 1.00 | wood |
+| east | perch | 2300 | 1000 | 1.00 | wood |
+| far | perch | 1600 | 600 | 0.90 | wood |
+| far_west | perch | 800 | 600 | 0.90 | wood |
+| far_east | perch | 2400 | 600 | 0.90 | wood |
+| near | perch | 1600 | 1400 | 1.10 | wood |
+| near_west | perch | 900 | 1400 | 1.10 | wood |
+| near_east | perch | 2300 | 1400 | 1.10 | wood |
+| ground_centre | ground | 1600 | 1060 | 1.01 | grass |
+| ground_west | ground | 900 | 1060 | 1.01 | grass |
+| ground_east | ground | 2300 | 1060 | 1.01 | grass |
+| ground_far | ground | 1600 | 660 | 0.92 | grass |
+| ground_far_west | ground | 800 | 660 | 0.92 | grass |
+| ground_far_east | ground | 2400 | 660 | 0.92 | grass |
+| ground_near | ground | 1600 | 1460 | 1.11 | grass |
+| ground_near_west | ground | 900 | 1460 | 1.11 | grass |
+| ground_near_east | ground | 2300 | 1460 | 1.11 | grass |
+
 ### stream
 
-2800×1400 world px, camera centre x 700–2100, horizon 700, lane y 1050; ambience stream / stream.
+2800×1400 world px, camera centre x 700–2100, horizon 700, lane y 1050; Earth's eight times (default morning); ambience stream / stream.
 
 Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): stone_1 1124–1217 × 1029–1077, stone_2 1231–1309 × 1033–1076, stone_3 1327–1414 × 1029–1075, stone_4 1421–1520 × 1031–1082, frog_rock 1394–1466 × 1106–1146, bank_rock* 1980–2120 × 1140–1220, willow_bush* 480–800 × 760–970.
 
@@ -92,7 +119,7 @@ Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go roun
 
 ### valley
 
-2800×1400 world px, camera centre x 1000–1800, horizon 600, lane y 1200; ambience meadow-day / meadow-night.
+2800×1400 world px, camera centre x 1000–1800, horizon 600, lane y 1200; Earth's eight times (default dawn); ambience meadow-day / meadow-night.
 
 Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): lookout_rock* 1790–1970 × 1160–1250, gorse* 720–1000 × 1000–1170.
 
@@ -111,7 +138,7 @@ Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go roun
 
 ### village
 
-2800×1500 world px, camera centre x 600–2300, horizon 660, lane y 1160; ambience village-day / village-night.
+2800×1500 world px, camera centre x 600–2300, horizon 660, lane y 1160; Earth's eight times (default morning); ambience village-day / village-night.
 
 Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): cottage* 676–1448 × 234–900, bed_left* 706–992 × 796–1040, bed_right* 1110–1356 × 796–1040, fence_left* 660–1004 × 922–1074, gate_post_l* 874–1024 × 912–1074, gate_post_r* 1076–1136 × 912–1074, fence_right* 1096–1430 × 922–1074, fence_side_l1* 660–731 × 863–1072, fence_side_l2* 671–742 × 774–983, fence_side_r1* 1344–1430 × 853–1072, fence_side_r2* 1318–1404 × 754–973, well* 1525–1775 × 689–989, bench* 2047–2273 × 838–972, lantern* 1395–1554 × 664–1086, tree* 1550–3250 × -600–950, apple_tree* 120–640 × 420–912, wheelbarrow* 406–711 × 886–1120.
 
@@ -144,7 +171,7 @@ Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go roun
 
 ### wayside
 
-2800×1500 world px, camera centre x 700–2200, horizon 720, lane y 1080; ambience meadow-day / meadow-night.
+2800×1500 world px, camera centre x 700–2200, horizon 720, lane y 1080; Earth's eight times (default morning); ambience meadow-day / meadow-night.
 
 Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go round its foot): way_tree* 560–2460 × -600–1030, signpost* 2140–2340 × 874–1054, mile_stone* 700–820 × 1100–1170.
 
@@ -162,6 +189,7 @@ Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go roun
 | way_branch | perch (way_tree) | 1310 | 600 | 0.96 | wood |
 | branch_end | perch (way_tree) | 1128 | 597 | 0.96 | wood |
 | branch_base | perch (way_tree) | 1447 | 622 | 0.96 | wood |
+
 
 ## Notes that the tables don't show
 
@@ -186,3 +214,15 @@ Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go roun
 - **The front layer** (foreground grass blades, ferns, low branches) is drawn over the actors with its own parallax
   and is not on the set sheet: in a low or close shot a small actor near the bottom of the frame can be crossed by
   blades (the stream's banks, at a strawberry's height). Check those shots on a contact sheet.
+- **space** has no ground: a starfield backdrop drawn in screen space (it barely moves when the camera zooms, so a
+  push-in reads as travelling toward a planet) and one time of its own, `space` (no grade but the vignette, no sun,
+  no shadows): scenes there take `"time": "space"` (or no `time`) and `"ambience": "none"`, and any of Earth's eight
+  is an error. Bodies (the `planet` rig) hold at the perch anchors: `centre`, `west`, `east`, `far*` (a little
+  smaller), `near*` (a little bigger); `ground_<each>`, 60 px below each, is walkable stage for a walker or a stand-in.
+  Params: `seed`, `milky` and `nebula` (0..1), `tint` (violet, blue, teal). Off the stage: a scene actor's `z` of 2400
+  draws it behind everything on the stage at about half size, −900 in front at about 1.6× (p = 2304 / (2304 + z)).
+- **Kits with their own times** say so on their first line ("its own times: …"): only those are valid there. Every
+  other kit has Earth's eight.
+- **Anchor names** are never `left` or `right` (those are the sides `enter` and `exit` use), nor `x:…` or `near:…`
+  forms: `verify-kit` fails them. An anchor with a depth shows it after its type (`perch, z 1200`): an actor sent there
+  takes that depth.

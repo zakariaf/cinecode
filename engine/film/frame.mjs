@@ -20,11 +20,17 @@
 // frameInfo(plan, t): the same frame's geometry (screen boxes, head boxes, contacts, caption box) for lint/sheets;
 // boxes include the quick squash of a turn, the pitch on a slope and a wading actor's sink (visibleBox: the part above
 // the waterline).
+// Depth (DESIGN §10): one projection (camera.mjs project / depthScale / depthFade) for everything with a depth z: actors
+// (onScreen), the depth layer's items (api.item, api.project), layers (set.mjs) and the sky (the lens zoom). Props,
+// actors, one-shot fx and depth items are drawn sorted by z (farther first), then by key; the depth layer hands its
+// items over before the set is drawn, and a set layer something lies beyond (or, a front one, nearer than) joins the
+// sort at its own z (S.layerDepths). An actor nearer the lens than NEAR × it is left out and fades in from NEAR_FADE ×
+// it; one off the stage throws no ground shadow.
 import { createCanvas } from '@napi-rs/canvas';
 import { grade, black, deckle, sunOf } from './grade.mjs';
 import { drawEvent, rain, zzz, airShadow, ONE_SHOT, groundTone } from './fx.mjs';
 import { layoutCaption, drawCaption, drawTitle, drawCard, titleBlock, TITLE_PLACES } from './text.mjs';
-import { viewRect, toScreen } from './camera.mjs';
+import { viewRect, toScreen, depthScale, depthFade } from './camera.mjs';
 import { clamp, ease, probe, rigSizes, hash32 } from './util.mjs';
 import { canvas, rng } from '../core/lib.mjs';
 import { wadeSpans, wadeCut, wadeRing } from '../paint/water.mjs';
@@ -60,9 +66,10 @@ function headHeight(a) {
 }
 
 // An actor in screen space: position, scale, clip, wading sink (screen px drawn below the contact), waterline and
-// pitch on a slope (rot, rad: the drawing turns by it about the contact point).
+// pitch on a slope (rot, rad: the drawing turns by it about the contact point). An actor off the stage (a.z) is seen at
+// its depth's scale (DESIGN §10).
 function onScreen(a, cam, W, H) {
-  const z = cam.zoom, sx = (a.x - cam.cx) * z + W / 2, sy = (a.y - cam.cy) * z + H / 2;
+  const z = a.z ? cam.zoom * depthScale(cam, a.z) : cam.zoom, sx = (a.x - cam.cx) * z + W / 2, sy = (a.y - cam.cy) * z + H / 2;
   return {
     sx, sy, ss: a.s * z, clip: a.clip ? a.clip.map(([x, y]) => [(x - cam.cx) * z + W / 2, (y - cam.cy) * z + H / 2]) : null,
     sink: (a.sink || 0) * z, wl: a.waterY != null ? (a.waterY - cam.cy) * z + H / 2 : null, rot: a.pitch || 0,
@@ -87,16 +94,17 @@ function turner(cx, cy, rot) {
   return { pt, box, result };
 }
 
-// silhouette: no shadows (the rim light paints from it). On a slope the drawing (and its own ground shadow) turns
-// about the contact point; the result's points and bounds turn with it.
-function paintActor(c, a, P, silhouette = false) {
+// bare: no ground shadow, a contact or a flier's (a silhouette, which the rim light paints from, or a figure on a set
+// with no ground to shade: groundShadows false). On a slope the drawing (and its own ground shadow) turns about the
+// contact point; the result's points and bounds turn with it.
+function paintActor(c, a, P, bare = false) {
   c.save();
   if (P.clip) { c.beginPath(); P.clip.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.clip(); }
   if (P.wl != null) { c.beginPath(); if (P.under) c.rect(-1e5, P.wl, 2e5, 2e5); else c.rect(-1e5, -1e5, 2e5, P.wl + 1e5); c.clip(); }
   if (P.rot) { const cy = P.sy + P.sink; c.translate(P.sx, cy); c.rotate(P.rot); c.translate(-P.sx, -cy); }
   if (a.squash !== 1) { c.translate(P.sx, P.sy); c.scale(a.squash, 1); c.translate(-P.sx, -P.sy); }
-  if (a.mode === 'air' && !silhouette) { const w = (a.R.shadowW ?? (a.R.width || 40) * 0.5) * P.ss * (a.st.params?.size || 1); airShadow(c, P.sx, P.sy, w, (a.st.lift || 0) * P.ss); }
-  const r = a.R.draw(c, P.sx, P.sy + P.sink, P.ss, a.face, silhouette ? { ...a.st, shadow: false } : a.st);
+  if (a.mode === 'air' && !bare) { const w = (a.R.shadowW ?? (a.R.width || 40) * 0.5) * P.ss * (a.st.params?.size || 1); airShadow(c, P.sx, P.sy, w, (a.st.lift || 0) * P.ss); }
+  const r = a.R.draw(c, P.sx, P.sy + P.sink, P.ss, a.face, bare ? { ...a.st, shadow: false } : a.st);
   c.restore();
   return P.rot ? turner(P.sx, P.sy + P.sink, P.rot).result(r) : r;
 }
@@ -136,13 +144,14 @@ function drawActor(ctx, a, t, cam, W, H, drawn, S, shade = 0) {
   reset(ctx);
   if (a.alpha <= 0.001) return null;
   const wet = (c, fn) => { c.save(); clipWater(c, S, cam, W, H); fn(c); c.restore(); };
+  const bare = S?.def?.groundShadows === false;
   const paint = c => {
-    if (P.wl == null) return paintActor(c, a, P);
+    if (P.wl == null) return paintActor(c, a, P, bare);
     // wading: the body drawn whole aside, its waterline measured on it; the back of the waterline, the body hidden below
     // it only where it is over the water (a hind leg still on the bank stays) and past each crossing's near arc (the
     // front of the body above the water stays: wadeCut), the faint body under the water, the front of the waterline
     const [cv, x] = scratch(W, H, 'wade');
-    const r = paintActor(x, a, { ...P, wl: null }), ring = rippleOf(a, P, t, x);
+    const r = paintActor(x, a, { ...P, wl: null }, bare), ring = rippleOf(a, P, t, x);
     if (ring) wet(c, y => wadeRing(y, { ...ring, half: 'back' }));
     x.save(); clipWater(x, S, cam, W, H); x.globalCompositeOperation = 'destination-out'; wadeCut(x, ring ?? { x: P.sx, y: P.wl, rx: 0 }, W, H); x.fill(); x.restore();
     c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(cv, 0, 0); c.restore();
@@ -173,13 +182,16 @@ function drawActor(ctx, a, t, cam, W, H, drawn, S, shade = 0) {
 // sheared sideways by len × the height above the ground and falls a little toward the lens (the light is above and
 // behind the scene: an upper-left light throws shadows to the lower right), softened more for taller casters, fading
 // toward its tip, and multiplied over whatever lies under it. Its length and strength follow the time of day (SUN in
-// grade.mjs: short at noon, long at dawn and golden hour, none at night). Perched, hollow-bound and wading actors
+// grade.mjs: short at noon, long at dawn and golden hour, none at night; a kit's own time has its declared sun, or
+// none: then nothing is thrown and nothing stands in shade; a set with no ground, groundShadows false, takes no
+// shadow under any sun, and its figures draw no contact shadow either: paintActor). Perched, hollow-bound and wading actors
 // throw none; a rider's falls from its carrier's ground. On a slope the shadow lies on the slope (the ground line
 // through the contact at the ground's angle there, a.slope), for upright figures too. A prop's is cached per set, prop
 // and sun; a tall prop's (a tree's canopy) is dappled with light, and a figure standing in a prop's shade is drawn that
 // much darker (shadeAt).
 const SHADOW_RGB = '74,68,112';
 export function sunFor(S, sky) {
+  if (S?.def?.groundShadows === false) return null;
   const s = sunOf(typeof sky === 'string' ? [[sky, 1]] : sky);
   if (!(s.a > 0.004) || !(s.len > 0)) return null;
   const dir = (S?.light?.[0] ?? -0.6) < 0 ? 1 : -1;
@@ -318,13 +330,17 @@ function rimLight(ctx, rim, actors, t, cam, W, H, drawn) {
 
 // ───────────── overlays and custom beats ─────────────
 // The api handed to custom.mjs overlays and custom beats (DESIGN §9.1). actor(id) is the actor's draw state plus its
-// world head / mouth / box; toScreen / toWorld map points between the world and the screen.
-function layerRunner(ctx, plan, shot, t, cam, actors) {
+// world head / mouth / box; toScreen / toWorld map points between the world and the screen. Depth (DESIGN §10):
+// project([x, y, z]) → [sx, sy, s, a] (s: screen px per world px at that depth; a: its near fade, 0: don't draw it), and
+// on the 'depth' layer item([x, y, z], draw) hands the frame a piece to draw among the actors (into `deep`; depthItem).
+function layerRunner(ctx, plan, shot, t, cam, actors, deep = null) {
   const scene = plan.scenes.find(s => s.id === shot.scene), W = plan.W, H = plan.H, z = cam.zoom, S = shot.set;
-  const overlays = (plan.overlays || []).filter(o => o.scene === shot.scene);
-  const customs = plan.custom.filter(c => c.scene === shot.scene && c.def?.draw && t >= c.t0 && t < c.t1);
+  // an overlay with "shots" draws only in those; a custom beat with "scope": "shot" only in its own shot, until its cut
+  // (not in the fading picture of a dissolve into the next scene)
+  const overlays = (plan.overlays || []).filter(o => o.scene === shot.scene && (!o.shots || o.shots.includes(shot.id)));
+  const customs = plan.custom.filter(c => c.scene === shot.scene && c.def?.draw && t >= c.t0 && t < c.t1 && (c.beat?.scope !== 'shot' || (c.shot === shot.id && t < shot.t1)));
   if (!overlays.length && !customs.length) return () => {};
-  const geo = new Map();
+  const geo = new Map(), dcam = cam.lens ? cam : { ...cam, lens: S.lens };
   const actor = id => {
     const a = actors.find(x => x.id === id); if (!a) return null;
     if (!geo.has(id)) {
@@ -342,8 +358,15 @@ function layerRunner(ctx, plan, shot, t, cam, actors) {
     silhouette: (c, a) => { a = typeof a === 'string' ? actors.find(x => x.id === a) : a; if (a) paintActor(c, a, onScreen(a, cam, W, H), true); },
     toScreen: ([x, y]) => [(x - cam.cx) * z + W / 2, (y - cam.cy) * z + H / 2],
     toWorld: ([x, y]) => [(x - W / 2) / z + cam.cx, (y - H / 2) / z + cam.cy],
+    project: ([x, y, d = 0]) => { const p = depthScale(dcam, d), k = z * p; return [(x - cam.cx) * k + W / 2, (y - cam.cy) * k + H / 2, k, p > 0 ? depthFade(dcam, d) : 0]; },
+    item: (at, draw) => {
+      if (cur !== 'depth') throw new Error(`api.item: only an overlay or custom beat on the "depth" layer can hand the frame pieces to sort (this one draws on "${cur}")`);
+      const it = depthItem(ctx, dcam, W, H, at, draw); if (it && deep) deep.push(it);
+    },
   };
+  let cur = null;
   return (layer, space) => {
+    cur = layer;
     for (const o of overlays) if (o.layer === layer) { space(); ctx.save(); o.def.draw(ctx, { ...base, params: o.params, seed: o.seed, name: o.name }); ctx.restore(); }
     for (const c of customs) if ((c.def.layer || 'world') === layer) {
       const u = clamp((t - c.t0) / ((c.t1 - c.t0) || 1e-6));
@@ -351,6 +374,24 @@ function layerRunner(ctx, plan, shot, t, cam, actors) {
       c.def.draw(ctx, u, { ...base, u, bt: t - c.t0, dur: c.t1 - c.t0, beat: c.beat, params: c.params || c.beat, seed: c.seed ?? 1, name: c.name });
       ctx.restore();
     }
+  };
+}
+
+// A piece an effect hands to the depth sort (api.item, DESIGN §10) at the world point [x, y, z]: sorted by z, then by y
+// (as an actor standing there); drawn with ctx in the world transform of its depth (zoom × p about the camera centre)
+// and its near fade as globalAlpha, and P = { x, y, s, z, a } (its screen point, screen px per world px there, its depth
+// and fade). null when the lens has come too near it (or passed it).
+function depthItem(ctx, cam, W, H, [x, y, z = 0], draw) {
+  const a = depthFade(cam, z);
+  if (!(a > 0)) return null;
+  const s = cam.zoom * depthScale(cam, z);
+  return {
+    key: y, z, ord: 3,
+    draw: () => {
+      reset(ctx); ctx.save(); ctx.setTransform(s, 0, 0, s, W / 2 - cam.cx * s, H / 2 - cam.cy * s); ctx.globalAlpha = a;
+      draw(ctx, { x: (x - cam.cx) * s + W / 2, y: (y - cam.cy) * s + H / 2, s, z, a });
+      ctx.restore(); reset(ctx);
+    },
   };
 }
 
@@ -394,23 +435,43 @@ function picture(ctx, plan, shot, t, titles = true) {
   for (const e of plan.fx) if (e.name === 'dust' && e.scene === shot.scene && t >= e.t0 && t < e.t1) dustTone(plan, e);
   reset(ctx);
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  S.drawSky(ctx, cam, sky, t);
+  // (the sky is at infinity: a camera's depth brings it no nearer, so it takes the lens zoom; DESIGN §10)
+  S.drawSky(ctx, cam.z ? { ...cam, zoom: z * (cam.lens - cam.z) / cam.lens } : cam, sky, t);
   const world = () => ctx.setTransform(z, 0, 0, z, W / 2 - cam.cx * z, H / 2 - cam.cy * z), screen = () => reset(ctx);
   const actors = plan.actorsAt(t, shot.scene).filter(a => a.visible && a.mode !== 'off');
-  const layer = layerRunner(ctx, plan, shot, t, cam, actors);
+  const deep = [], layer = layerRunner(ctx, plan, shot, t, cam, actors, deep);
   layer('sky', screen);
   const dofPx = dofRadius(shot, z, H);
+  // (the depth layer's pieces, sorted with the props and actors below: handed over before the set is drawn, so its
+  // layers know what lies beyond or nearer than them)
+  layer('depth', world);
+  // depth (DESIGN §10): a set layer something lies beyond (a back layer) or nearer than (a front layer) is drawn in the
+  // depth sort at its own z (S.layerDepths) instead of before or after everything; the 'back' overlays then go with
+  // the stage (after every back layer, before what is on the stage)
+  const zs = [...actors.filter(a => a.z && depthFade(cam, a.z) > 0).map(a => a.z), ...deep.map(d => d.z)];
+  const mid = zs.length ? S.layerDepths(cam.lens ?? S.lens).filter(L => (L.front ? zs.some(v => v < L.z) : zs.some(v => v > L.z))) : [];
+  const inSort = new Set(mid.map(L => L.ly)), only = inSort.size ? { layers: ly => !inSort.has(ly) } : {}, backIn = mid.some(L => !L.front);
+  const backOpts = { t, dof: dofPx > 0 ? 2 : 0, haze: sky }, frontOpts = { t, dof: dofPx > 0 ? Math.max(2, dofPx / z) : 0 };
   world();
-  S.drawBack(ctx, cam, { t, dof: dofPx > 0 ? 2 : 0, haze: sky });
-  layer('back', world);
+  S.drawBack(ctx, cam, { ...backOpts, ...only });
+  if (!backIn) layer('back', world);
   const drawn = new Map();
   const scene = shot.scene, rect = viewRect(cam, W, H);
   const live = plan.fx.filter(e => e.scene === scene && t >= e.t0 && t < e.t1);
   const sun = sunFor(S, sky);
   const items = S.propsSorted().map(p => ({ key: p.y, ord: 0, draw: () => { world(); propShadow(ctx, S, p.id, sun); world(); p.draw(ctx); } }));
-  for (const a of actors) items.push({ key: a.key, ord: 1, actor: a, draw: () => { castShadow(ctx, a, onScreen(a, cam, W, H), sun, cam, W, H); drawActor(ctx, a, t, cam, W, H, drawn, S, shadeAt(S, a, sun)); } });
+  for (const a of actors) {
+    // (depth: an actor the lens has come too near is left out, or fades; one off the stage throws no ground shadow)
+    const f = depthFade(cam, a.z), b = f < 1 ? { ...a, alpha: a.alpha * f } : a;
+    if (f > 0) items.push({ key: a.key, z: a.z || 0, ord: 1, actor: a, draw: () => { if (!a.z) castShadow(ctx, b, onScreen(b, cam, W, H), sun, cam, W, H); drawActor(ctx, b, t, cam, W, H, drawn, S, shadeAt(S, b, sun)); } });
+  }
   for (const e of live) if (ONE_SHOT.has(e.name)) items.push({ key: (e.key ?? e.y ?? 0) + 0.5, ord: 2, draw: () => { world(); drawEvent(ctx, e, t, { rect, zoom: z, W, H, S, tone: e.name === 'dust' ? dustTone(plan, e) : undefined }); } });
-  items.sort((a, b) => a.key - b.key || a.ord - b.ord);
+  items.push(...deep);
+  for (const L of mid) items.push({ key: L.front ? 1e9 : -1e9, z: L.z, ord: L.front ? 9 : -1, draw: () => { world(); (L.front ? S.drawFront : S.drawBack)(ctx, cam, { ...(L.front ? frontOpts : backOpts), layers: ly => ly === L.ly }); } });
+  if (backIn) items.push({ key: -1e9, z: 0, ord: -0.5, draw: () => layer('back', world) });
+  // farther first: by depth (DESIGN §10), then by key (ground y), then props, actors, one-shot fx, depth pieces (a back
+  // layer before everything at its depth, a front one after)
+  items.sort((a, b) => (b.z || 0) - (a.z || 0) || a.key - b.key || a.ord - b.ord);
   // depth of field: blur everything behind the subjects (fading out below their feet), when a figure the camera is on
   // is on stage. The subjects are every one the camera names (focusIds), the places among them (anchors) too.
   let i0 = 0;
@@ -418,9 +479,11 @@ function picture(ctx, plan, shot, t, titles = true) {
     const ids = focusIds(plan, shot), subj = actors.filter(a => ids.includes(a.id));
     if (subj.some(a => shot.on.includes(a.id))) {
       const places = ids.filter(id => !subj.some(a => a.id === id) && S.anchorNames?.includes(id)).map(id => S.anchor(id).depth);
-      const focus = Math.min(...subj.map(a => a.key), ...places) - 2;
+      const focus = Math.min(...subj.map(a => a.key), ...places) - 2, fz = Math.min(...subj.map(a => a.z || 0));
       const feet = Math.max(...subj.map(a => onScreen(a, cam, W, H).sy), ...places.map(y => (y - cam.cy) * z + H / 2));
-      while (i0 < items.length && items[i0].key < focus) items[i0++].draw();
+      // (behind: farther than the nearest subject, or at its depth behind its key)
+      const behind = it => (it.z || 0) > fz || ((it.z || 0) === fz && it.key < focus);
+      while (i0 < items.length && behind(items[i0])) items[i0++].draw();
       const [cv, x] = scratch(W, H, 'dof');
       x.filter = `blur(${dofPx.toFixed(1)}px)`; x.drawImage(ctx.canvas, 0, 0); x.filter = 'none';
       // at night what lies behind the subjects falls off into the dark (the moon lights the figure, not the soft
@@ -443,12 +506,13 @@ function picture(ctx, plan, shot, t, titles = true) {
   // overlays and custom beats on the world layer, then the front layers
   layer('world', world);
   world();
-  S.drawFront(ctx, cam, { t, dof: dofPx > 0 ? Math.max(2, dofPx / z) : 0 });
+  S.drawFront(ctx, cam, { ...frontOpts, ...only });
   layer('front', world);
   reset(ctx);
-  if (screenFx) rain(ctx, t, W, H, { a: clamp(Math.min((t - screenFx.t0) / 1.2, (screenFx.t1 - t) / 1.2)), seed: screenFx.seed });
+  // (a rain kept to some shots fades only at its scene's edges, so it is fully on from a cut inside the scene)
+  if (screenFx) { const [e0, e1] = screenFx.edges ?? [screenFx.t0, screenFx.t1]; rain(ctx, t, W, H, { a: clamp(Math.min((t - e0) / 1.2, (e1 - t) / 1.2)), seed: screenFx.seed }); }
   const g = shot.gradeAt(t);
-  grade(ctx, g, t, W, H, g.story, gradeFocus(shot, actors, drawn, z));
+  grade(ctx, g, t, W, H, g.story, gradeFocus(shot, actors, drawn, z, cam));
   rimLight(ctx, sceneRecOf(plan, shot)?.rim, actors, t, cam, W, H, drawn);
   layer('grade', screen);
   // lights (fireflies) glow over the grade instead of being darkened by it
@@ -461,10 +525,11 @@ function picture(ctx, plan, shot, t, titles = true) {
 
 // What a close or medium shot is about, for the grade: the centre of its subjects' heads in the picture and a radius
 // that holds them (k: 1 for close shots, less for a medium). null when no subject is drawn.
-function gradeFocus(shot, actors, drawn, z) {
+export function gradeFocus(shot, actors, drawn, z, cam) {
   const k = { close: 1, 'extreme-close': 1, medium: 0.6 }[shot.size];
   if (!k) return null;
-  const hb = actors.filter(a => shot.on.includes(a.id) && drawn.has(a.id)).map(a => headBox(a, drawn.get(a.id), z));
+  // (an actor off the stage: its head as its depth draws it; DESIGN §10)
+  const hb = actors.filter(a => shot.on.includes(a.id) && drawn.has(a.id)).map(a => headBox(a, drawn.get(a.id), a.z ? z * depthScale(cam, a.z) : z));
   if (!hb.length) return null;
   const x0 = Math.min(...hb.map(b => b[0])), y0 = Math.min(...hb.map(b => b[1])), x1 = Math.max(...hb.map(b => b[2])), y1 = Math.max(...hb.map(b => b[3]));
   return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, r: 0.5 * Math.hypot(x1 - x0, y1 - y0) * 1.6, k };
@@ -496,7 +561,8 @@ export function titleX(plan, c) {
     const cam = shot.cameraAt(t), S = shot.set, actors = plan.actorsAt(t, shot.scene), xs = [];
     for (const id of shot.on) {
       const a = actors.find(q => q.id === id && q.visible);
-      if (a) xs.push(a.x); else if (S.anchorNames?.includes(id)) xs.push(S.anchor(id).x);
+      // (an actor off the stage: where its depth shows it, as a point on the stage)
+      if (a) xs.push(a.z ? cam.cx + (a.x - cam.cx) * depthScale(cam, a.z) : a.x); else if (S.anchorNames?.includes(id)) xs.push(S.anchor(id).x);
     }
     const lo = TITLE_SAFE * W + half, hi = (1 - TITLE_SAFE) * W - half;
     if (xs.length && lo <= hi) x = clamp(((xs.reduce((a, v) => a + v, 0) / xs.length) - cam.cx) * cam.zoom + W / 2, lo, hi);
@@ -560,11 +626,11 @@ function headsAt(plan, t) {
   const shot = plan.shotAt(t);
   if (!shot) return [];
   const W = plan.W, H = plan.H, cam = shot.cameraAt(t);
-  return plan.actorsAt(t, shot.scene).filter(a => a.visible && a.mode !== 'off' && a.alpha > 0.001).map(a => {
+  return plan.actorsAt(t, shot.scene).filter(a => a.visible && a.mode !== 'off' && a.alpha > 0.001 && depthFade(cam, a.z) > 0).map(a => {
     const P = onScreen(a, cam, W, H), r = probe(a.R, P.sx, P.sy + P.sink, P.ss, a.face, { ...a.st, shadow: false }), q = a.squash ?? 1;
     let head = [P.sx + (r.head[0] - P.sx) * q, r.head[1]];
     if (P.rot) head = turner(P.sx, P.sy + P.sink, P.rot).pt(head);
-    return { id: a.id, box: headBox(a, { head }, cam.zoom) };
+    return { id: a.id, box: headBox(a, { head }, a.z ? cam.zoom * depthScale(cam, a.z) : cam.zoom) };
   });
 }
 // The burned captions of a plan in runs that overlap in time (in screen order: of a line and a sound caption starting
@@ -730,31 +796,35 @@ function drawCardFrame(ctx, plan, card, t) {
  * → { t, shot, scene, set, size, camera, view, actors: [{ id, rig, x, y, s, scale, face, screenBox, worldBox, headBox,
  *     visibleBox, head, contact: { x, y, kind ('ground' | 'surface' | 'perch' | 'hollow' | 'air' | 'mount'), screen,
  *     carrier? }, airborne, perch, speaking, mode, key, alpha, action, anchor, squash, sink, waterline, wade,
- *     carrier, tilt, pitch, slope }], captionBox, captions, colliders }
+ *     carrier, tilt, pitch, slope, z, zoom }], captionBox, captions, colliders }
  * screenBox / headBox / head already include the turn squash (squash), the wading sink and the pitch on a slope (pitch,
  * rad: the drawing turned about the contact point; slope: the ground's angle there); visibleBox is the part above the
- * waterline (screen y `waterline`, null when not wading).
+ * waterline (screen y `waterline`, null when not wading). z: the actor's depth; zoom: screen px per world px at it (the
+ * camera's zoom on the stage; DESIGN §10).
  */
 export function frameInfo(plan, t) {
   const W = plan.W, H = plan.H, shot = plan.shotAt(t);
   if (!shot) return { t, shot: null, scene: null, set: null, camera: null, actors: [], captionBox: null, captions: [], colliders: [], card: plan.cards.find(c => t >= c.t0 && t < c.t1)?.kind ?? null };
   const cam = shot.cameraAt(t), z = cam.zoom;
   const toWorld = b => [(b[0] - W / 2) / z + cam.cx, (b[1] - H / 2) / z + cam.cy, (b[2] - W / 2) / z + cam.cx, (b[3] - H / 2) / z + cam.cy];
-  const actors = plan.actorsAt(t, shot.scene).filter(a => a.visible && a.mode !== 'off' && a.alpha > 0.001).map(a => {
-    const P = onScreen(a, cam, W, H), r = probe(a.R, P.sx, P.sy + P.sink, P.ss, a.face, { ...a.st, shadow: false });
+  // (depth: an actor the lens has come too near is not in the picture; za: screen px per world px at its depth)
+  const actors = plan.actorsAt(t, shot.scene).filter(a => a.visible && a.mode !== 'off' && a.alpha > 0.001 && depthFade(cam, a.z) > 0).map(a => {
+    const P = onScreen(a, cam, W, H), r = probe(a.R, P.sx, P.sy + P.sink, P.ss, a.face, { ...a.st, shadow: false }), za = a.z ? z * depthScale(cam, a.z) : z, f = depthFade(cam, a.z);
+    const toW = za === z ? toWorld : b => [(b[0] - W / 2) / za + cam.cx, (b[1] - H / 2) / za + cam.cy, (b[2] - W / 2) / za + cam.cx, (b[3] - H / 2) / za + cam.cy];
     // the drawing squashes horizontally around the contact point during a turn
     const q = a.squash ?? 1, X = v => P.sx + (v - P.sx) * q, b0 = r.bounds;
     let box = q === 1 ? b0.slice() : [Math.min(X(b0[0]), X(b0[2])), b0[1], Math.max(X(b0[0]), X(b0[2])), b0[3]], head = [X(r.head[0]), r.head[1]];
     // on a slope the (squashed) drawing turns about the contact point
     if (P.rot) { const T = turner(P.sx, P.sy + P.sink, P.rot); box = T.box(box); head = T.pt(head); }
-    const hb = headBox(a, { head }, z);
+    const hb = headBox(a, { head }, za);
     // wading (or riding a wading carrier): the drawing below the waterline is hidden
     const vis = P.wl == null ? box.slice() : [box[0], Math.min(box[1], P.wl), box[2], Math.min(box[3], P.wl)];
     return {
-      id: a.id, rig: a.rig, x: a.x, y: a.y, s: a.s, scale: a.scale, face: a.face, screenBox: box, worldBox: toWorld(box), headBox: hb,
+      id: a.id, rig: a.rig, x: a.x, y: a.y, s: a.s, scale: a.scale, face: a.face, screenBox: box, worldBox: toW(box), headBox: hb,
       visibleBox: vis, head, contact: { x: a.x, y: a.y, kind: a.mode === 'air' ? 'air' : a.mode, screen: [P.sx, P.sy], ...(a.carrier ? { carrier: a.carrier } : {}) },
-      airborne: a.airborne, perch: a.perch, speaking: a.speaking, mode: a.mode, key: a.key, alpha: a.alpha, action: a.action, anchor: a.anchor,
+      airborne: a.airborne, perch: a.perch, speaking: a.speaking, mode: a.mode, key: a.key, alpha: f < 1 ? a.alpha * f : a.alpha, action: a.action, anchor: a.anchor,
       squash: q, sink: a.sink || 0, waterline: P.wl, wade: a.wade, carrier: a.carrier, tilt: a.st.tilt ?? 0, pitch: a.pitch || 0, slope: a.slope || 0,
+      z: a.z || 0, zoom: za,
     };
   });
   const caps = plan.captionMode === 'none' ? [] : captionLayouts(plan, t);

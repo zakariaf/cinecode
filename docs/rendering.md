@@ -28,9 +28,14 @@ workers and encoders and cleans up; a second Ctrl-C exits at once).
 | `render <film>` | the final film | `out/<slug>.mp4`, `out/<slug>.srt` (+ the mix) |
 | `cast-sheet [film] [kinds…]` | every rig in its poses and expressions | `out/cast-sheet.jpg` |
 | `set-sheet [film] [kits…]` | every kit with anchors, footprints and walk regions | `out/set-sheet.jpg` |
+| `verify-rig <file\|kind>` | a new rig's gate: checks and review images | `out/verify/<kind>.jpg`, `<kind>-lineup.jpg` |
+| `verify-kit <file\|name>` | a new kit's gate: checks and review images | `out/verify/<name>.jpg`, `<name>-times.jpg` |
+| `verify-effect <film> [names…]` | a film's effects' gate: checks and a review strip | `out/verify/effects[-<names>].jpg` |
 
 `out/` is the film's own `films/<slug>/out/`, except for `cast-sheet` and `set-sheet` without a film, which write to
-`out/` in the current folder.
+`out/` in the current folder, and `verify-rig` and `verify-kit` given a file, which write to `out/` beside the folder
+that holds it: `films/<slug>/out/verify/` for a film's `rigs/` or `kits/`, `cinecode/out/verify/` for a project's
+(`--out=DIR` puts them elsewhere; given a registered name, `out/verify/` in the current folder).
 
 ### new
 
@@ -52,6 +57,9 @@ node bin/cinecode.mjs plan films/my-film
 ```
 
 `check` lists every problem with its path in `film.json` ([storyboard.md](storyboard.md#checking-a-storyboard)).
+When the film is valid it names the extension files it loaded (`rigs/kite.mjs`, `cinecode/kits/harbour.mjs`), marking
+one that replaces a built-in rig, kit or effect of the same name: `cinecode/effects/rows.mjs (replaces the built-in
+custom beat "sizerow")`.
 `plan` compiles the film and prints its length and the shot list: id, set, size, start, length and the first line of
 each shot. Unvoiced lines use an estimate, marked `~`. Neither prints warnings; the Claude Code skill's
 `node .claude/skills/cinecode/scripts/warnings.mjs films/my-film` does. Nor does `plan` print when each beat starts

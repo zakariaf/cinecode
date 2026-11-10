@@ -13,12 +13,14 @@ import { getRig } from '../cast/index.mjs';
 import { clampCamera, pointInPoly, inEllipse, SKY_TIMES, MAX_VIEW } from '../set/set.mjs';
 import { getKit } from '../set/kits/index.mjs';
 import { renderSet, setSheet } from '../set/sheet.mjs';
+import { hasLight } from '../film/grade.mjs';
 import { AMBIENCE_NAMES } from '../audio/sfx.mjs';
+import { parseTarget } from '../film/util.mjs';
 
 const finite = v => typeof v === 'number' && Number.isFinite(v);
 const check = (name, problems, detail = '') => ({ name, ok: problems.length === 0, detail: problems.length ? problems.slice(0, 6).join('; ') + (problems.length > 6 ? `; … ${problems.length - 6} more` : '') : detail });
 const attempt = (name, fn) => { try { return fn(); } catch (e) { return { name, ok: false, detail: `threw: ${e.message}` }; } };
-const LAYERS = ['sky', 'back', 'world', 'front', 'grade', 'screen'];
+const LAYERS = ['sky', 'back', 'depth', 'world', 'front', 'grade', 'screen'];   // as validate.mjs OVERLAY_LAYERS
 
 // ───────────── rigs ─────────────
 
@@ -224,6 +226,17 @@ export async function rigReview(rig, outDir) {
 
 // ───────────── set kits ─────────────
 
+// What check says when a film puts an actor at an anchor whose name it reads as something else (validate.mjs's
+// checkTarget, on parseTarget): "left" and "right" are the sides actors enter and exit by, "x:…" a position, "near:…"
+// and the like a place by an actor, and a name is letters, digits, _ . and - only. → that message | null (a usable name)
+function reservedName(n) {
+  const T = parseTarget(n);
+  if (T.kind === 'name') return null;
+  if (T.kind === 'side') return `"${n}" is only valid for enter/exit; use an anchor or "x:…" here`;
+  if (T.kind === 'bad') return `not a place: ${JSON.stringify(n)} (use an anchor name, "x:1500", "x:1500,y:1060", "near:<actor>", "left-of:<actor>", "right-of:<actor>" or, for hop / place, "on:<actor>")`;
+  return `"${n}" is read as ${T.kind === 'x' || T.kind === 'xy' ? 'a position' : `a place by "${T.who}"`}, never as this anchor`;
+}
+
 /** Contract checks for a kit function (DESIGN.md §3): → [{ name, ok, detail }]. */
 export function verifyKit(kit, name = 'kit') {
   if (typeof kit !== 'function') return [check('contract', ['the default export must be a function (params) => set (use makeSet from cinecode/set)'])];
@@ -237,6 +250,7 @@ export function verifyKit(kit, name = 'kit') {
   out.push(attempt('anchors', () => {
     const p = [];
     if (S.anchorNames.length < 4) p.push(`${S.anchorNames.length} anchors: a kit needs at least 4`);
+    for (const n of S.anchorNames) { const why = reservedName(n); if (why) p.push(`${n}: a reserved name, rename the anchor (check: ${why})`); }
     for (const a of S.anchors()) {
       if (!['ground', 'surface', 'perch', 'hollow', 'view'].includes(a.type)) p.push(`${a.name}: unknown type ${a.type}`);
       for (const f of ['x', 'y', 's', 'depth']) if (!finite(a[f])) p.push(`${a.name}.${f} is ${a[f]}`);
@@ -250,7 +264,9 @@ export function verifyKit(kit, name = 'kit') {
 
   out.push(attempt('world', () => {
     const p = [];
-    for (const t of SKY_TIMES) if (!S.skyNames.includes(t)) p.push(`no ${t} sky`);
+    // a kit with times of its own (makeSet times) is checked on those, any other on Earth's eight; every time has a light
+    for (const t of S.def.times ? [] : SKY_TIMES) if (!S.skyNames.includes(t)) p.push(`no ${t} sky`);
+    for (const t of S.skyNames) if (!hasLight(t)) p.push(`the ${t} sky has no light (declare it: times: { ${t}: { grade, sun } })`);
     for (const k of ['day', 'night']) if (!AMBIENCE_NAMES.includes(S.ambience[k])) p.push(`ambience.${k} "${S.ambience[k]}" is not one of ${AMBIENCE_NAMES.join(', ')}`);
     if (!(S.area.x1 - S.area.x0 >= MAX_VIEW.w && S.area.y1 - S.area.y0 >= MAX_VIEW.h)) p.push(`area ${S.area.x1 - S.area.x0} × ${S.area.y1 - S.area.y0} is smaller than the widest view (${MAX_VIEW.w} × ${MAX_VIEW.h})`);
     const V = S.view, A = S.area;
@@ -303,15 +319,15 @@ export function verifyKit(kit, name = 'kit') {
     const p = [], small = { W: 480, H: 270, debug: false };
     S.build();
     for (const q of S.props) if (q.clipped) p.push(`prop ${q.id} is clipped by its paint canvas (widen its bounds)`);
-    const frames = {};
-    for (const t of SKY_TIMES) {
+    const frames = {}, times = S.def.times ? S.skyNames : SKY_TIMES, ref = times.includes('morning') ? 'morning' : S.defaultSky;
+    for (const t of times) {
       const d = renderSet(S, { ...small, sky: t }).canvas.getContext('2d').getImageData(0, 0, 480, 270).data;
       let lit = 0; for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 24) lit++;
       if (lit < 480 * 270 * 0.9) p.push(`${t}: ${Math.round(100 - (100 * lit) / (480 * 270))}% of the frame is unpainted (black)`);
       frames[t] = d;
     }
-    const again = kit({}).build(), d2 = renderSet(again, { ...small, sky: 'morning' }).canvas.getContext('2d').getImageData(0, 0, 480, 270).data;
-    let n = 0; for (let i = 0; i < d2.length; i++) if (d2[i] !== frames.morning[i]) n++;
+    const again = kit({}).build(), d2 = renderSet(again, { ...small, sky: ref }).canvas.getContext('2d').getImageData(0, 0, 480, 270).data;
+    let n = 0; for (let i = 0; i < d2.length; i++) if (d2[i] !== frames[ref][i]) n++;
     if (n) p.push('two builds of the kit paint different pixels (Math.random or Date.now in a paint function?)');
     return check('paint', p, `every time of day paints the whole frame; two builds paint the same pixels`);
   }));
@@ -319,13 +335,15 @@ export function verifyKit(kit, name = 'kit') {
 }
 
 /** Review images for a registered kit: the debug set sheet (anchors, walk region, colliders, a route) and a strip of
- *  every time of day. */
+ *  every time of day (a kit with times of its own: those; the sheet under its default; each of its own times graded as
+ *  the film grades it: renderSet). */
 export async function kitReview(name, outDir) {
   mkdirSync(outDir, { recursive: true });
   const sheet = join(outDir, `${name}.jpg`), times = join(outDir, `${name}-times.jpg`);
+  const S = getKit(name)({}), list = S.def.times ? S.skyNames : SKY_TIMES;
   setSheet([name], sheet, { debug: true, cols: 1, cellW: 1600 });
-  const S = getKit(name)({}), tw = 480, th = 270, cols = 4, cv = createCanvas(tw * cols, th * Math.ceil(SKY_TIMES.length / cols)), ctx = cv.getContext('2d');
-  SKY_TIMES.forEach((t, i) => {
+  const tw = 480, th = 270, cols = Math.min(4, list.length), cv = createCanvas(tw * cols, th * Math.ceil(list.length / cols)), ctx = cv.getContext('2d');
+  list.forEach((t, i) => {
     const x = (i % cols) * tw, y = Math.floor(i / cols) * th;
     ctx.drawImage(renderSet(S, { W: tw, H: th, sky: t }).canvas, x, y);
     ctx.fillStyle = 'rgba(10,10,20,.7)'; ctx.fillRect(x, y, 110, 22); ctx.fillStyle = '#fff'; ctx.font = '15px sans-serif'; ctx.fillText(t, x + 6, y + 16);
@@ -344,8 +362,21 @@ export function filmEffects(film, plan, names = []) {
   for (const [n, fn] of Object.entries(C.sounds || {})) if (want(n)) E.push({ kind: 'sound', name: n, def: fn, uses: [] });
   return E;
 }
-// Three times inside each use span (first use): early, middle, late.
-const timesOf = e => { const u = e.uses[0]; if (!u) return []; const t0 = u.t0 ?? 0, t1 = u.t1 ?? t0 + 1; return [0.15, 0.5, 0.85].map(k => t0 + (t1 - t0) * k); };
+// Three times, early, middle and late, across stretches of film time [[t0, t1], …] taken as one.
+const spread = spans => {
+  const all = spans.reduce((n, [a, b]) => n + b - a, 0);
+  return [0.15, 0.5, 0.85].map(k => { let d = all * k; for (const [a, b] of spans) { if (d < b - a) return a + d; d -= b - a; } return spans[spans.length - 1][1]; });
+};
+// Where an effect is looked at: three times inside its first use. A beat's use is its span; an overlay's, its scene,
+// or the shots it names ("shots"). An overlay that draws nothing there may keep to some shots by itself (its draw reads
+// api.shot): verifyEffects then looks in the shots it draws in and remembers them here for effectReview.
+const looked = new WeakMap();   // plan → Map(effect def → times)
+function timesOf(e, plan) {
+  const u = e.uses[0]; if (!u) return [];
+  const seen = looked.get(plan)?.get(e.def); if (seen) return seen;
+  const t0 = u.t0 ?? 0, t1 = u.t1 ?? t0 + 1, named = e.kind === 'overlay' && Array.isArray(u.shots) ? (plan.shots || []).filter(s => s.scene === u.scene && u.shots.includes(s.id)) : [];
+  return spread(named.length ? named.map(s => [s.t0, s.t1]) : [[t0, t1]]);
+}
 
 /** Checks for a film's own effects: → [{ name, ok, detail }]. */
 export async function verifyEffects(film, plan, names = []) {
@@ -355,6 +386,9 @@ export async function verifyEffects(film, plan, names = []) {
   const W = plan.W, H = plan.H;
   const frame = t => { const cv = createCanvas(W, H), ctx = cv.getContext('2d'); drawFrame(ctx, plan, t); return ctx.getImageData(0, 0, W, H).data; };
   const same = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };
+  // the frame with an effect switched off, and how many pixels an effect changes
+  const off = (e, t) => { const draw = e.def.draw; try { e.def.draw = () => {}; return frame(t); } finally { e.def.draw = draw; } };
+  const moved = (a, b) => { let n = 0; for (let k = 0; k < a.length; k += 4) if (Math.abs(a[k] - b[k]) + Math.abs(a[k + 1] - b[k + 1]) + Math.abs(a[k + 2] - b[k + 2]) > 12) n++; return n; };
   for (const e of E) {
     out.push(await (async () => {
       const p = [], label = `${e.kind} ${e.name}`;
@@ -370,25 +404,32 @@ export async function verifyEffects(film, plan, names = []) {
       if (typeof e.def?.draw !== 'function') return check(label, ['needs a draw() function']);
       if (e.def.layer && !LAYERS.includes(e.def.layer)) p.push(`layer "${e.def.layer}" is not one of ${LAYERS.join(', ')}`);
       if (!e.uses.length) return check(label, p, 'not used in film.json: only its shape was checked');
-      const ts = timesOf(e), fwd = ts.map(frame), back = [...ts].reverse().map(frame).reverse();
-      ts.forEach((t, i) => { if (!same(fwd[i], back[i])) p.push(`the frame at ${t.toFixed(2)} s changes with the drawing order (state kept between calls, or Math.random?)`); });
       // what it adds: the same frames with the effect switched off
-      const draw = e.def.draw;
-      let changed = 0;
-      try { e.def.draw = () => {}; ts.forEach((t, i) => { const off = frame(t); let n = 0; for (let k = 0; k < off.length; k += 4) if (Math.abs(off[k] - fwd[i][k]) + Math.abs(off[k + 1] - fwd[i][k + 1]) + Math.abs(off[k + 2] - fwd[i][k + 2]) > 12) n++; changed = Math.max(changed, n / (W * H)); }); }
-      finally { e.def.draw = draw; }
-      if (changed === 0) p.push(`draws nothing at ${ts.map(t => t.toFixed(2)).join(', ')} s`);
-      return check(label, p, `${e.uses.length} use${e.uses.length > 1 ? 's' : ''} (${e.uses[0].scene ?? ''} ${e.uses[0].shot ?? ''}), deterministic in any order, changes up to ${(100 * changed).toFixed(1)}% of the frame`);
+      let ts = timesOf(e, plan), fwd = ts.map(frame), changed = Math.max(...ts.map((t, i) => moved(off(e, t), fwd[i])));
+      // an overlay that keeps to some shots by itself: looked at in the shots of its scene it draws in (each shot's
+      // middle frame drawn with and without it)
+      const u = e.uses[0], hunt = !changed && e.kind === 'overlay' && !Array.isArray(u.shots);
+      if (hunt) {
+        const drawn = (plan.shots || []).filter(s => { const t = (s.t0 + s.t1) / 2; return s.scene === u.scene && moved(off(e, t), frame(t)) > 0; });
+        if (drawn.length) { ts = spread(drawn.map(s => [s.t0, s.t1])); fwd = ts.map(frame); changed = Math.max(...ts.map((t, i) => moved(off(e, t), fwd[i]))); }
+      }
+      if (!looked.has(plan)) looked.set(plan, new Map());
+      looked.get(plan).set(e.def, ts);
+      const back = [...ts].reverse().map(frame).reverse();
+      ts.forEach((t, i) => { if (!same(fwd[i], back[i])) p.push(`the frame at ${t.toFixed(2)} s changes with the drawing order (state kept between calls, or Math.random?)`); });
+      if (changed === 0) p.push(`draws nothing at ${ts.map(t => t.toFixed(2)).join(', ')} s${hunt ? ` (nor in the middle of any shot of ${u.scene})` : ''}`);
+      const at = [...new Set(ts.map(t => plan.shotAt?.(t)?.id).filter(Boolean))];
+      return check(label, p, `${e.uses.length} use${e.uses.length > 1 ? 's' : ''} (${[u.scene, u.shot].filter(Boolean).join(' ')}), looked at in shot${at.length > 1 ? 's' : ''} ${at.join(', ')}: deterministic in any order, changes up to ${(100 * changed / (W * H)).toFixed(1)}% of the frame`);
     })().catch(err => ({ name: `${e.kind} ${e.name}`, ok: false, detail: `threw: ${err.message}` })));
   }
   return out;
 }
 
-/** Review strip: three frames from the first use of each drawn effect, labelled. */
+/** Review strip: three frames from the first use of each drawn effect (where verifyEffects looked at it), labelled. */
 export async function effectReview(film, plan, names, outPath) {
   const { contactSheet } = await import('./sheet.mjs');
   const { drawFrame } = await import('../film/frame.mjs');
-  const times = filmEffects(film, plan, names).filter(e => e.kind !== 'sound').flatMap(timesOf);
+  const times = filmEffects(film, plan, names).filter(e => e.kind !== 'sound').flatMap(e => timesOf(e, plan));
   if (!times.length) return null;
   mkdirSync(dirname(outPath), { recursive: true });
   await contactSheet({ plan, drawFrame, outPath, times, cols: 3, tileW: 560, title: `${plan.title}: effects ${names.join(', ')}` });

@@ -181,6 +181,57 @@ test('verify-kit: built-in kits pass; a kit with too few anchors, a buried ancho
   assert.equal(r.world.ok, false); assert.match(r.world.detail, /smaller than the widest view/); assert.match(r.world.detail, /ambience\.night "nope"/);
 });
 
+test('verify-kit: an anchor named "left" or "right" (a name check reads as something else) fails with check\'s own message', async () => {
+  const { verifyKit } = await import('../engine/render/verify.mjs');
+  const { makeSet } = await import('../engine/set/set.mjs');
+  const { registerKit } = await import('../engine/set/kits/index.mjs');
+  const { loadFilm } = await import('../engine/film/load.mjs');
+  const sides = () => makeSet({ id: 'sides', W: 2000, H: 1200, refX: 1000, refY: 600, area: { x0: 0, x1: 2000, y0: 0, y1: 1200 }, horizon: 500, laneY: 900, baseS: 1, layers: [], props: [],
+    anchors: { left: { x: 600, y: 900 }, right: { x: 1400, y: 900 }, middle: { x: 1000, y: 900 }, front: { x: 1000, y: 1000 } }, ambience: { day: 'meadow-day', night: 'meadow-night' } });
+  const r = verifyKit(sides, 'sides').find(c => c.name === 'anchors');
+  assert.equal(r.ok, false);
+  // what check says when a film puts an actor at that anchor
+  registerKit('sides', sides);
+  let said = null;
+  try {
+    await loadFilm({ title: 'Sides', cast: { hare: { rig: 'hare' } }, sets: { s: { kit: 'sides' } },
+      scenes: [{ id: 'A', set: 's', time: 'morning', actors: { hare: { at: 'left' } }, shots: [{ id: 'a', dur: 1, camera: { size: 'wide', on: ['hare'] } }] }] });
+  } catch (e) { said = e.problems?.find(p => p.path === 'scenes[0].actors.hare.at')?.message.replace('scenes[0].actors.hare.at: ', ''); }
+  assert.ok(said, 'check rejects the anchor "left" as a place');
+  assert.ok(r.detail.includes(`left: a reserved name, rename the anchor (check: ${said})`), r.detail);
+  assert.match(r.detail, /right: a reserved name, rename the anchor \(check: "right" is only valid for enter\/exit/);
+  assert.doesNotMatch(r.detail, /middle|front/);
+});
+
+test('verify-effect: an overlay kept to some shots is looked at in them (by its "shots", or where it draws); one that never draws fails', async () => {
+  const { loadFilm } = await import('../engine/film/load.mjs');
+  const { compile } = await import('../engine/film/compile.mjs');
+  const { verifyEffects } = await import('../engine/render/verify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'cinecode-fx-'));
+  try {
+    mkdirSync(join(dir, 'films', 'shots'), { recursive: true });
+    // four 1 s shots: the scene-wide times (0.6, 2.0, 3.4 s) fall in a, c and d, never in b
+    writeFileSync(join(dir, 'films', 'shots', 'custom.mjs'), `export const overlays = {
+  only: { layer: 'screen', draw(ctx, api) { if (api.shot.id === 'b') { ctx.fillStyle = '#f0f'; ctx.fillRect(0, 0, api.W / 4, api.H / 4); } } },
+  every: { layer: 'screen', draw(ctx, api) { ctx.fillStyle = '#0f0'; ctx.fillRect(api.W / 2, 0, api.W / 4, api.H / 4); } },
+  never: { layer: 'screen', draw() {} },
+};\n`);
+    writeFileSync(join(dir, 'films', 'shots', 'film.json'), JSON.stringify({ title: 'Shots', format: { width: 320, height: 180, fps: 24, captions: 'none' },
+      cast: { hare: { rig: 'hare' } }, sets: { m: { kit: 'meadow' } },
+      scenes: [{ id: 'A', set: 'm', time: 'morning', overlays: ['only', 'every', 'never'], actors: { hare: { at: 'x:1200' } },
+        shots: ['a', 'b', 'c', 'd'].map((id, i) => ({ id, dur: 1, camera: { size: i % 2 ? 'full' : 'wide', on: ['hare'] } })) }] }));
+    const film = await loadFilm(join(dir, 'films', 'shots')), plan = compile(film);
+    plan.overlays.find(o => o.name === 'every').shots = ['c'];          // as an overlay's "shots": ["c"] compiles
+    const r = Object.fromEntries((await verifyEffects(film, plan)).map(c => [c.name, c]));
+    assert.equal(r['overlay only'].ok, true, r['overlay only'].detail);
+    assert.match(r['overlay only'].detail, /looked at in shot b:/);
+    assert.equal(r['overlay every'].ok, true, r['overlay every'].detail);
+    assert.match(r['overlay every'].detail, /looked at in shot c:/);
+    assert.equal(r['overlay never'].ok, false);
+    assert.match(r['overlay never'].detail, /draws nothing at 0\.60, 2\.00, 3\.40 s \(nor in the middle of any shot of A\)/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('the rig and kit examples in docs/cast.md and docs/sets.md are files of their own that pass their gates', () => {
   const dir = project();
   try {

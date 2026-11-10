@@ -28,14 +28,16 @@ TTS); they are checked and cached on disk, so a voiced film re-renders the same 
 
 - **Rigs.** 14 characters, inked and cel-shaded: human, hare, tortoise, fox, owl, squirrel, songbird, mouse,
   hedgehog, badger, deer, frog, beetle and butterfly. Each has poses, gaits, gestures and expressions; the human has
-  ages, builds, hair and clothes. [docs/cast.md](docs/cast.md)
-- **Sets.** 7 painted locations (meadow, forest, stream, wayside, valley, hill, village) with parallax layers, props
-  that sort in depth with the actors, named anchors (ground, surfaces, perches, hollows), walkable regions with
-  routing around obstacles, water and stepping stones, eight times of day with sun shadows, and an ambience bed.
-  [docs/sets.md](docs/sets.md)
-- **Camera.** Shot sizes from establishing to extreme close-up framed on the actors you name; push-in, pull-out, pan,
-  track, tilt and handheld moves; lead room, headroom and caption-safe framing; depth of field on close shots;
-  dissolves between scenes.
+  ages, builds, hair and clothes. Two things as well: a `planet` (eleven worlds, Saturn's rings at their true radii)
+  and a `telescope`. [docs/cast.md](docs/cast.md)
+- **Sets.** 8 painted locations (meadow, forest, stream, wayside, valley, hill, village, and space) with parallax
+  layers, props that sort in depth with the actors, named anchors (ground, surfaces, perches, hollows), walkable
+  regions with routing around obstacles, water and stepping stones, eight times of day with sun shadows (or a kit's
+  own: space has one), and an ambience bed. [docs/sets.md](docs/sets.md)
+- **Camera.** Shot sizes from establishing to extreme close-up framed on the actors you name, a point of the set, or
+  part of a subject (a crop or a `focus`); push-in, pull-out, pan, track, tilt and handheld moves, and moves through
+  depth (a dolly, a dolly-zoom) among things in front of and behind each other; lead room, headroom and caption-safe
+  framing; depth of field on close shots; dissolves between scenes. [docs/storyboard.md](docs/storyboard.md#camera)
 - **Acting.** Walks, runs, hops and flights along routes; fliers that hover; looks, eyelines and listeners who keep
   watching the speaker; expressions that change behind a blink; lip sync from the voice's envelope; blinking and
   breathing; riding on another character; wading.
@@ -46,8 +48,13 @@ TTS); they are checked and cached on disk, so a voiced film re-renders the same 
   [docs/sound.md](docs/sound.md#music)
 - **Sound and mix.** 39 synthesized effects, automatic footsteps by surface, eight ambience beds, dialogue
   normalization, music ducking and a two-pass loudness master to −16 LUFS. [docs/sound.md](docs/sound.md)
+- **Effects.** Built-in fields and one-shots (dust, splashes, sparkles, leaves, rain, fireflies, motes, mist) and
+  nine built-in custom effects for skies and space (a star seen by eye, the Sun's glow, a star stream, a telescope's
+  eyepiece, light crossing to a planet, an orbit, a row of Earths across a planet, its moons, drifting debris).
+  [docs/effects.md](docs/effects.md#built-in-effects)
 - **Lint.** Sixteen staging and editing rules with an illustrated report; each framing fault comes with a camera
-  change or staging that was tried on the recompiled film. [docs/lint.md](docs/lint.md)
+  change or staging that was tried on the recompiled film, and a warning kept on purpose is marked on its shot with
+  the reason. [docs/lint.md](docs/lint.md)
 - **Parallel render.** The frames are split between worker processes (by default one fewer than the CPU cores),
   each with its own x264 encoder, and the parts are joined without re-encoding.
   [docs/rendering.md](docs/rendering.md)
@@ -121,8 +128,9 @@ The repository includes a Claude Code skill, [.claude/skills/cinecode/SKILL.md](
 the working method used for the demo: writing the screenplay, translating it to `film.json`, voicing and checking
 takes, the contact-sheet review loop, custom effects, and the final render. Open Claude Code in this repository and
 ask for a film ("make a two-minute animated film about a fox who is afraid of the dark"), or point it at a screenplay
-of your own. The skill's `references/` hold quick tables of rigs, kits, voices and review checklists, and its
-`scripts/` print what the commands don't: live inventories of rigs and kits (with every prop's extent), the warnings
+of your own. The skill's `references/` hold quick tables of rigs, kits, built-in effects, voices and review
+checklists, and its `scripts/` print what the commands don't: live inventories of rigs, kits (with every prop's
+extent) and effects, the warnings
 `check` doesn't show, every beat's start and end and the marks' times (`timeline.mjs`), what each voice take says
 with its length and pauses (`takes.mjs --all`), and the score's level per shot with any quiet holes (`levels.mjs`).
 
@@ -132,9 +140,10 @@ with its length and pauses (`takes.mjs --all`), and the score's level per shot w
 bin/cinecode.mjs            the command line (bin/cinecode: the same as a bare command, on the plugin's PATH)
 engine/
   core/                     shared helpers: seeded random, geometry, ink and cel-shading style
-  paint/                    brushes, skies, nature, scenery, water, buildings
+  paint/                    brushes, skies, nature, scenery, water, buildings, planets
   cast/                     the rigs (one file each) and the rig framework
   set/                      the set framework and the kits in set/kits/
+  effects/                  the built-in custom effects (one file each, used by name like a film's own)
   film/                     loading and validation, compile (storyboard → timed plan), camera, actors, frame drawing, grades
   audio/                    voices (Gemini TTS + QA + cache), music, synthesis, effects, ambience, the mix
   lint/                     the staging and editing checks and their report

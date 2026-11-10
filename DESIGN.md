@@ -25,6 +25,7 @@ engine/cast/rig.mjs         rig contract helpers + registry        (owner: rigs)
 engine/cast/<kind>.mjs      one file per rig                       (owner: rigs; human.mjs owner: human)
 engine/set/set.mjs          makeSet(), anchors, props, routing     (owner: sets)
 engine/set/kits/<kit>.mjs   one file per location kit              (owner: sets)
+engine/effects/<name>.mjs   built-in custom beats and overlays     (owner: effects; §11)
 engine/film/*.mjs           load, validate, compile, camera, frame (owner: film)
 engine/audio/wav.mjs        WAV read/write, resample               (done; read-only)
 engine/audio/voice.mjs      Gemini TTS + cache + QA + lip envelope (owner: voice)
@@ -84,7 +85,9 @@ export default {
 `engine/cast/rig.mjs` exports: `register(rig)`, `getRig(kind)`, `listRigs()`, `mixPose(a, b, u)`, `idle(rig, t, seed)` → `{ breath, blink }` (seeded blink every 2.5–5 s, 0.15 s long), and `RIG_KINDS`.
 `engine/cast/index.mjs` imports every rig file and registers it, then re-exports `getRig`, `listRigs`, `register`. Other modules import rigs **only** through `engine/cast/index.mjs`.
 `engine/cast/sheet.mjs` exports `castSheet(kinds, outPath)` (every pose, gait phase, gesture key frame and expression of each rig, labelled).
-**Rigs required:** hare, tortoise, fox, owl, squirrel, songbird, mouse, hedgehog, badger, deer, frog, beetle, butterfly. **New:** `human` (child/adult/elder variants via params). Every rig must support `talk`, `blink` and `expr` (rigs with no visible mouth may ignore `talk`).
+**Rigs required:** hare, tortoise, fox, owl, squirrel, songbird, mouse, hedgehog, badger, deer, frog, beetle, butterfly. **New:** `human` (child/adult/elder variants via params); round 6: `planet` and `telescope` (§11). Every rig must support `talk`, `blink` and `expr` (rigs with no visible mouth may ignore `talk`).
+
+Optional rig fields the engine reads: `sizes(params) → { height, headHeight, width, speeds, stride }` (per-actor numbers; without it `params.size` scales them), `upright` (true: stays vertical on a slope; false: pitches with it; default by kind), `faceless` (true / false; default: no face when the only expression is `neutral`, §11), `shadowW`, `shadowA` (the contact shadow's half-width and opacity), `noShadow` (no contact shadow), `mount`, `lookTime`, `feet`, `steps`, `hangPoses`, `breathPeriod`. `engine/cast/index.mjs` also exports `BUILTIN_RIGS` (the kinds above; a film's or project's rig of the same kind replaces one).
 
 `engine/core/style.mjs` exports `SHADE`, `cel(ctx, P, col, sh, w, seed)`, `darken(hex, f)`, `lighten(hex, f)`, `groundShadow(ctx, x, y, w, lift, a)`, `eye(ctx, x, y, rx, ry, state, iris, look)`.
 
@@ -131,9 +134,9 @@ export default function kit(params = {}) {          // engine/set/kits/meadow.mj
 
 **Props are depth-sorted with the actors.** Trees, stumps, rocks and stones are props, not painted into the ground layer, so a character behind a tree is correctly hidden by it. Parallax: a layer with factor `k` is offset by `(cam.cx - refX) * (1 - k)` horizontally and `(cam.cy - refY) * (1 - k) * 0.4` vertically.
 
-`engine/set/kits/index.mjs` exports `getKit(name)`, `listKits()`, `registerKit(name, fn)`; other modules import kits **only** through it. `engine/set/sheet.mjs` exports `setSheet(kitNames, outPath)` (each kit at a wide view with anchors, solid footprints, walk region, water and routes drawn as a debug overlay).
+`engine/set/kits/index.mjs` exports `getKit(name)`, `listKits()`, `registerKit(name, fn)` and `BUILTIN_KITS`; other modules import kits **only** through it. `engine/set/sheet.mjs` exports `setSheet(kitNames, outPath)` (each kit at a wide view with anchors, solid footprints, walk region, water and routes drawn as a debug overlay).
 
-**Kits required:** `valley`, `meadow`, `forest`, `stream`, `wayside`, `hill`. **New:** `village` (cottage with door and window, fence, well, path, garden) and `night-sky` variants of skies. Every kit defines at least 4 anchors and its ambience names.
+**Kits required:** `valley`, `meadow`, `forest`, `stream`, `wayside`, `hill`. **New:** `village` (cottage with door and window, fence, well, path, garden) and `night-sky` variants of skies; round 6: `space` (§11). Every kit defines at least 4 anchors and its ambience names. Round 6 `makeSet` fields: `times` (a kit's own times of day), `groundShadows`, `lens` and an anchor's `z` (§10, §11); anchor names are never ones a storyboard reads as something else (`left`, `right`, `x:…`, `near:…`).
 
 ## 4. The storyboard file (`films/<slug>/film.json`)
 
@@ -218,7 +221,7 @@ export const custom = { acornDrop: { draw(ctx, u, api) {}, sfx: [{ at: 0.3, name
 ```
 
 **Extension folders** (`engine/film/load.mjs`): the same things as files of their own, loaded before `custom.mjs`
-(which wins on a clash). `films/<slug>/rigs/<kind>.mjs` default-exports a rig (registered by its `kind`),
+(which wins on a clash), and the built-in effects (`engine/effects/`, §11) that film.json names under them all. `films/<slug>/rigs/<kind>.mjs` default-exports a rig (registered by its `kind`),
 `kits/<name>.mjs` default-exports `(params) => set` (registered by file name), `effects/<name>.mjs` exports any of
 `custom`, `overlays`, `sounds`. A project shares them between films in `cinecode/rigs|kits|effects/`: the nearest such
 folder above the film, not past the project root (a folder with `.git`). Files starting with `_` are skipped.
@@ -278,7 +281,7 @@ All audio is 48 kHz. Internal buffers are `Float32Array`s (mono) or `{ L, R }`.
 
 ## 7. Lint (`engine/lint/lint.mjs`)
 
-`lintPlan(plan, { step = 1/6 }) → { errors: [], warnings: [] }`; each issue: `{ rule, severity, t, shot, actor?, message, box? }`. `writeLintReport(plan, result, outDir)` writes `lint.json` and a contact sheet `lint.jpg` with the offending frames and boxes drawn.
+`lintPlan(plan, { step = 1/6 }) → { errors: [], warnings: [], kept: [] }`; each issue: `{ rule, severity, t, shot, actor?, message, box?, note? }` (`kept`: the warnings a shot's `"lint": { "allow", "note" }` marks as intended, §11). `writeLintReport(plan, result, outDir)` writes `lint.json` and a contact sheet `lint.jpg` with the offending frames and boxes drawn.
 
 | rule | catches |
 |---|---|
@@ -354,6 +357,7 @@ export const overlays = {
 };                                              // 'back' (world, after back layers, before props/actors)
                                                 // 'world' (world, after actors and world fx), 'front' (world, after front layers)
                                                 // 'grade' (screen, after the grade, before glow fx), 'screen' (screen, last before titles)
+                                                // round 6: 'depth' (pieces handed to the depth sort, §10)
 export const sounds = { 'tiny-bell': ({ seed, dur, params }) => new Float32Array(48000) };   // 48 kHz mono
 ```
 
@@ -380,3 +384,110 @@ Overlay and custom-beat `api`: `{ t, st /* s since scene start */, su /* 0..1 sc
 ### 9.4 Lint additions (owner: lint)
 
 Riders (`contact.kind === 'mount'`) are not floating and don't collide with their carrier; wading actors are allowed in water; scale/size rules divide by cast `scale`; riders and sunk actors use their visible (clipped) box for offscreen/size checks.
+
+## 10. Depth (owner: film; the lens and anchor `z`: sets)
+
+One projection for everything that has a depth, unified with §3's layer parallax. **z** is world px from the
+**stage**: the plane a set stages on (its k = 1 ground layer, its props and anchors, every actor by default);
+positive is farther from the lens, negative nearer. A camera has a depth too, `cam.z` (0: where it stands today),
+and the set's **lens** D (`makeSet({ lens })`, default `LENS` = 2304 world px: a 45° view across a 1920-px frame at
+zoom 1) is how far in front of the stage a camera at depth 0 stands. A camera (cx, cy, zoom, z = c) sees a point
+(x, y, z) at
+
+    d = D + z − c   (its distance from the lens)      p = (D − c) / d
+    screen = (W/2 + zoom·p·(x − cx), H/2 + zoom·p·(y − cy)),  drawn at p × its size
+
+`zoom` stays the stage's zoom (what `cameraAt` returns and every 2D consumer uses): on the stage p = 1 whatever the
+camera's depth, so everything staged keeps today's arithmetic, and a camera at depth 0 with nothing off the stage
+draws byte-identical frames. `camera.mjs` exports `LENS`, `NEAR`, `NEAR_FADE`, `depthScale(cam, z)` (p),
+`depthFade(cam, z)` and `project(cam, W, H, x, y, z) → [sx, sy, s]` (s = zoom·p: screen px per world px there).
+
+- **Layers.** A layer with parallax k is at z = D(1/k − 1) (k = 1: the stage; k < 1 behind it; k > 1 in front; the
+  sky at infinity). Its sideways parallax stays §3's (the image as painted is what the camera sees from depth 0); a
+  camera at depth c draws it scaled about the frame centre by (D − c)/(D − k·c), the p of its z, so a dolly in grows
+  a near layer more than the stage, a far one less, and the sky (drawn with the lens zoom, zoom·(D − c)/D) not at all.
+  Layers are occluders at their depth (see Draw order), with one exception: the stage's own layer (k 1, a back layer:
+  its painted ground) is a floor, not a wall, so for the sort it reaches back to the nearest backdrop (the nearest back
+  layer with 0 < k < 1; none: to infinity) and what is between the stage and that backdrop shows over the ground
+  (`S.layerDepths(D)` → [{ ly, front, z }]; a front layer is never behind the stage).
+- **Cull and fade.** Whatever is nearer the lens than NEAR·D (0.1 D; behind the camera too) is not drawn; it fades
+  out (smoothly) from NEAR_FADE·D (0.25 D). A camera stays more than NEAR_FADE·D in front of the stage (c < 0.75 D,
+  validated against the set's lens), so the stage never fades and its zoom stays finite: to fly past something, put
+  it in front of the stage (negative z) and what the camera flies toward behind it, or give the kit a longer lens.
+- **Things with a depth.** Actors: the scene actor's `z`, else the `z` of the anchor it starts at (0 without one). A
+  beat that takes an actor somewhere (`place`, `walk` / `run` / `hop` / `fly`, `enter`, `exit`, `set`) takes it to
+  its own `z`, else to the depth of where it goes: a named anchor's `z` (**0 when the anchor declares none**: a named
+  place is on the stage unless it says otherwise), the carrier's (`on:X`, where it lands), the other actor's (`near:X`,
+  `left-of:X`, `right-of:X`, `behind:X`, `front-of:X`, or an actor's name); a point (`x:…`, `x:…,y:…`), a side or a
+  beat with no place keeps its depth. The change is eased over the beat (`set` takes its `dur`); an entrance takes
+  it at once (from a side it was off screen; from a place it appears at that place's depth, then eases to its
+  destination's). A rider has its carrier's z; hopping on eases to it by the landing, hopping off eases from it. An
+  exit or entrance at a side starts or ends off screen as its depth draws it (a view shows depth z out to
+  W/2/(zoom·p) either side of its centre). `plan.actorsAt` states carry `z` and are sorted by it (farther first),
+  then by key. Effects: overlays and custom beats on the new layer `depth` run first in the frame, before the set's
+  layers (so the layers know what lies beyond or nearer than them), and draw only by handing their pieces to
+  `api.item([x, y, z], draw)` (anything drawn straight on ctx there lands behind the set's layers); on every layer
+  `api.project([x, y, z]) → [sx, sy, s, a]` (a: 0..1, the near fade; 0: don't draw it).
+- **Draw order.** Props, actors, one-shot fx and depth items are sorted by z (farther first), then by their staging
+  key (ground y, as before), then by kind: a moon passes behind and in front of a planet with no hiding by hand. **z
+  comes before ground y**: whatever is off the stage is drawn behind (z > 0) or in front of (z < 0) everything on it,
+  whatever its ground y, and is drawn away from the painted spot under it (it slides over the ground as the camera
+  moves), so figures that stand on a set's painted stage (a k 1 layer or props) stay at z 0: compile warns about one
+  standing (ground, perch, hollow) at another depth; depth is for fliers, effect pieces and sets with no painted
+  ground (space). A set layer that something drawn lies beyond (a back layer) or nearer than (a front layer) joins the
+  sort at its own z (before everything at that depth for a back layer, after it for a front one); the others are drawn
+  before and after it all as before, and with no back layer in the sort the 'back' overlays keep their place, else they
+  are drawn after every back layer and before the stage (z 0). An item's `draw(ctx, P)` gets ctx in the world transform
+  of its depth (zoom·p about the camera centre, globalAlpha = its fade) and P = { x, y, s, z, a } (its screen point
+  and scale). An actor off the stage throws no ground shadow. The depth of field blurs what is farther than the
+  nearest subject, and at its depth what is behind its key (as before); the grade's close-shot focus takes each head
+  at its depth's scale.
+- **Camera.** `z` (the depth at the shot's start, default 0) and `zTo` (at the move's end) move the camera through
+  depth over the move's window (`moveAt` / `moveDur`, else the whole shot; eased), with any move. A push-in /
+  pull-out `to` a size composes its end framing as seen from `zTo`: the subjects frame as asked and only what lies at
+  other depths changes (a dolly-zoom when z goes against the zoom). Every other move composes its framing at `z`, and
+  the camera then travels along its axis (the frame centre is the vanishing point): the stage grows by
+  (D − z)/(D − c). Subjects off the stage are framed by their size as seen from the framing's depth: each mapped onto
+  the stage about the centre of the framing it feeds (each end of a pan or a move, the held frame of a still shot,
+  each sample of a track and its containment), solved for that centre (exact for subjects at one depth, iterated for
+  several); the framing's point then stays a world point at its depth, so re-solving it at another zoom (a push-in,
+  a `zoomTo`, a track's zoom) and the straight screen path of a move keep it where the composition put it. A
+  `focus` on a world point is a point on the stage. A depth camera is clamped on its widest view (the lens view;
+  pulled back, the nearest layer's), so no layer shows its edge. Every camera of a scene that uses depth carries `z`
+  and `lens`.
+- **Geometry.** `frameInfo` boxes come from the same projection; its actors carry `z` and `zoom` (screen px per world
+  px at their depth: use it, not `camera.zoom`, for an actor off the stage); an actor nearer than NEAR·D is left out.
+
+## 11. Round 6 extensions (all generic; first used by the Saturn chapter of a solar-system film)
+
+Everything in §1–10 still holds; a film that uses none of these renders as before.
+
+| where | field | meaning (owner) |
+|---|---|---|
+| camera | `zoom` above 1 | on subjects that all have no face (a rig's `faceless: true`, or no expression but `neutral`): crops into the size's framing about where it composes them, and `offset` applies as given. Only subjects with a face keep their heads above the caption band. (film) |
+| camera | `focus` | `[fx, fy]` in the subjects' box (0..1), `"head"`, or a world point `"x:…,y:…"`: that point at the frame centre (moved by `offset` and the angle) at the size's zoom × `zoom`; no lead room, headroom, caption band, held-gesture following, clearing or track containment. (film) |
+| camera | `on`, `toOn` points | `"x:N"` framed like a figure on the lane there; `"x:…,y:…"` the point itself at the scale of the lane below it. Inside the set. (film) |
+| camera | `z`, `zTo` | depth through the move (§10). (film) |
+| scene actor, beats | `z` | depth (§10): scene actors; `place`, `walk`, `run`, `hop`, `fly`, `enter`, `exit`, `set` (a `set` takes its `dur`). (film) |
+| custom beat | `scope` | `"shot"`: drawn only in its own shot, before its end (not in a dissolve's fading picture); its sfx from the cut on dropped. `"scene"`: the default (its whole `dur`, into the later shots and the dissolve), said on purpose. The plan warns about an unscoped beat drawn on a later shot's first frame, or ending partway through the dissolve. (film) |
+| custom / sfx beat | `hold` | `false`: plays its whole `dur` but takes no time in the beat timeline (the next beat, its group and the shot don't wait). (film) |
+| scene overlay | `shots` | `{ "name", "params", "shots": [ids of that scene] }`: drawn only in those shots; a built-in field covers each run of consecutive ones; a rain fades only at the scene's edges. (film) |
+| shot | `lint` | `{ "allow": [warning rules], "note" }`: those warnings are kept (lint's `kept`), not reported as warnings; errors never. (lint) |
+| kit | `times` | `{ name: { grade, sun, haze } }` with a painter per name in `skies`: then the kit's only times, the first its default. `grade`: `'neutral'` (default), an Earth time's, or `{ sl, mul, vig, con }`; `sun`: `null` (default, no sun), an Earth time's, or `{ len, a }`; `haze`: `[r, g, b]` or none. A name means one light in a film. `grade.mjs` `gradeOf` / `sunLight` look a time up; a name neither Earth's nor declared is an error (no morning fallback). (sets, film) |
+| kit | `groundShadows` | `false`: no figure, flier or prop throws a shadow, and no figure draws its contact shadow. (sets) |
+
+- **Library** (`engine/cast/planet.mjs`, `telescope.mjs`, `engine/set/kits/space.mjs`, `engine/paint/planets.mjs`,
+  `engine/effects/`): the `planet` rig (eleven bodies, `sizes(params)`, faceless, upright, no shadow), the `telescope`
+  prop rig, the `space` kit (its own time `space`, `groundShadows: false`, perch holds), the planet painter for film
+  code (`cinecode/paint/planets`: `drawBody`, `globeOf`, `atDepth`, `radiusOf`), and the built-in effects:
+  `engine/effects/index.mjs` exports `BUILTIN_EFFECTS = { custom, overlays }` from every other file there (`skydot`,
+  `sunglow`, `starstream`, `eyepiece`, `lightpulse`, `orbit`, `sizerow`, `moonlets`, `debris`). A film gets the ones
+  its film.json names; a film's, project's or `custom.mjs`'s rig, kit or effect of a built-in's name replaces it, and
+  `loadFilm` says so (the file is listed with "replaces the built-in …" and `film.warnings` carries the note).
+- **Gates.** `verify-kit` fails an anchor whose name a storyboard reads as something else, checks a kit's own times
+  (or Earth's eight) for a light and paint (≥ 90% of a preview frame more than near-black under each time's grade),
+  and draws its times sheet from them. `verify-effect` looks at an overlay in the shots its `shots` names (or, when it
+  keeps to some shots by itself, the shots it draws in). Review images go to `out/verify/` beside the folder that
+  holds the piece (a film's, or the project's `cinecode/`).
+- **Lint.** Rigs with no face: `edge-cut`'s head cut, `halo` and `caption-face` skip them; the other rules judge their
+  body or framed region.

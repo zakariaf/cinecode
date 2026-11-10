@@ -1,6 +1,15 @@
 // Staging and editing checks: the things that make a film look wrong even when every frame renders.
-//   lintPlan(plan, { step = 1/6 }) → { errors, warnings, stats }
+//   lintPlan(plan, { step = 1/6 }) → { errors, warnings, kept, stats }
 //   writeLintReport(plan, result, outDir) → { json, jpg }   (see report.mjs)
+//
+// Kept warnings: a shot's "lint": { "allow": [rule names], "note": "why" } marks its warnings of those rules as
+// intended. They are reported in `kept` (each with the note, no fix tried), not in `warnings`; errors are never kept.
+// lintPlan throws a ValidationError when a shot's lint block is malformed (allowProblems).
+//
+// Rigs without a face (faceless(): only the 'neutral' expression, or the rig's own `faceless: true`): their head point
+// is only where close shots frame them. The rules about heads and faces skip them (edge-cut's head cut near the eyes,
+// halo, caption-face); the rest judge them by their body (a sliver, a tangent) or by what the camera frames (the
+// framed region of subject-size and offscreen-speaker, named without "head" or "face").
 //
 // The film is sampled on real frame times (every `step` seconds, every beat and line boundary, and the first and
 // last frame of each shot). Each sample reads frameInfo() (screen boxes, heads, contacts, captions) and the set
@@ -21,15 +30,17 @@
 // sounds and instants, not actors: they hide no one and bring no one together. A push-in / pull-out that ends at
 // another size or zoom ("to", "toOn", "zoomTo") is judged at its starting size.
 //
-// Issue: { rule, severity, t, t0, t1, frame, shot, scene, actor?, other?, message, box?, marks?, frames?, samples }
+// Issue: { rule, severity, t, t0, t1, frame, shot, scene, actor?, other?, message, note?, box?, marks?, frames?, samples }
 //   t, frame  the worst moment (seconds, and the frame index t·fps); t0–t1 the span the hits cover
 //   box     the offending actor's screen box [x0, y0, x1, y1] at t (plan W×H pixels)
 //   marks   what the report draws: { kind: 'box' | 'ellipse' | 'point' | 'caption', box | [cx, cy, rx, ry] | [x, y], label }
 //   frames  two times for issues about a cut (cut-jump, axis, continuity): the frame before and the frame after
+//   note    a kept warning's reason (its shot's "lint" note)
 import { createCanvas } from '@napi-rs/canvas';
 import { frameInfo } from '../film/frame.mjs';
 import * as FRAME from '../film/frame.mjs';
 import { compile } from '../film/compile.mjs';
+import { ValidationError } from '../film/load.mjs';
 import { regionOf, SIZE_SPEC, ZMAX, LOOSER } from '../film/camera.mjs';
 import { profile, rigSizes, probe, parseTarget } from '../film/util.mjs';
 import { SKY_STYLE, SKY_TIMES, SKY_W, SKY_H } from '../paint/sky.mjs';
@@ -48,13 +59,13 @@ export const RULES = {
     fix: 'put the speaker in "on" (or a looser size), bring them out from behind what hides them, or mark the line "vo": true' },
   'subject-size': { severity: 'warning', catches: 'the framed subject\'s screen height is outside the range for the shot size',
     fix: 'follow the cause in the message: frame the subject alone or stage the others closer; for a subject that grows later in the shot (a pose, a rider), make that change at the end of the shot before; at the closest zoom use a looser size. "zoom" never clears it (the range scales with it); a push-in or pull-out is judged at its start' },
-  'edge-cut': { severity: 'warning', catches: 'a head cut by the frame edge (its eyes at or past the edge), or a sliver of an actor (under 25% of it in frame, head out; a walker only at the top or bottom) held for 0.5 s or more',
+  'edge-cut': { severity: 'warning', catches: 'a head cut by the frame edge (its eyes at or past the edge; not for a rig with no face), or a sliver of an actor (under 25% of it in frame, head out; a walker only at the top or bottom) held for 0.5 s or more',
     fix: 'apply the change in the message, tried on the recompiled film: a camera change ("offset" or "size") that frames the actor in or out without a new edge-cut, tangent or halo, else a staging (move where the actor stands as the shot starts and where it goes in it)' },
   tangent: { severity: 'warning', catches: 'an actor\'s outline just touching a frame edge (an ear or a tail tip against the top, feet just above the bottom; measured on the part of the drawing facing the frame) for 0.5 s or more',
     fix: 'apply the change in the message, tried on the recompiled film: a camera change ("offset" or "zoom") that clears the edge or lets it cut clearly without a new framing fault, else a staging (move where the actor stands as the shot starts and where it goes in it)' },
-  halo: { severity: 'warning', catches: 'the sun or moon disc of the sky touching or behind a head for 0.5 s or more',
+  halo: { severity: 'warning', catches: 'the sun or moon disc of the sky touching or behind a head (of a rig with a face) for 0.5 s or more',
     fix: 'apply the change in the message, tried on the recompiled film: a camera change ("offset", "angle", "size", "zoom") or a staging that moves the head off the disc without a new framing fault; else re-block the scene under a clear sky' },
-  'caption-face': { severity: 'warning', catches: 'the caption box overlaps a speaker\'s head',
+  'caption-face': { severity: 'warning', catches: 'the caption box overlaps a speaker\'s face (a rig with a face)',
     fix: 'stage the speaker higher in frame (an "offset" or the "high" angle), or a tighter size' },
   'cut-jump': { severity: 'warning', catches: 'consecutive shots of the same set with nearly identical framing',
     fix: 'change the size (a zoom ratio of at least 1.2), the subject or the angle between the two shots, or make them one shot' },
@@ -92,6 +103,13 @@ export const LIMITS = {
 };
 const SWIMMERS = new Set(['frog']);
 const REGION_NAME = { wide: 'body', full: 'body', medium: 'waist-up region', close: 'head and shoulders', 'extreme-close': 'face' };
+// ... of a rig with no face: the camera frames it the same way, around its head point
+const BARE_NAME = { wide: 'body', full: 'body', medium: 'upper part', close: 'head-point region', 'extreme-close': 'head-point region' };
+/** A rig with no face: its own `faceless` (true / false) when it says, else only the 'neutral' expression. */
+export const faceless = R => (typeof R?.faceless === 'boolean' ? R.faceless : !(R?.expressions?.length > 1));
+const regionName = (size, R) => (faceless(R) ? BARE_NAME : REGION_NAME)[size];
+// The rules a shot may keep (warnings; a collision is one while a beat brings the two together).
+const KEEPABLE = Object.keys(RULES).filter(r => RULES[r].severity === 'warning' || r === 'collision');
 const MOVES = new Set(['walk', 'run', 'hop', 'fly', 'enter', 'exit']);
 const ORDER = Object.keys(RULES);
 const HELD = new Set(['edge-cut', 'tangent', 'halo']);   // rules whose faults must last LIMITS.edgeHold
@@ -105,7 +123,29 @@ const STOP = new Error('stop');   // (a check of a fix gives up at its first hel
  * each candidate camera change and the shot linted again (see hint()).
  */
 export function lintPlan(plan, opts = {}) {
+  const bad = allowProblems(plan.film);
+  if (bad.length) throw new ValidationError(bad);
   return new Linter(plan, opts).run();
+}
+
+/**
+ * A shot's lint block, "lint": { "allow": [rule names], "note": "why" }, checked on the film JSON: allow is a
+ * non-empty list of rules that can warn, note says why. → problems [{ path, message }] as validateFilm lists them.
+ */
+export function allowProblems(film) {
+  const out = [], P = (path, m) => out.push({ path, message: `${path}: ${m}` });
+  (Array.isArray(film?.scenes) ? film.scenes : []).forEach((sc, i) => (Array.isArray(sc?.shots) ? sc.shots : []).forEach((sh, j) => {
+    const L = sh?.lint, p = `scenes[${i}].shots[${j}].lint`;
+    if (L === undefined) return;
+    if (!L || typeof L !== 'object' || Array.isArray(L)) { P(p, 'must be an object { "allow": [rule names], "note": "why" }'); return; }
+    for (const k of Object.keys(L)) if (k !== 'allow' && k !== 'note') P(`${p}.${k}`, 'unknown field (a shot\'s lint block takes "allow" and "note")');
+    if (!Array.isArray(L.allow) || !L.allow.length) P(`${p}.allow`, `must be a non-empty array of rule names (${KEEPABLE.join(', ')})`);
+    else L.allow.forEach((r, k) => {
+      if (!KEEPABLE.includes(r)) P(`${p}.allow[${k}]`, RULES[r] ? `"${r}" is an error: errors are never kept, fix it` : `unknown rule ${JSON.stringify(r)} (one of ${KEEPABLE.join(', ')})`);
+    });
+    if (typeof L.note !== 'string' || !L.note.trim()) P(`${p}.note`, 'say why the warning is intended ("note": "…")');
+  }));
+  return out;
 }
 
 // ───────────── geometry ─────────────
@@ -586,7 +626,7 @@ class Linter {
       }
       const v = visibleFraction(this.plan, c.shot, c.t, c.info, a, a.st, c.states, { occlusion: this.occlusion, region });
       if (v.frac >= LIMITS.minVisible) continue;
-      const parts = [], what = REGION_NAME[size] ? `${REGION_NAME[size]} ` : '';
+      const parts = [], what = regionName(size, a.st.R) ? `${regionName(size, a.st.R)} ` : '';
       if (v.frame < 0.995) parts.push(`${pct(1 - v.frame)} is outside the frame`);
       for (const b of v.blockers) if (b.frac >= 0.05) parts.push(`${pct(b.frac)} is hidden ${b.id === 'front' ? 'behind the foreground' : b.id.startsWith('inside:') ? `inside ${b.id.slice(7)}` : `behind ${b.id}`}`);
       this.hit(c, { rule: 'offscreen-speaker', actor: a.id, metric: 1 - v.frac,
@@ -599,11 +639,12 @@ class Linter {
   // ── caption-face: a burned-in caption over a speaker's eyes or mouth ──
   // The face zone is the middle of the head box; the score is how much of the smaller of (visible face zone,
   // caption) the other covers, so a caption across a close-up face and a caption hiding a small face both count.
+  // A rig with no face has none to cover.
   captionFace(c) {
     if (!this.on('caption-face')) return;
     const W = this.W, H = this.H;
     for (const cap of c.info.captions || []) for (const a of c.actors) {
-      if (!a.speaking) continue;
+      if (!a.speaking || faceless(a.st.R)) continue;
       const hh = a.hh ?? (a.headBox[2] - a.headBox[0]) / 1.2, [hx, hy] = a.head;
       const zone = inter([hx - 0.45 * hh, hy - 0.4 * hh, hx + 0.45 * hh, hy + 0.4 * hh], [0, 0, W, H]);
       const za = area(zone), ca = area(cap.box);
@@ -660,13 +701,13 @@ class Linter {
       return { a, g: framedRegion(x, size), gv: framedRegion(seen(x), size) };
     });
     if (!subs.length) return;
-    const what = REGION_NAME[size] === 'body' || REGION_NAME[size].endsWith('region') ? REGION_NAME[size] : `${REGION_NAME[size]} region`;
+    const what = R => { const n = regionName(size, R); return n === 'body' || n.endsWith('region') || faceless(R) ? n : `${n} region`; };
     if (!subs.some(s => frac(s.gv, W, H) >= 0.5)) {
       // entering or leaving, a wade going under (in frame, below the waterline), or a move toward other subjects
       const under = subs.some(s => frac(s.g, W, H) >= 0.5);
       if (!under && !live.some(s => s.action === 'enter' || s.action === 'exit') && !(resized && cs.toOn)) {
         const s0 = subs[0];
-        this.hit(c, { rule: 'subject-size', variant: 'absent', actor: s0.a.id, metric: 1, message: `${size} shot on ${ids.join(' + ')}, but ${subs.length > 1 ? 'none of their' : `${s0.a.id}'s`} ${what}${subs.length > 1 ? 's is' : ' is not'} in frame`, box: s0.gv, marks: [{ kind: 'box', box: s0.gv, label: s0.a.id }] });
+        this.hit(c, { rule: 'subject-size', variant: 'absent', actor: s0.a.id, metric: 1, message: `${size} shot on ${ids.join(' + ')}, but ${subs.length > 1 ? 'none of their' : `${s0.a.id}'s`} ${what(s0.a.st.R)}${subs.length > 1 ? 's is' : ' is not'} in frame`, box: s0.gv, marks: [{ kind: 'box', box: s0.gv, label: s0.a.id }] });
       }
       return;
     }
@@ -704,7 +745,7 @@ class Linter {
     const grows = !big && !capped && !roams && tall > 1.2 * now;
     const m = big ? best.mv : best.m, box = big ? best.gv : best.g;
     this.hit(c, { rule: 'subject-size', variant: big ? 'big' : 'small', actor: best.a.id, metric: big ? m / hi - 1 : 1 - m / lo,
-      message: `${size} shot: ${best.a.id}'s ${what} fills ${pct(m)} of the frame height${resized ? ` at the move's starting zoom` : ''} (expected ${pct(lo)}–${pct(hi)})${capped ? `; the camera is already at its closest zoom, so the rig is too small for this size${k !== 1 ? ` (cast scale ${k})` : ''}` : roams ? `; ${rover.id} travels ${Math.round(rover.d)} px during the shot and the camera frames the whole move (try "move": "track")` : grows ? `; the shot is framed for ${best.a.id}'s ${(tall / now).toFixed(1)}× taller figure later in it (a pose, a rider), so it reads small until then: put that pose change at the end of the shot before, so this one starts in it; "zoom" won't help, the range scales with it` : ''}`,
+      message: `${size} shot: ${best.a.id}'s ${what(best.a.st.R)} fills ${pct(m)} of the frame height${resized ? ` at the move's starting zoom` : ''} (expected ${pct(lo)}–${pct(hi)})${capped ? `; the camera is already at its closest zoom, so the rig is too small for this size${k !== 1 ? ` (cast scale ${k})` : ''}` : roams ? `; ${rover.id} travels ${Math.round(rover.d)} px during the shot and the camera frames the whole move (try "move": "track")` : grows ? `; the shot is framed for ${best.a.id}'s ${(tall / now).toFixed(1)}× taller figure later in it (a pose, a rider), so it reads small until then: put that pose change at the end of the shot before, so this one starts in it; "zoom" won't help, the range scales with it` : ''}`,
       box, marks: [{ kind: 'box', box, label: best.a.id }] });
   }
 
@@ -917,11 +958,12 @@ class Linter {
 
   // ── edge-cut and tangent: what the frame's edges do to each actor ──
   // edge-cut: a head the edge cuts through near the eyes (the head point closer than headCut head heights to an edge,
-  // or past it with some of the head still in), or a sliver: under `sliver` of the drawing in frame, its head out (a
-  // carrier under its riders is their ground, not a sliver). tangent: the drawn outline ends within `tangent` of the
-  // frame height of an edge, inside or outside it (a tip just touching, feet just above the bottom), for a figure at
-  // least half in frame, measured on the part of the drawing facing that edge (a tail leaving by the side is not at
-  // the bottom). Actors walking in or out are not judged at the side edges; both rules need edgeHold seconds.
+  // or past it with some of the head still in; not for a rig with no face), or a sliver: under `sliver` of the drawing
+  // in frame, its head out (a carrier under its riders is their ground, not a sliver). tangent: the drawn outline ends
+  // within `tangent` of the frame height of an edge, inside or outside it (a tip just touching, feet just above the
+  // bottom), for a figure at least half in frame, measured on the part of the drawing facing that edge (a tail leaving
+  // by the side is not at the bottom). Actors walking in or out are not judged at the side edges; both rules need
+  // edgeHold seconds.
   // Each fix moves the picture (or stages the actor) at the moment that needs the biggest move, so it holds for the
   // whole span: a head framed in, or the whole drawing taken out; an outline clear of the edge, or cut clearly by it.
   edges(c) {
@@ -934,11 +976,11 @@ class Linter {
     for (const a of c.actors) {
       if (a.alpha < 0.5 || area(inter(shown(a), [0, 0, W, H])) <= 0) continue;
       const st = a.st, moving = MOVES.has(st.action), sides = moving ? ['top', 'bottom'] : ['left', 'right', 'top', 'bottom'], own = subj.has(a.id);
-      const hb = a.headBox, hh = (hb[2] - hb[0]) / 1.2, [hx, hy] = a.head, P = this.world(c, a.head);
+      const hb = a.headBox, hh = (hb[2] - hb[0]) / 1.2, [hx, hy] = a.head, P = this.world(c, a.head), bare = faceless(st.R);
       const dist = { left: hx, right: W - hx, top: hy, bottom: H - hy }, up = y => (a.contact.screen[1] - y) / z;
       let sil = null;
-      // a head cut near its eyes
-      if (cut && hh > 0) {
+      // a head cut near its eyes (a rig with no face has no eyes to cut: its body is judged below)
+      if (cut && hh > 0 && !bare) {
         const e = sides.reduce((m, k) => (dist[k] < dist[m] ? k : m), sides[0]), d = dist[e], hin = frac(hb, W, H);
         if (d < LIMITS.headCut * hh && hin >= 0.08) {
           // frame the head in (the picture moves away from every edge it is near: out of a corner too) or the whole
@@ -978,7 +1020,7 @@ class Linter {
         const alt = own && LOOSER[size] !== size ? [[{ size: LOOSER[size] }, `"size": "${LOOSER[size]}" frames it`]] : [];
         const fallback = `no "offset"${alt.length ? ', looser size' : ''} or simple move of ${a.id} clears it here: re-block the shot so ${a.id} stays out of frame or comes well into it`;
         this.hit(c, { rule: 'edge-cut', variant: 'sliver', actor: a.id, metric: mv, P, fix: { moves: [[sx, sy, what]], alt, stage: [sMove], fallback },
-          message: `only a sliver of ${a.id} is in frame (${pct(sil.frac)} of it, at the ${e} edge, its head out)`,
+          message: `only a sliver of ${a.id} is in frame (${pct(sil.frac)} of it, at the ${e} edge${bare ? '' : ', its head out'})`,
           box: I, marks: [{ kind: 'box', box: I, label: a.id }] });
         continue;
       }
@@ -1000,7 +1042,7 @@ class Linter {
     }
   }
 
-  // ── halo: the sun or moon of the sky touching or behind a head ──
+  // ── halo: the sun or moon of the sky touching or behind a head (a rig with no face has no head to crown) ──
   halo(c) {
     if (!this.on('halo')) return;
     const W = this.W, H = this.H, S = c.S, discs = skyDiscs(S, c.cam, c.shot.skyAt?.(c.t), W, H).filter(d => d.a >= 0.35);
@@ -1008,7 +1050,7 @@ class Linter {
     for (const d of discs) {
       if (d.x < -d.r || d.x > W + d.r || d.y < -d.r || d.y > H + d.r) continue;
       for (const a of c.actors) {
-        if (a.alpha < 0.5) continue;
+        if (a.alpha < 0.5 || faceless(a.st.R)) continue;
         // the drawn head (its drawing inside the head box): how far the disc is from it, and whether the disc stands
         // over its crown (a big head reads a disc a little above it as its halo, one off to the side does not)
         const hb = a.headBox, hh = (hb[2] - hb[0]) / 1.2, wide = Math.max(LIMITS.halo * d.r, LIMITS.haloHead * hh);
@@ -1230,24 +1272,28 @@ class Linter {
   }
 
   finish(ms) {
-    // framing faults that pass in a moment (a move sweeping through, a figure turning) are not issues
+    // framing faults that pass in a moment (a move sweeping through, a figure turning) are not issues; a warning its
+    // shot allows ("lint": { "allow": [rule], "note" }) is kept, with the note and no fix tried
+    const kept = new Set();
     const out = this.runs.filter(held).map(r => {
       const w = r.worst, span = r.t1 - r.t0 > 1e-6 && r.n > 1;
-      const t = w.t ?? r.t0;
+      const t = w.t ?? r.t0, L = r.shot != null ? this.srec.get(r.shot)?.def?.lint : null;
+      const keep = r.severity === 'warning' && Array.isArray(L?.allow) && L.allow.includes(r.rule);
       const issue = { rule: r.rule, severity: r.severity, t, t0: r.t0, t1: r.t1, frame: Math.round(t * this.fps), shot: r.shot ?? null, scene: r.scene ?? null };
       if (r.actor) issue.actor = r.actor;
       if (r.other) issue.other = r.other;
-      const msg = w.fix ? `${w.message}: ${this.hint(r)}` : w.message;
+      const msg = w.fix && !keep ? `${w.message}: ${this.hint(r)}` : w.message;
       issue.message = span && !w.frames ? `${msg} (${r.t0.toFixed(1)}–${r.t1.toFixed(1)} s)` : msg;
+      if (keep) { issue.note = L.note; kept.add(issue); }
       if (w.box) issue.box = w.box.map(r1);
       if (w.marks?.length) issue.marks = w.marks.map(m => ({ ...m, ...(m.box ? { box: m.box.map(r1) } : {}), ...(m.ellipse ? { ellipse: m.ellipse.map(r1) } : {}), ...(m.point ? { point: m.point.map(r1) } : {}) }));
       if (w.frames) issue.frames = w.frames.slice();
       issue.samples = r.n;
       return issue;
     }).sort((a, b) => a.t - b.t || ORDER.indexOf(a.rule) - ORDER.indexOf(b.rule) || String(a.actor).localeCompare(String(b.actor)));
-    const errors = out.filter(i => i.severity === 'error'), warnings = out.filter(i => i.severity !== 'error');
-    const byRule = Object.fromEntries(ORDER.map(r => [r, out.filter(i => i.rule === r).length]).filter(([, n]) => n));
-    return { errors, warnings, stats: { samples: this.samples, step: r3(this.step), ms: Math.round(ms), byRule } };
+    const errors = out.filter(i => i.severity === 'error'), warnings = out.filter(i => i.severity !== 'error' && !kept.has(i));
+    const byRule = Object.fromEntries(ORDER.map(r => [r, out.filter(i => i.rule === r && !kept.has(i)).length]).filter(([, n]) => n));
+    return { errors, warnings, kept: out.filter(i => kept.has(i)), stats: { samples: this.samples, step: r3(this.step), ms: Math.round(ms), byRule } };
   }
 }
 

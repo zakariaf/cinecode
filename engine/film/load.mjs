@@ -12,12 +12,16 @@
 // one of those, searched up to the first folder with a .git). rigs/*.mjs default-export a rig (registered by its
 // kind), kits/*.mjs a kit function (registered under the file name, like engine/set/kits/), effects/*.mjs any of
 // custom.mjs's `custom`, `overlays` and `sounds`. Load order: project, film folder, custom.mjs; a later name wins.
+// Built-in effects (engine/effects/) come first: a film gets the ones its film.json names. A rig, kit or effect of the
+// film's or project's own named like a built-in one replaces it, and check says so (its file is listed with
+// "replaces the built-in …", and film.warnings carries the same note).
 import module from 'node:module';
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, resolve, basename, dirname, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { getRig, register, listRigs } from '../cast/index.mjs';
-import { getKit, listKits, registerKit } from '../set/kits/index.mjs';
+import { getRig, register, listRigs, BUILTIN_RIGS } from '../cast/index.mjs';
+import { getKit, listKits, registerKit, BUILTIN_KITS } from '../set/kits/index.mjs';
+import { BUILTIN_EFFECTS } from '../effects/index.mjs';
 import { validateFilm } from './validate.mjs';
 
 export class ValidationError extends Error {
@@ -52,12 +56,20 @@ export function projectExtDir(from) {
   }
 }
 
+// What of a module's (or custom.mjs's) rigs, kits and effects carries the name of a built-in one: → ['rig "planet"', …]
+function builtinNames({ rigs = [], kits = {}, custom = {}, overlays = {} }) {
+  return [...rigs.filter(r => BUILTIN_RIGS.includes(r?.kind)).map(r => `rig "${r.kind}"`), ...Object.keys(kits).filter(n => BUILTIN_KITS.includes(n)).map(n => `kit "${n}"`),
+    ...Object.keys(custom).filter(n => Object.hasOwn(BUILTIN_EFFECTS.custom, n)).map(n => `custom beat "${n}"`),
+    ...Object.keys(overlays).filter(n => Object.hasOwn(BUILTIN_EFFECTS.overlays, n)).map(n => `overlay "${n}"`)];
+}
+
 /**
  * Load and register the extensions for a film folder (and its project), or for a working directory (the project's
- * only). → { rigs, kits, custom, overlays, sounds, files: [paths relative to `dir`], problems }
+ * only). → { rigs, kits, custom, overlays, sounds, files: [paths relative to `dir`], problems,
+ *   replaced: [{ file, names: ['rig "planet"', …] }] (what a file defines in place of a built-in one) }
  */
 export async function loadExtensions(dir, { film = true } = {}) {
-  const out = { rigs: [], kits: {}, custom: {}, overlays: {}, sounds: {}, files: [], problems: [] };
+  const out = { rigs: [], kits: {}, custom: {}, overlays: {}, sounds: {}, files: [], problems: [], replaced: [] };
   const roots = [projectExtDir(film ? dirname(resolve(dir)) : dir), film ? resolve(dir) : null].filter(Boolean);
   for (const root of [...new Set(roots)]) {
     for (const kind of ['rigs', 'kits', 'effects']) {
@@ -78,6 +90,8 @@ export async function loadExtensions(dir, { film = true } = {}) {
             if (!m.custom && !m.overlays && !m.sounds) throw new Error('an effect file exports custom, overlays or sounds (like custom.mjs)');
             for (const k of ['custom', 'overlays', 'sounds']) Object.assign(out[k], m[k] || {});
           }
+          const names = builtinNames(kind === 'rigs' ? { rigs: [m.default] } : kind === 'kits' ? { kits: { [basename(f, '.mjs')]: m.default } } : m);
+          if (names.length) out.replaced.push({ file: name, names });
         } catch (e) { out.problems.push({ path: name, message: `${name}: ${e.message}` }); }
       }
     }
@@ -123,7 +137,7 @@ export async function loadFilm(src, opts = {}) {
 
   // extensions (project, then film folder), then custom.mjs: extra rigs, kits, custom beats, overlays (scene-long
   // drawings) and sounds
-  const ext = dir ? await loadExtensions(dir) : { rigs: [], kits: {}, custom: {}, overlays: {}, sounds: {}, files: [], problems: [] };
+  const ext = dir ? await loadExtensions(dir) : { rigs: [], kits: {}, custom: {}, overlays: {}, sounds: {}, files: [], problems: [], replaced: [] };
   const problems = [...ext.problems], custom = { rigs: [], kits: {}, custom: {}, overlays: {}, sounds: {}, files: ext.files };
   const customPath = opts.custom ?? (dir ? join(dir, 'custom.mjs') : null);
   if (customPath && existsSync(customPath)) {
@@ -140,8 +154,22 @@ export async function loadFilm(src, opts = {}) {
   }
   custom.rigs.forEach((r, i) => { try { register(r); } catch (e) { problems.push({ path: `custom.mjs rigs[${i}]`, message: `custom.mjs rigs[${i}]: ${e.message}` }); } });
   for (const [name, fn] of Object.entries(custom.kits)) { try { registerKit(name, fn); } catch (e) { problems.push({ path: `custom.mjs kits.${name}`, message: `custom.mjs kits.${name}: ${e.message}` }); } }
+  const replaced = [...ext.replaced, ...(custom.module ? [{ file: 'custom.mjs', names: builtinNames(custom) }] : [])].filter(r => r.names.length);
   custom.rigs = [...ext.rigs, ...custom.rigs]; custom.kits = { ...ext.kits, ...custom.kits };
   for (const k of ['custom', 'overlays', 'sounds']) custom[k] = { ...ext[k], ...custom[k] };
+  // the built-in effects film.json names, under the film's own (a name of its own replaces the built-in)
+  for (const sc of Array.isArray(json?.scenes) ? json.scenes : []) {
+    for (const o of Array.isArray(sc?.overlays) ? sc.overlays : []) {
+      const n = typeof o === 'string' ? o : o?.name;
+      if (typeof n === 'string' && !Object.hasOwn(custom.overlays, n) && Object.hasOwn(BUILTIN_EFFECTS.overlays, n)) custom.overlays[n] = BUILTIN_EFFECTS.overlays[n];
+    }
+    for (const sh of Array.isArray(sc?.shots) ? sc.shots : []) for (const b of Array.isArray(sh?.beats) ? sh.beats : []) {
+      if (b?.do === 'custom' && typeof b.name === 'string' && !Object.hasOwn(custom.custom, b.name) && Object.hasOwn(BUILTIN_EFFECTS.custom, b.name)) custom.custom[b.name] = BUILTIN_EFFECTS.custom[b.name];
+    }
+  }
+  // what replaces a built-in: noted on its file in the list check prints, and as a warning
+  const notes = replaced.map(r => ({ path: r.file, message: `${r.file}: ${r.names.join(', ')} replace${r.names.length > 1 ? '' : 's'} the built-in one${r.names.length > 1 ? 's' : ''} of ${r.names.length > 1 ? 'those names' : 'that name'}` }));
+  custom.files = custom.files.map(f => { const r = replaced.find(q => q.file === f); return r ? `${f} (replaces the built-in ${r.names.join(', ')})` : f; });
 
   // set instances (validation needs their anchors and sky names)
   const kits = new Set(listKits()), sets = {};
@@ -158,7 +186,7 @@ export async function loadFilm(src, opts = {}) {
 
   const rigs = {};
   for (const [id, c] of Object.entries(json.cast || {})) rigs[id] = getRig(c.rig);
-  const film = { ...json, dir, slug: dir ? basename(dir) : (json.slug || 'film'), warnings: v.warnings, custom };
+  const film = { ...json, dir, slug: dir ? basename(dir) : (json.slug || 'film'), warnings: [...notes, ...v.warnings], custom };
   Object.defineProperty(film, 'resolved', { value: { rigs, sets, kits: Object.fromEntries(Object.entries(json.sets).map(([id, s]) => [id, s.kit])) }, enumerable: false });
   return film;
 }

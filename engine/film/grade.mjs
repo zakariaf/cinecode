@@ -6,9 +6,12 @@
 // Dawn grades the land too (a rose-gold light over the meadow, not only a pink sky). SUN / sunOf: how long and how
 // strong the sun's cast shadows are at each time of day (frame.mjs throws them). The memory grade is a sepia storybook
 // plate inside a torn cream page edge (deckle, drawn last over the picture; mixStory narrows it away with the grade).
+// A kit not under Earth's sky declares times of its own (set.mjs makeSet `times`, with their grade and sun, or none):
+// gradeOf / sunLight look a time's light up by name, and a name that is neither Earth's nor declared is an error.
 import { rng, canvas, noise1 } from '../core/lib.mjs';
 import { paper } from '../paint/atmos.mjs';
 import { clamp, lerp, ease } from './util.mjs';
+import { SKY_TIMES } from '../paint/sky.mjs';
 
 export const GR = {
   dawn: { sl: [255, 182, 168, 0.5], mul: [255, 214, 224], vig: 0.36 },
@@ -39,17 +42,51 @@ export const SUN = {
   dawn: { len: 1.2, a: 0.3 }, morning: { len: 0.7, a: 0.38 }, noon: { len: 0.25, a: 0.42 }, afternoon: { len: 0.8, a: 0.42 },
   golden: { len: 1.5, a: 0.46 }, sunset: { len: 1.9, a: 0.36 }, twilight: { len: 1.9, a: 0 }, night: { len: 0, a: 0 },
 };
+
+// The light of a time a kit declares (set.mjs makeSet `times`): its grade (NEUTRAL, the picture as painted under the
+// house vignette, unless it gives one: an Earth time's by name or its own, what it leaves out neutral), its sun (none
+// unless it gives one) and its haze (none unless it gives one). Any other name is an error: a time is never silently lit
+// like morning. The frame looks a time's light up by its name, so a name means one light in a film: declared again
+// (another kit, or the same with other params), it must resolve to the same light, however it is written.
+export const NEUTRAL = { sl: [255, 255, 255, 0], mul: [255, 255, 255], vig: 0.3 };
+const NO_SUN = { len: 0, a: 0 };
+const TIMES = new Map();                 // name → { light, key, by: the set that declared it }
+// a declaration { grade, sun, haze } → its light, defaults filled in: { grade: { sl, mul, vig, con }, sun: { len, a }, haze }
+function lightOf(sp) {
+  const g = sp.grade == null || sp.grade === 'neutral' ? NEUTRAL : typeof sp.grade === 'string' ? GR[sp.grade] : { ...NEUTRAL, ...sp.grade };
+  const s = !sp.sun ? NO_SUN : typeof sp.sun === 'string' ? SUN[sp.sun] : sp.sun;
+  return { grade: { sl: [...g.sl], mul: [...g.mul], vig: g.vig, con: g.con ?? 1 }, sun: { len: s.len, a: s.a }, haze: sp.haze ? [...sp.haze] : null };
+}
+// The set that already declared `name` with another light (→ its id), or null. declareTime records a declaration (the
+// first one stands: any later one has been checked to be the same light). declaredTime(name) → its light, or null.
+export function timeClash(name, sp) { const had = TIMES.get(name); return had && had.key !== JSON.stringify(lightOf(sp)) ? had.by : null; }
+export function declareTime(name, sp, by) { if (!TIMES.has(name)) { const light = lightOf(sp); TIMES.set(name, { light, key: JSON.stringify(light), by }); } }
+export const declaredTime = name => TIMES.get(name)?.light ?? null;
+const unknown = name => new Error(`unknown time "${name}": not one of ${SKY_TIMES.join(', ')}, and no kit declares it (makeSet times)`);
+export function gradeOf(name) {
+  if (Object.hasOwn(GR, name)) return GR[name];
+  const d = declaredTime(name); if (!d) throw unknown(name);
+  return d.grade;
+}
+export function sunLight(name) {
+  if (Object.hasOwn(SUN, name)) return SUN[name];
+  const d = declaredTime(name); if (!d) throw unknown(name);
+  return d.sun;
+}
+// Whether a name is a time with a light (Earth's eight, or a kit's declared one).
+export const hasLight = name => Object.hasOwn(GR, name) || TIMES.has(name);
+
 // A sky crossfade list → { len, a }.
 export function sunOf(list) {
   let len = 0, a = 0, tot = 0;
-  for (const [name, w] of list || []) { const S = SUN[name] || SUN.morning; if (!(w > 0)) continue; len += S.len * w; a += S.a * w; tot += w; }
+  for (const [name, w] of list || []) { const S = sunLight(name); if (!(w > 0)) continue; len += S.len * w; a += S.a * w; tot += w; }
   return tot ? { len: len / tot, a: a / tot } : { ...SUN.morning };
 }
 
 export function mixGrade(list) {
   let tot = 0; const g = { sl: [0, 0, 0, 0], mul: [0, 0, 0], vig: 0, con: 0 };
   for (const [name, a] of list) {
-    const G = GR[name] || GR.morning; if (!(a > 0)) continue; tot += a;
+    const G = gradeOf(name); if (!(a > 0)) continue; tot += a;
     for (let i = 0; i < 4; i++) g.sl[i] += G.sl[i] * a;
     for (let i = 0; i < 3; i++) g.mul[i] += G.mul[i] * a;
     g.vig += G.vig * a; g.con += (G.con ?? 1) * a;

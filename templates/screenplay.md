@@ -14,7 +14,8 @@ later with a new meaning (a line said early that pays off at the end).>
 ## Characters
 
 ### <Name>, <what they are> (lead)
-- **Rig:** `<rig>` <!-- hare, tortoise, fox, owl, squirrel, songbird, mouse, hedgehog, badger, deer, frog, beetle, butterfly, human.
+- **Rig:** `<rig>` <!-- hare, tortoise, fox, owl, squirrel, songbird, mouse, hedgehog, badger, deer, frog, beetle, butterfly, human;
+     things: planet (a planet, moon or the Sun), telescope.
      No rig for the animal? The nearest one reskinned, plus an overlay for what it lacks (docs/cast.md).
      A prop the story turns on (a kite, a strawberry)? docs/effects.md, "Props". -->
 - **Look:** <colours as hex, size (cast `scale`), rig params: e.g. human `age`, `hairStyle`, `glasses`, `scarf`>
@@ -42,7 +43,8 @@ later with a new meaning (a line said early that pays off at the end).>
 aim about 10% under.>
 
 <!-- kits: forest, hill, meadow, stream, valley, village, wayside. times: dawn, morning, noon, afternoon, golden,
-     sunset, twilight, night (or a change across a scene: from golden to twilight). -->
+     sunset, twilight, night (or a change across a scene: from golden to twilight). The space kit has one time of its
+     own, space. -->
 
 ## Music plan
 

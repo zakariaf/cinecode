@@ -12,5 +12,7 @@ for (const f of files) {
   const mod = await import(pathToFileURL(nodePath.join(DIR, f)).href);
   if (mod.default && typeof mod.default.draw === 'function') register(mod.default);
 }
+// The kinds of the rigs above (a film's or project's rig of the same kind replaces one: engine/film/load.mjs says so).
+export const BUILTIN_RIGS = Object.freeze(listRigs());
 
 export { register, getRig, listRigs, requireRig, mixPose, idle, RIG_KINDS, EXPRESSIONS, FACES };

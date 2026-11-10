@@ -288,3 +288,135 @@ test('title cards: no doc recommends a card shorter than the 3 s it takes to be 
   }
   assert.match(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'), /^\| about 30 s \| 1 \| 5–6 \|/m, 'SKILL.md has a row for about 30 s');
 });
+
+// ───────────── round 6: the space library, depth, partial framing, scoped effects, a kit's own times ─────────────
+
+const read = p => readFileSync(join(ROOT, p), 'utf8');
+const skillDoc = name => readFileSync(join(SKILL, '..', name, 'SKILL.md'), 'utf8');
+
+test('inventory lists every built-in effect (as, layer, its description), and references/effects.md covers them', async () => {
+  const { BUILTIN_EFFECTS } = await import(join(ROOT, 'engine/effects/index.mjs'));
+  const names = [...new Set([...Object.keys(BUILTIN_EFFECTS.custom), ...Object.keys(BUILTIN_EFFECTS.overlays)])];
+  assert.ok(names.length >= 9, `${names.length} built-in effects`);
+  const r = run('inventory.mjs', 'effects');
+  assert.equal(r.status, 0, r.stderr);
+  const ref = readFileSync(join(SKILL, 'references/effects.md'), 'utf8');
+  for (const n of names) {
+    const layer = (BUILTIN_EFFECTS.custom[n] ?? BUILTIN_EFFECTS.overlays[n]).layer || 'world';
+    assert.match(r.stdout, new RegExp(`^\\| ${n} \\| [a-z ,]+ \\| ${layer}`, 'm'), `inventory: ${n} on ${layer}`);
+    assert.match(ref, new RegExp(`^\\| ${n} \\|`, 'm'), `references/effects.md is missing ${n}: regenerate it`);
+    assert.match(ref, new RegExp(`^### (?:[a-z, ]+, )?${n}(?:, [a-z, ]+)?$`, 'm'), `references/effects.md has no section for ${n}`);
+  }
+  assert.match(r.stdout, /^\| sunglow \| custom beat, overlay \| grade \|$/m, 'an effect that is both a beat and an overlay');
+  assert.match(run('inventory.mjs', 'cast').stdout, /^\| planet \|.*no face/m, 'a rig with no face says so');
+  assert.match(run('inventory.mjs', 'sets').stdout, /^### space\n\n.*its own times: space \(default space\); no ground, so no shadows/m, 'a kit with its own times');
+});
+
+test('the build skills say where the gate writes its review images: the film\'s out/ or the project\'s cinecode/out/', () => {
+  for (const b of ['build-rig', 'build-kit']) {
+    const s = skillDoc(b);
+    assert.match(s, /films\/<slug>\/out\/verify\//, `${b}: a film's piece`);
+    assert.match(s, /cinecode\/out\/verify\//, `${b}: a project's piece`);
+  }
+  // and that is where verify-kit writes them for a project's kit
+  const dir = mkdtempSync(join(tmpdir(), 'cinecode-gate-'));
+  try {
+    mkdirSync(join(dir, '.git')); mkdirSync(join(dir, 'cinecode/kits'), { recursive: true });
+    writeFileSync(join(dir, 'cinecode/kits/glade.mjs'), readFileSync(join(SKILL, '..', 'build-kit', 'starter.mjs'), 'utf8'));
+    const r = spawnSync(process.execPath, [join(ROOT, 'bin/cinecode.mjs'), 'verify-kit', 'cinecode/kits/glade.mjs'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    for (const f of ['glade.jpg', 'glade-times.jpg']) assert.ok(existsSync(join(dir, 'cinecode/out/verify', f)), `cinecode/out/verify/${f}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('build-rig\'s contract lists every optional rig field the engine reads', () => {
+  const s = skillDoc('build-rig'), src = ['engine/cast/rig.mjs', 'engine/film/util.mjs', 'engine/film/actor.mjs', 'engine/film/compile.mjs', 'engine/film/frame.mjs', 'engine/lint/lint.mjs', 'engine/render/verify.mjs'].map(read).join('\n');
+  for (const f of ['sizes', 'upright', 'noShadow', 'shadowA', 'shadowW', 'faceless', 'mount', 'lookTime', 'hangPoses', 'breathPeriod', 'feet', 'steps']) {
+    assert.match(src, new RegExp(`\\.${f}\\b`), `the engine reads ${f}`);
+    assert.match(s, new RegExp(`\`${f}(?:\\(|\`)`), `build-rig documents ${f}`);
+  }
+  assert.match(s, /planet\.mjs/, 'build-rig names the planet rig (no face, sizes from params) as a model');
+});
+
+test('build-kit documents a kit\'s own times, the paint rule, depth, and the anchor names check reads as something else', () => {
+  const s = skillDoc('build-kit');
+  for (const f of ['times', 'groundShadows', 'lens']) assert.match(s, new RegExp(`\`${f}\``), `build-kit: ${f}`);
+  assert.match(s, /90%/, 'the paint check: 90% of the frame painted after each grade');
+  assert.match(s, /"left"/, 'reserved anchor names');
+  assert.match(s, /space\.mjs/, 'the space kit as a model');
+  assert.doesNotMatch(s, /\(meadow, forest, stream, wayside, valley, hill, village\)/, 'the list of built-in kits includes space');
+});
+
+test('build-effect and docs/effects.md document every overlay layer, scope, hold, overlay shots and the built-in effects', async () => {
+  const { OVERLAY_LAYERS } = await import(join(ROOT, 'engine/film/validate.mjs'));
+  const s = skillDoc('build-effect'), fx = read('docs/effects.md');
+  for (const l of OVERLAY_LAYERS) {
+    assert.match(s, new RegExp(`\`${l}\``), `build-effect: layer ${l}`);
+    assert.match(fx, new RegExp(`^\\| \`${l}\` \\|`, 'm'), `docs/effects.md layer table: ${l}`);
+  }
+  for (const f of ['api.item', 'api.project', '"scope": "shot"', '"hold": false', '"shots"']) {
+    assert.ok(s.includes(f), `build-effect: ${f}`);
+    assert.ok(fx.includes(f), `docs/effects.md: ${f}`);
+  }
+  assert.match(s, /references\/effects\.md/, 'build-effect points at the built-in effects');
+});
+
+test('camera: focus, z, zTo and world points in "on" are documented, and no doc says "on" can\'t take points', () => {
+  const quick = readFileSync(join(SKILL, 'references/storyboard-quick.md'), 'utf8'), board = read('docs/storyboard.md');
+  for (const [name, text] of [['references/storyboard-quick.md', quick], ['docs/storyboard.md', board]]) {
+    for (const f of ['focus', 'z', 'zTo']) assert.match(text, new RegExp(`^\\| (?:\`\\w+\`, )*\`${f}\`(?:, \`\\w+\`)* \\|`, 'm'), `${name}: camera row for ${f}`);
+    assert.match(text, /^\| `on` \|.*x:…,y:…/m, `${name}: "on" takes world points`);
+    assert.match(text, /"scope"/, `${name}: a custom beat's scope`);
+    assert.match(text, /"hold": false/, `${name}: hold false`);
+  }
+  for (const { p, text } of allDocs()) assert.doesNotMatch(text, /not `x:…,y:…` points|Not `x:…,y:…` points/i, `${p} still says "on" can't take points`);
+  assert.doesNotMatch(board, /multiplier on the size's zoom \(`0\.8` = a little wider\) \|/, 'docs/storyboard.md explains zoom on subjects with and without a face');
+});
+
+test('the quick reference\'s space scene is a valid film (space kit, planets, depth, partial framing, a scoped effect)', async () => {
+  const text = readFileSync(join(SKILL, 'references/storyboard-quick.md'), 'utf8'), blocks = [...text.matchAll(/```json\n([\s\S]*?)\n```/g)];
+  assert.ok(blocks.length >= 2, 'a second JSON block: the space scene');
+  const dir = tmpFilm(JSON.parse(blocks[1][1]));
+  try {
+    const { loadPlan } = await import(join(ROOT, 'engine/render/film-source.mjs'));
+    const { film, plan } = await loadPlan(dir);
+    assert.deepEqual(film.warnings.map(w => w.message ?? w), []);
+    assert.deepEqual(plan.warnings.map(w => w.message ?? w), []);
+    const src = blocks[1][1];
+    for (const f of ['"kit": "space"', '"rig": "planet"', '"focus"', '"zTo"', '"z":', '"scope": "shot"']) assert.ok(src.includes(f), `the space scene uses ${f}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('voices: "soft" and "warm" are not listed as never read aloud ("[warm, gentle, soft]" was)', () => {
+  for (const [p, text] of [['references/voices.md', readFileSync(join(SKILL, 'references/voices.md'), 'utf8')], ['docs/sound.md', read('docs/sound.md')]]) {
+    const never = /Never read aloud[^.]*\./i.exec(text)?.[0] ?? '';
+    assert.ok(never, `${p}: the never-read list`);
+    assert.doesNotMatch(never, /"soft"|"warm"/, `${p} lists soft or warm as never read aloud`);
+    assert.match(text, /\[warm, gentle, soft\]/, `${p}: the take that read "soft" aloud`);
+  }
+});
+
+test('SKILL.md starts space and depth films, reuses the bigger library first, and cuts into a full-frame effect', () => {
+  const s = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+  for (const f of ['`space`', '`planet`', '`telescope`', '`focus`', '`zTo`', '"transition": "cut"', 'references/effects.md', '"scope": "shot"', '"hold": false', '"lint": { "allow"']) assert.ok(s.includes(f), `SKILL.md: ${f}`);
+});
+
+test('every built-in rig and kit is in the docs and in the screenplay template\'s lists', async () => {
+  const { listRigs } = await import(join(ROOT, 'engine/cast/index.mjs'));
+  const { listKits } = await import(join(ROOT, 'engine/set/kits/index.mjs'));
+  const cast = read('docs/cast.md'), sets = read('docs/sets.md'), tpl = read('templates/screenplay.md');
+  for (const k of listRigs().map(r => (typeof r === 'string' ? r : r.kind))) {
+    assert.match(cast, new RegExp(`^##+ ${k}$`, 'm'), `docs/cast.md has no section for ${k}`);
+    assert.match(tpl, new RegExp(`\\b${k}\\b`), `templates/screenplay.md doesn't list rig ${k}`);
+  }
+  for (const k of listKits().map(x => (typeof x === 'string' ? x : x.id ?? x.name))) {
+    assert.match(sets, new RegExp(`^### ${k}$`, 'm'), `docs/sets.md has no section for kit ${k}`);
+    assert.match(tpl, new RegExp(`\\b${k}\\b`), `templates/screenplay.md doesn't list kit ${k}`);
+  }
+});
+
+test('a shot\'s lint block for a warning kept on purpose is documented where the skill and the docs talk about lint', () => {
+  for (const [p, text] of [['docs/lint.md', read('docs/lint.md')], ['references/review.md', readFileSync(join(SKILL, 'references/review.md'), 'utf8')], ['docs/storyboard.md', read('docs/storyboard.md')]]) {
+    assert.match(text, /"lint": \{ "allow": \[/, `${p}: the lint block`);
+  }
+});

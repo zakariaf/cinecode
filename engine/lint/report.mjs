@@ -4,7 +4,8 @@
 // anything off frame, a magnified inset when the marks are small), then its rule, shot, time span and message, and
 // last a table of every rule: severity, issues found, what it catches and how to fix it. Issues about a cut
 // (cut-jump, axis, continuity) show the frame after the cut with the frame before it as an inset. Stills skip scene
-// dissolves and fades, so a tile always shows the scene its boxes were measured in.
+// dissolves and fades, so a tile always shows the scene its boxes were measured in. Kept warnings (a shot's "lint":
+// { "allow", "note" }) are listed apart in lint.json ("kept") and drawn last, in their own colour with their note.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createCanvas } from '@napi-rs/canvas';
@@ -12,10 +13,12 @@ import { drawFrame } from '../film/frame.mjs';
 import { RULES, LIMITS } from './lint.mjs';
 
 const PAPER = '#f1e8d6', INK = '#2a2130', MUTED = '#7a6c74';
-const SEV = { error: '#c4372c', warning: '#d58a12' };
+const SEV = { error: '#c4372c', warning: '#d58a12' }, KEPT = '#5d8466';
 const SERIF = 'Georgia, "Times New Roman", serif', MONO = 'Menlo, "DejaVu Sans Mono", monospace';
 const clock = t => { const m = Math.floor(t / 60), s = t - m * 60; return `${m}:${s.toFixed(1).padStart(4, '0')}`; };
 const range = i => (i.t1 - i.t0 > 0.05 ? `${clock(i.t0)}–${clock(i.t1)}` : clock(i.t));
+// an issue's colour: its severity's, or the kept colour for a kept warning (one that carries its shot's note)
+const colOf = i => (i.note !== undefined ? KEPT : SEV[i.severity] || SEV.warning);
 
 /**
  * Write outDir/lint.json and outDir/lint.jpg.
@@ -23,14 +26,14 @@ const range = i => (i.t1 - i.t0 > 0.05 ? `${clock(i.t0)}–${clock(i.t1)}` : clo
  */
 export async function writeLintReport(plan, result, outDir, opts = {}) {
   mkdirSync(outDir, { recursive: true });
-  const errors = result.errors || [], warnings = result.warnings || [];
+  const errors = result.errors || [], warnings = result.warnings || [], kept = result.kept || [];
   const json = join(outDir, 'lint.json'), jpg = join(outDir, 'lint.jpg');
   writeFileSync(json, `${JSON.stringify({
     title: plan.title ?? '', format: { width: plan.W, height: plan.H, fps: plan.fps }, duration: plan.duration, shots: (plan.shots || []).length,
-    counts: { errors: errors.length, warnings: warnings.length }, stats: result.stats ?? null, limits: LIMITS,
-    rules: Object.fromEntries(Object.entries(RULES).map(([k, v]) => [k, v.severity])), fixes: Object.fromEntries(Object.entries(RULES).map(([k, v]) => [k, v.fix])), errors, warnings,
+    counts: { errors: errors.length, warnings: warnings.length, kept: kept.length }, stats: result.stats ?? null, limits: LIMITS,
+    rules: Object.fromEntries(Object.entries(RULES).map(([k, v]) => [k, v.severity])), fixes: Object.fromEntries(Object.entries(RULES).map(([k, v]) => [k, v.fix])), errors, warnings, kept,
   }, null, 2)}\n`);
-  const all = [...errors, ...warnings];
+  const all = [...errors, ...warnings, ...kept];
   const tiles = all.slice(0, opts.maxTiles ?? 48);
   const sheet = drawSheet(plan, result, tiles, all.length - tiles.length, opts);
   writeFileSync(jpg, await sheet.encode('jpeg', opts.quality ?? 88));
@@ -54,18 +57,19 @@ function drawSheet(plan, result, tiles, omitted, opts) {
   paper(x, width, height);
 
   // header
-  const errors = result.errors || [], warnings = result.warnings || [];
+  const errors = result.errors || [], warnings = result.warnings || [], kept = result.kept || [];
   x.textBaseline = 'alphabetic'; x.textAlign = 'left'; x.fillStyle = INK;
   x.font = `bold ${Math.round(34 * u)}px ${SERIF}`;
   x.fillText(`Lint · ${plan.title || 'Untitled'}`, margin, margin + Math.round(36 * u));
   x.font = `${Math.round(18 * u)}px ${SERIF}`;
   let cx = margin;
   const chip = (n, word, col) => {
-    const s = `${n} ${word}${n === 1 ? '' : 's'}`;
+    const s = `${n} ${word}${n === 1 || word === 'kept' ? '' : 's'}`;
     x.fillStyle = n ? col : MUTED; x.font = `bold ${Math.round(18 * u)}px ${SERIF}`; x.fillText(s, cx, margin + Math.round(68 * u));
     cx += x.measureText(s).width + Math.round(18 * u);
   };
   chip(errors.length, 'error', SEV.error); chip(warnings.length, 'warning', SEV.warning);
+  if (kept.length) chip(kept.length, 'kept', KEPT);
   const st = result.stats || {}, shots = (plan.shots || []).length;
   x.font = `${Math.round(16 * u)}px ${SERIF}`; x.fillStyle = MUTED;
   x.fillText(`${clock(plan.duration)} · ${shots} shot${shots === 1 ? '' : 's'} · ${W}×${H} @ ${plan.fps} fps${st.samples ? ` · ${st.samples} samples every ${(+st.step).toFixed(2)} s, teleports every frame` : ''}`, cx + Math.round(6 * u), margin + Math.round(68 * u));
@@ -73,7 +77,7 @@ function drawSheet(plan, result, tiles, omitted, opts) {
   x.beginPath(); x.moveTo(margin, margin + header - Math.round(12 * u)); x.lineTo(width - margin, margin + header - Math.round(12 * u)); x.stroke(); x.globalAlpha = 1;
 
   // timeline
-  drawTimeline(x, plan, tiles, [...errors, ...warnings], { x0: margin, y0: margin + header, w: width - 2 * margin, h: timeline - Math.round(28 * u), u });
+  drawTimeline(x, plan, tiles, [...errors, ...warnings, ...kept], { x0: margin, y0: margin + header, w: width - 2 * margin, h: timeline - Math.round(28 * u), u });
 
   // tiles
   const top = margin + header + timeline;
@@ -94,10 +98,11 @@ function drawSheet(plan, result, tiles, omitted, opts) {
   return c;
 }
 
-// The rule table under the tiles: every rule with its severity, how many issues it found, what it catches and how
-// to fix it. → { h, draw(x, x0, y0) } (laid out with the measuring context mx)
+// The rule table under the tiles: every rule with its severity, how many issues it found (and kept), what it catches
+// and how to fix it. → { h, draw(x, x0, y0) } (laid out with the measuring context mx)
 function ruleTable(mx, result, { w, u }) {
   const all = [...(result.errors || []), ...(result.warnings || [])], n = r => all.filter(i => i.rule === r).length;
+  const kn = r => (result.kept || []).filter(i => i.rule === r).length;
   mx.font = `bold ${Math.round(16 * u)}px ${MONO}`;
   const c1 = Math.round(Math.max(...Object.keys(RULES).map(r => mx.measureText(r).width)) + 18 * u), c2 = Math.round(84 * u), c3 = Math.round(64 * u), tx = c1 + c2 + c3, tw = w - tx;
   const head = Math.round(46 * u), line = Math.round(19 * u), pad = Math.round(9 * u);
@@ -105,7 +110,7 @@ function ruleTable(mx, result, { w, u }) {
   const rows = Object.entries(RULES).map(([rule, R]) => {
     mx.font = fCatch; const a = wrap(mx, R.catches, tw, 9);
     mx.font = fFix; const b = wrap(mx, `Fix: ${R.fix ?? '—'}`, tw, 9);
-    return { rule, R, n: n(rule), a, b, h: (a.length + b.length) * line + 2 * pad };
+    return { rule, R, n: n(rule), k: kn(rule), a, b, h: (a.length + b.length) * line + 2 * pad };
   });
   const h = head + rows.reduce((s, r) => s + r.h, 0);
   const draw = (x, x0, y0) => {
@@ -121,6 +126,7 @@ function ruleTable(mx, result, { w, u }) {
       x.fillStyle = INK; x.font = `bold ${Math.round(16 * u)}px ${MONO}`; x.fillText(r.rule, x0, base);
       x.fillStyle = SEV[r.R.severity] || SEV.warning; x.font = `bold ${Math.round(14 * u)}px ${SERIF}`; x.fillText(r.R.severity, x0 + c1, base);
       x.fillStyle = r.n ? INK : MUTED; x.font = `${r.n ? 'bold ' : ''}${Math.round(16 * u)}px ${SERIF}`; x.fillText(String(r.n), x0 + c1 + c2, base);
+      if (r.k) { x.fillStyle = KEPT; x.font = `italic ${Math.round(13 * u)}px ${SERIF}`; x.fillText(`+${r.k} kept`, x0 + c1 + c2, base + line); }
       let ly = base;
       x.fillStyle = '#3d3340'; x.font = fCatch; for (const L of r.a) { x.fillText(L, x0 + tx, ly); ly += line; }
       x.fillStyle = MUTED; x.font = fFix; for (const L of r.b) { x.fillText(L, x0 + tx, ly); ly += line; }
@@ -157,14 +163,14 @@ function drawTimeline(x, plan, tiles, all, { x0, y0, w, h, u }) {
   });
   x.strokeStyle = INK; x.globalAlpha = 0.5; x.lineWidth = Math.max(1, u); x.strokeRect(x0 + 0.5, barY + 0.5, w - 1, barH - 1); x.globalAlpha = 1;
   // issue spans (all of them), then numbered pins (the ones with tiles)
-  for (const i of all) { x.fillStyle = SEV[i.severity] || SEV.warning; x.globalAlpha = 0.55; x.fillRect(X(i.t0), barY + 3 * u, Math.max(2 * u, X(i.t1) - X(i.t0)), Math.round(8 * u)); x.globalAlpha = 1; }
+  for (const i of all) { x.fillStyle = colOf(i); x.globalAlpha = 0.55; x.fillRect(X(i.t0), barY + 3 * u, Math.max(2 * u, X(i.t1) - X(i.t0)), Math.round(8 * u)); x.globalAlpha = 1; }
   // pins in time order; crowded ones slide right and keep a leader line to their moment
   let last = -Infinity;
   tiles.map((i, n) => ({ i, n })).sort((p, q) => p.i.t - q.i.t || p.n - q.n).forEach(({ i, n }) => {
     const r = Math.round(10 * u), tx = X(i.t), px = Math.min(x0 + w - r, Math.max(tx, last + 2 * r + 2 * u)), py = barY - r - 6 * u;
     last = px;
-    x.strokeStyle = SEV[i.severity]; x.lineWidth = Math.max(1, u); x.beginPath(); x.moveTo(px, py + r); x.lineTo(tx, barY + 3 * u); x.stroke();
-    pin(x, px, py, r, n + 1, SEV[i.severity], u);
+    x.strokeStyle = colOf(i); x.lineWidth = Math.max(1, u); x.beginPath(); x.moveTo(px, py + r); x.lineTo(tx, barY + 3 * u); x.stroke();
+    pin(x, px, py, r, n + 1, colOf(i), u);
   });
   x.restore();
 }
@@ -190,7 +196,7 @@ function still(plan, t, frame, fx) {
   return frame;
 }
 function drawTile(x, plan, issue, n, { px, py, tw, th, k, u, frame, fx }) {
-  const col = SEV[issue.severity] || SEV.warning;
+  const col = colOf(issue), kept = issue.note !== undefined;
   x.save();
   x.shadowColor = 'rgba(42,33,48,0.3)'; x.shadowBlur = 12 * u; x.shadowOffsetY = 3 * u;
   x.fillStyle = INK; x.fillRect(px, py, tw, th);
@@ -233,10 +239,10 @@ function drawTile(x, plan, issue, n, { px, py, tw, th, k, u, frame, fx }) {
   x.strokeStyle = col; x.lineWidth = Math.round(4 * u); x.strokeRect(px + 2 * u, py + 2 * u, tw - 4 * u, th - 4 * u);
   pin(x, px + Math.round(22 * u), py + Math.round(22 * u), Math.round(14 * u), n, col, u);
 
-  // label: severity · rule · shot · time, then the message
+  // label: severity (or kept) · rule · shot · time, then the message (a kept one: its note first)
   let ly = py + th + Math.round(26 * u);
   x.textAlign = 'left';
-  const sev = issue.severity === 'error' ? 'ERROR' : 'WARNING';
+  const sev = kept ? 'KEPT' : issue.severity === 'error' ? 'ERROR' : 'WARNING';
   x.font = `bold ${Math.round(12 * u)}px ${SERIF}`;
   const sw = x.measureText(sev).width + 12 * u;
   x.fillStyle = col; roundRect(x, px, ly - 15 * u, sw, 20 * u, 4 * u); x.fill();
@@ -251,6 +257,11 @@ function drawTile(x, plan, issue, n, { px, py, tw, th, k, u, frame, fx }) {
   if (used + x.measureText(meta).width <= tw) { x.textAlign = 'right'; x.fillText(meta, px + tw, ly); x.textAlign = 'left'; }
   else { ly += Math.round(21 * u); x.fillText(meta, px, ly); lines = 2; }
   ly += Math.round(24 * u);
+  if (kept) {
+    x.fillStyle = col; x.font = `italic ${Math.round(15.5 * u)}px ${SERIF}`;
+    for (const line of wrap(x, `Kept: ${issue.note}`, tw, 1)) { x.fillText(line, px, ly); ly += Math.round(20 * u); }
+    lines--;
+  }
   x.fillStyle = '#3d3340'; x.font = `${Math.round(15.5 * u)}px ${SERIF}`;
   const msg = String(issue.message).replace(/ \(\d+(\.\d+)?–\d+(\.\d+)? s\)$/, '');      // the span is in the meta line
   for (const line of wrap(x, msg, tw, lines)) { x.fillText(line, px, ly); ly += Math.round(20 * u); }

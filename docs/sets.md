@@ -10,7 +10,7 @@ actors route through, water and stepping stones, and the ambience it sounds like
 "scenes": [ { "id": "s01", "set": "meadow", "time": "dawn", … } ]
 ```
 
-![The seven kits](images/kits.jpg)
+![The seven Earth kits (the eighth, space, is below)](images/kits.jpg)
 
 Everything an actor can touch (ground, stump tops, branches, hollows, stones, water) is defined once, as data, and
 both the painting and the staging read that same data, so an actor sent to `stump_top` stands on the painted stump.
@@ -60,6 +60,11 @@ never shows past the painted area.
 | `hollow` | an opening in a prop (the owl's hollow, the fox's den), see below. |
 | `view` | a far landmark (the valley's): frame it with the camera's `on`, or `look` at it. Not a place to stand. |
 
+An anchor's name is a word of letters, digits, `_`, `.` and `-`, and never one a storyboard reads as something else:
+`left` and `right` are the sides `enter` and `exit` use, `x:…` a position, `near:…` and the like a place by an actor.
+`verify-kit` fails such a name. An anchor may also have a depth, `z` ([storyboard.md](storyboard.md#depth)): an actor
+placed or moved there takes it (an anchor without one is on the stage, z 0).
+
 Any anchor can be a camera subject (`"on": ["den"]`): it is framed as a box of about 120 × 110 world px (× the scale
 there), roughly a standing hare, so a small actor framed together with an anchor comes out small.
 
@@ -75,9 +80,14 @@ lane, further down. A two-shot of someone in a hollow and someone on the ground 
 
 ## Times of day
 
-Every kit paints all eight skies: `dawn`, `morning`, `noon`, `afternoon`, `golden`, `sunset`, `twilight`, `night`.
-A scene sets one with `time`, or a change `{ "from": "golden", "to": "twilight" }` blended over the middle 80% of the
-scene; a shot can set its own (a time-lapse). Without `time` a scene uses the kit's default.
+Every kit under Earth's sky paints all eight skies: `dawn`, `morning`, `noon`, `afternoon`, `golden`, `sunset`,
+`twilight`, `night`. A scene sets one with `time`, or a change `{ "from": "golden", "to": "twilight" }` blended over
+the middle 80% of the scene; a shot can set its own (a time-lapse). Without `time` a scene uses the kit's default.
+
+A kit that is somewhere else (space, a cave, under the sea) declares times of its own instead, each with its sky and
+its light, and those are then the only times it has: the `space` kit has one, `space` (no grade but the vignette, no
+sun). A time a kit doesn't have, or a sky a kit paints without saying how it is lit, is a `check` error, never a
+morning in disguise. See [adding a kit](#adding-a-kit).
 
 The time of day is a sky and a grade over the whole picture: a soft-light wash, a multiply tint, a vignette and film
 grain. Dawn turns the land rose-gold, golden hour warm, twilight lavender; night is moonlit blue with a contrast
@@ -95,7 +105,8 @@ a scene that changes between the two switches beds at its midpoint. The beds are
 
 ## The kits
 
-Kits take one param, `seed` (`"params": { "seed": 2 }`), which changes the random details of the painting.
+Kits take one param, `seed` (`"params": { "seed": 2 }`), which changes the random details of the painting (`space`
+takes three more).
 
 ### forest
 
@@ -173,6 +184,32 @@ The meadow at the forest edge: an owl's hollow tree with a low branch on the lef
 | `low_branch` | perch (on `owl_tree`) | 650 | 672 | 1.20 |
 | `branch_tip` | perch (on `owl_tree`) | 780 | 652 | 1.20 |
 | `stump_top` | surface (on `stump`) | 2050 | 901 | 1.20 |
+
+### space
+
+Deep space: a starfield with the Milky Way and faint nebula washes on a deep navy (not black), and no ground. Planets,
+moons and the Sun are actors (the [`planet` rig](cast.md#planet)) held at its perch anchors on an invisible stage, so
+the camera frames, pushes in on and lints them like characters. The backdrop is drawn in screen space and barely moves
+when the camera zooms, so a push-in on a planet reads as travelling toward it while the stars stay put.
+
+![The space kit: Saturn with Titan behind it (z 1500), and a crop into its rings with debris drifting past](images/space.jpg)
+
+- **size:** 3200 × 1800 world px; camera centre x −200–3400, y 0–1800; an invisible stage plane: far anchors (y 600) a
+  little smaller, near ones (y 1400) a little bigger
+- **time:** its own, `space` (the only one: no grade but the house vignette, no sun); no ground to shade, so nothing
+  throws a shadow at all (`groundShadows: false`). **ambience:** scenes there use `"ambience": "none"`
+- **params:** `seed` (another starfield), `milky` and `nebula` (0..1, default 1), `tint` (`violet`, `blue`, `teal`)
+- **depth:** with no painted ground, any actor may be off the stage: a scene actor's `"z"` of 2400 is about half size
+  behind everything on the stage, −900 about 1.6× in front ([storyboard.md](storyboard.md#depth))
+
+| anchor | type | x | y | scale |
+|---|---|---|---|---|
+| `centre`, `west`, `east` | perch | 1600, 900, 2300 | 1000 | 1.00 |
+| `far`, `far_west`, `far_east` | perch | 1600, 800, 2400 | 600 | 0.90 |
+| `near`, `near_west`, `near_east` | perch | 1600, 900, 2300 | 1400 | 1.10 |
+| `ground_<each of the above>` | ground | the same x | 60 px below | 0.92–1.11 |
+
+The `ground_*` anchors are walkable stage under each hold, for a walker or a hidden stand-in.
 
 ### stream
 
@@ -339,18 +376,28 @@ The description:
 | `horizon`, `laneY`, `baseS`, `lane(x)` | perspective: the actor scale is `baseS` on the lane y and 0 at the horizon. `lane(x)` gives the main lane's y at x (default `laneY`). `scaleAt(x, y)` may replace the formula. |
 | `layers` | `[{ k, paint(ctx, rnd, S, E), front, outline, anim, shade }]`. `k` is the parallax factor (0.5 = far, 1 = the ground, > 1 or `front: true` = drawn in front of the actors). `paint` draws once in world coordinates inside the extent `E` (`{ x0, x1, y0, y1 }`) with the seeded random `rnd()`; the result is cached. `outline: { w, color, alpha }` inks the layer's silhouette. `anim(ctx, t)` draws moving parts every frame (water shimmer). `shade(S)` → `{ rgb, a }` or `null` shades the layer's own paint: it is multiplied by `rgb` (0..255 each) and crossfaded in by `a` (before haze), so it never darkens what lies behind the layer and blurred edges take it too (the hill shades its far ranges by night this way). |
 | `props` | `[{ id, x, y, solid: { rx, ry }, bounds: [x0, y0, x1, y1], paint(ctx, rnd, S), anchors, top }]`: things that sort in depth with the actors by `y`. `solid` is the footprint ellipse actors route around. `bounds` is a hint of where it paints. `anchors` on a prop belong to it (a surface on its top). |
-| `anchors` | `{ name: { x, y, type, depth, face, clip, branch, at, s, surface } }`; type defaults to `ground`, `y` to the lane. For a `perch`, `branch: { pts, w0, w1 }` and `at` (0..1 along it). For a `hollow`, `clip` is the opening's polygon. `face` is the facing an actor placed there takes; `s` overrides the scale there; `surface` the footstep sound. |
+| `anchors` | `{ name: { x, y, type, depth, face, clip, branch, at, s, surface, z } }` (names: see [anchor types](#anchor-types)); type defaults to `ground`, `y` to the lane, `z` (its depth off the stage) to 0. For a `perch`, `branch: { pts, w0, w1 }` and `at` (0..1 along it). For a `hollow`, `clip` is the opening's polygon. `face` is the facing an actor placed there takes; `s` overrides the scale there; `surface` the footstep sound. |
 | `walk` | `{ region, ground, band, water, stones, paths }`: `region` the walkable polygon (default: the whole area); `ground(x)` and `band` make a ridge set; `water` a list of polygons; `stones` prop ids whose `top` ellipse (`{ x, y, rx, ry }`) can be stood on in water; `paths` `[{ poly, surface }]`: ground with its own footstep sound (`surface` defaults to `dirt`). |
 | `surface` | the footstep surface everywhere else (default `grass`) |
 | `sampleRoute` | `[from, to]`, anchor names or `[x, y]` points: a route drawn on the set sheet |
 | `light` | the light direction for ink and shading (default from the upper left) |
-| `defaultSky` | the time of day when a scene gives none (default `morning`) |
+| `defaultSky` | the time of day when a scene gives none (default `morning`, or the first of the kit's own `times`) |
+| `skies` | `{ name: (ctx, rnd, w, h) => … }`: a sky painter for a time (screen space, w × h, drawn to cover the frame); one of Earth's eight names replaces that sky's painting |
+| `times` | a kit not under Earth's sky: `{ name: { grade, sun, haze } }`, each with a painter in `skies`; they are then all the times the kit has, and the first is its default. `grade`: `'neutral'` (default: the picture as painted, under the house vignette), one of Earth's eight (its grade), or `{ sl: [r, g, b, a], mul: [r, g, b], vig, con }`; `sun`: `null` (default: no sun, no cast shadows), one of Earth's eight, or `{ len, a }`; `haze`: `[r, g, b]` that far layers fade toward (default none). `{ night: {} }` among them keeps Earth's night as it is. A time's name means one light in a film: two kits may declare the same name only with the same light. |
+| `groundShadows` | `false`: no ground to shade (space), so no figure, flier or prop throws a shadow and no figure draws its contact shadow |
+| `lens` | world px from a camera at depth 0 to the stage (default 2304: about a 45° view across a 1920-px frame at zoom 1); it sets how depth scales things ([storyboard.md](storyboard.md#depth)), and camera `z` / `zTo` must stay under 3/4 of it |
 | `ambience` | `{ day, night }` bed names for `"ambience": "auto"` |
 
 Paint in the house style with the helpers in `engine/paint/` (`nature.mjs`: trees, foliage, grass; `scenery.mjs`:
 ridges, meadow floors, tree lines; `water.mjs`; `structures.mjs`: cottages, fences, walls; `atmos.mjs`: paper
 texture, haze, mist; `brush.mjs`: gouache dabs and ink) and look at `engine/set/kits/meadow.mjs` for a full kit. Use
 the random function you are given, never `Math.random()`, so every render paints the same picture. Check a new kit
-with `node bin/cinecode.mjs set-sheet films/<slug> <name>`: anchors, solid footprints, the walk region and water are
+with its gate, `node bin/cinecode.mjs verify-kit films/<slug>/kits/<name>.mjs`: at least 4 anchors with usable names
+and sane scales on walkable ground, every route between them clear, the area and parallax covering every camera, and
+every time of day (Earth's eight, or the kit's own) with a light and painted: at least 90% of a preview frame under
+each time's grade must be more than near-black, so a night sky or space is a deep blue, not black. It writes two
+review images to `out/verify/` beside the folder that holds the kit: `films/<slug>/out/verify/` for a film's kit,
+`cinecode/out/verify/` for a project's (the gate prints the paths). Then
+`node bin/cinecode.mjs set-sheet films/<slug> <name>`: anchors, solid footprints, the walk region and water are
 drawn over it. A kit for every film belongs in `engine/set/kits/<name>.mjs` (registered automatically under its file
 name) with a test in `test/sets.test.mjs`.

@@ -75,9 +75,10 @@ direction at all (the voice alone carries the line). Such a take can pass with t
 delivery gone; `takes.mjs` (below) flags it `TONE-CUT`.
 
 No word is safe every time. Read aloud in the demo film or a test film: "wondering", "hopeful", "certain", "less
-sure" (each even as the whole direction), "steady", "simple", "deadpan", "whispering", "gently offended". Never read
-aloud there: "soft", "warm", "teasing", "tender", "scared", "grateful", "delighted", "excited", "quiet", "solemn",
-"earnest", "breathless". When a tone is read aloud, change the word rather than retrying it.
+sure" (each even as the whole direction), "steady", "simple", "deadpan", "whispering", "gently offended", and
+`[warm, gentle, soft]` as a whole (it took with "tender" for "soft"). Never read aloud there: "teasing", "tender",
+"scared", "grateful", "delighted", "excited", "quiet", "solemn", "earnest", "breathless". When a tone is read aloud,
+change the word rather than retrying it.
 
 Made-up names are often misheard by the transcriber ("Glim" came back as "Clem", then "Glem"), which fails a good
 take and uses up tries: read what was heard before you redo a take, and prefer names that are real words or names.

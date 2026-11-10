@@ -17,8 +17,10 @@ Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s
 | human | 141 | 92 | run 240 | 2.5 s | ground |
 | mouse | 17.5 | 24 | run 80 | 9.6 s | ground |
 | owl | 62 | 22 | fly 220 | 10.5 s | perch, fly |
+| planet | 91.5 | 40 | run 200 | 5.8 s | perch, no face |
 | songbird | 24 | 26 | fly 190 | 8.9 s | perch, fly |
 | squirrel | 52 | 24 | run 165 | 9.6 s | perch |
+| telescope | 192.3 | 30 | walk 30 | 7.7 s | no face |
 | tortoise | 50 | 15 | run 34 | 15.4 s | carry a rider, look 1s |
 
 ### badger
@@ -109,6 +111,14 @@ Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s
 - expressions: neutral, happy, laugh, sad, surprised, angry, sleepy, smug, worried, scared, determined, one-eye
 - params: body, belly, disc, wing, beak, eye, leg, toe
 
+### planet
+
+- poses: stand, perch
+- gaits: walk, run
+- gestures: 
+- expressions: neutral
+- params: body
+
 ### songbird
 
 - poses: stand, alert, sit, sleep, sing, spread, rest, perch
@@ -124,6 +134,14 @@ Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s
 - gestures: nod, laugh, jump, wave, point, shush, drop, nibble
 - expressions: neutral, happy, laugh, sad, surprised, angry, sleepy, smug, worried, scared, determined
 - params: coat, cream, earIn, nose, eye, tail
+
+### telescope
+
+- poses: stand
+- gaits: walk
+- gestures: 
+- expressions: neutral
+- params: angle, eye, tube, trim, legs, dark
 
 ### tortoise
 
@@ -142,6 +160,22 @@ Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s
 - **frog**: `walk` and `hop` are small hops at 26 (its slowest: 300 px takes about 9 s); `run` is big leaps at 92. Across
   stepping stones every rig jumps stone to stone, 0.7–1.5 s a stone (the small rigs the longest) whatever its gait or `speed`.
 - **owl**: expression `one-eye` (a dozing owl peeking). Perches on `perch` anchors; can fly.
+- **planet**: a planet, moon or star, one rig with a `body` preset: saturn (default), jupiter, earth, mars, venus,
+  mercury, uranus, neptune, moon, titan, sun. Other params: `tilt` (the rings' opening, radians; Saturn 0.38),
+  `roll` (the whole body turned), `axis` (how much of a ringless body's pole we see), `spin` (band drift per second),
+  `size`. Saturn's rings are at their true radii. Size it with the cast `scale` (the Saturn chapter's Saturn is 2.5);
+  for true relative sizes multiply by the ratio of radii (`radiusOf` in `cinecode/paint/planets`:
+  Earth / Saturn = 0.1058). It holds at a `perch` anchor (the `space` kit's), stays upright, throws no shadow, has
+  no face (the camera crops into it: `zoom` above 1, `focus`), and its `head` is the globe's centre, so `close`
+  frames the globe. A moon behind or in front of it is a second planet actor with a `z` (SKILL.md, "Space and depth").
+- **telescope**: a refractor on a wooden tripod, a prop (no face), pointing up the way it faces; params `angle`
+  (the tube's elevation, default 0.5 rad), `eye` (the eyepiece height, default 116: a standing child's eye) and its
+  colours. A child at the eyepiece faces the same way and stands 66 × s behind its contact point (s = the set's scale
+  there × cast `scale`): facing left, child x = telescope x + 66 × s. Its `head` is the eyepiece, so a `close` on
+  it frames the eyecup and a face at it.
+- **Rigs with no face** (planet, telescope, a prop rig like the strawberry: only the `neutral` expression, or the
+  rig's own `faceless: true`): the camera has no head to keep above the captions, so a `zoom` above 1 on a shot
+  whose subjects all have no face crops into them, and lint's face rules (a head cut near the eyes, a halo, a caption over a face) skip them.
 - Cast-level `scale` multiplies the set's perspective scale; lint divides by it, so a big or tiny character isn't a `scale` error.
 - `do: set` changes params mid-shot (`{ "do": "set", "who": "fidget", "params": { "coat": "#8e3c1e", "tail": 0.45 } }`), e.g. wet fur after a wade.
 - **Fliers** (owl, songbird, butterfly; the beetle has no fly gait) hover with `"height": N` on a `fly`, `enter` or
@@ -177,3 +211,7 @@ Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s
   gait, hovering with `height`), or the quicker stand-in: a butterfly hovering with `height`, moved by `fly`, faded to 0
   by its first beat, carrying an overlay that draws the thing at its `box` (still returned at opacity 0; the camera
   frames it with `on`; `CINECODE/films/kite/`).
+- **Framing part of something** (Saturn's cloud bands, the edge of its rings, a crown of leaves) needs no stand-in:
+  `"zoom": 1.6` (and an `offset`) crops into a subject with no face, `"focus": [0.9, 0.5]` puts that point of the
+  subjects' box at the centre (any subject), and `"on": ["x:1840,y:886"]` frames a point of the set. A hidden
+  stand-in is still the way to give the camera a subject that moves through the air.

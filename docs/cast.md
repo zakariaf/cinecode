@@ -13,7 +13,10 @@ its look with `params`:
 }
 ```
 
-![The fourteen rigs, standing (not to scale)](images/rigs.jpg)
+![The fourteen character rigs, standing (not to scale)](images/rigs.jpg)
+
+Two more are things, not characters: the [`planet`](#planet) (a planet, moon or the Sun, for films in space) and the
+[`telescope`](#telescope).
 
 To see every pose, gait phase, gesture key frame and expression of a rig, labelled:
 
@@ -36,6 +39,7 @@ lists as Markdown: `node .claude/skills/cinecode/scripts/inventory.mjs cast`.
 | gestures | short motions with a fixed length: `{ "do": "gesture", "who": "fox", "name": "bow" }`. They layer in the order they start (one started during another takes over from the pose at that moment). |
 | expressions | `expr` on a scene actor, a `say` line, an `emote`, `pose` or `set` beat |
 | params | the look: colours (any CSS hex colour) and a few rig-specific switches |
+| a face | a rig with only the `neutral` expression (the planet, the telescope, a prop rig), or one that sets `faceless: true`, has no face: the camera keeps no head of it above the captions, so a `zoom` above 1 crops into it ([framing part of a subject](storyboard.md#framing-part-of-a-subject)), and lint's face rules skip it |
 
 Every actor also gets **idle life** without being asked: it breathes, blinks every few seconds (seeded, so every render is
 the same), glances at whoever starts speaking (and keeps looking at them if it was never told where to look), and
@@ -64,6 +68,7 @@ glow overlay; a crow a near-black songbird (`scale` 1.3; loosely, a bat); a rabb
 mouse; a wolf or a dog a grey or brown fox; a ladybird a red beetle (no spots); a turtle a tortoise. Look at it on a
 contact sheet before you commit, and name the substitution in the screenplay. A prop (a strawberry, a kite, a
 lantern) is built the same way: a small static rig or a hidden stand-in with an overlay ([effects.md](effects.md#props)).
+To frame part of something big (a planet's rings) no stand-in is needed: crop with the camera's `zoom` or `focus`.
 
 **Cast scale vs. size.** Use the cast's `scale` (0.1–10) to make one actor bigger or smaller than the rig's default.
 The framing, routing and lint all account for it.
@@ -281,6 +286,38 @@ Height 50 units, length 96. Speeds (units/s at scale 1): walk 15, run 34. Has a 
 - **params:** `skin` `#a7a36a`, `shell` `#6f8a46`, `rim` `#d8c58c`, `claw` `#e8e0c0`, `eye` `#2a1e16`, `iris` `null`, `seam` `null`, `moss` `null`, `star` 0, `starCol` `#ede6d0`, `lids` 0, `wet` 0
 
 
+## Worlds and things
+
+### planet
+
+A planet, moon or star as an actor: the camera frames it (`on`), pushes in on it and lints it like a character. One
+rig with a `body` preset per world: `saturn` (default), `jupiter`, `earth`, `mars`, `venus`, `mercury`, `uranus`,
+`neptune`, `moon` (Earth's), `titan`, `sun`. Every globe is drawn 100 units across (Saturn is 226 with its rings, 91.5
+tall), so sizes come from the cast `scale`: for true relative sizes, multiply by the ratio of their radii (`radiusOf`
+in `cinecode/paint/planets`, true equatorial radii in km: Earth / Saturn = 0.1058, so an Earth beside a Saturn at
+`scale` 2.5 is 0.26). Saturn's rings are at their true radii (the C, B and A rings, the Cassini Division and the Encke
+Gap); the colours are a storybook's.
+
+- **poses:** `stand`, `perch`; it holds at a `perch` anchor (the [`space`](sets.md#space) kit's) or stands on the ground
+- **expressions:** `neutral` only: no face. It stays upright on a slope and throws no shadow.
+- **params:** `body`; `tilt` (the rings' opening, radians: 0 edge-on, Saturn's default 0.38), `roll` (the whole body
+  turned in the picture), `axis` (how much of a ringless body's pole we see), `spin` (band and feature drift per
+  second), `size`
+- Its `head` is the globe's centre, so a `close` shot frames the globe. A moon behind or in front of a planet is
+  another planet actor with a `z` ([depth](storyboard.md#depth)); the built-in space effects (`sizerow`, `moonlets`,
+  `orbit`, `lightpulse`, `sunglow`: [effects.md](effects.md#built-in-effects)) take a planet actor as `who`.
+
+### telescope
+
+A refractor on a wooden tripod, seen side-on, the tube pointing up the way it faces, a prop with no face. Height 192.3
+units (the tube's tip), 74 long.
+
+- **params:** `angle` (the tube's elevation, radians, default 0.5), `eye` (the eyepiece's height, units, default 116: a
+  standing child's eye with the human rig), `tube`, `trim`, `legs`, `dark` (colours)
+- A child at the eyepiece faces the same way and stands 66 × s behind the telescope's contact point, a few px nearer
+  the camera (s = the set's scale there × cast `scale`): facing left, the child's x = the telescope's x + 66 × s.
+- Its `head` is the eyepiece, so a `close` on it frames the eyecup and a face at it.
+
 ### Rig-specific params
 
 | rig | param | meaning |
@@ -379,12 +416,19 @@ How it fits together:
 - Optional: `perch: true`, `flies: true` (with a `fly` gait), `mount(pose, params)` → `[x, y]` riding point,
   `lookTime` (seconds a look takes), `feet(pose)` → contact points (so gestures layered over a walk keep planted feet
   still), `steps: { walk: [0, 0.5] }` (gait phases where a foot lands, for footstep sounds), `expressions` (default:
-  the eleven above), `shadowW`, `breathPeriod`.
+  the eleven above), `shadowW`, `breathPeriod`, `hangPoses` (poses whose legs hang below the ground on purpose).
+  `sizes(params)` → `{ height, headHeight, width, speeds, stride }` when the numbers depend on the params (the human's
+  age, the planet's body; without it a `size` param scales them). `upright: true` keeps the drawing vertical on a slope
+  (`false` makes it follow the slope; by default animals follow and the human and fliers stay upright). `noShadow:
+  true` draws no contact shadow under it; `shadowA` is that shadow's opacity (default 0.26). `faceless: true` (or
+  `false`) says whether the rig has a face, when its expressions alone would say otherwise.
 
 A rig written without `makeRig` must provide the contract in DESIGN.md §2 (`kind`, `draw(ctx, x, y, s, face, st)`
 returning `{ head, mouth, bounds }` and accepting `ctx = null`, `bbox`, `poses`, `gaits`, `gestures`, `expressions`).
 Check the result with `node bin/cinecode.mjs verify-rig <file>`: contract, size, bounds, ground, flip, determinism,
 face and motion, plus two images to look at (every pose, gait phase, gesture key and expression; a line-up beside the
-hare, the child and the mouse), then `node bin/cinecode.mjs cast-sheet films/<slug> <kind>`. A rig used by more than
+hare, the child and the mouse), written to `out/verify/` beside the folder that holds the rig
+(`films/<slug>/out/verify/` for a film's, `cinecode/out/verify/` for a project's; the gate prints the paths). A rig
+whose `kind` is a built-in one's replaces it for the film (`check` says so), so give it a kind of its own. Then `node bin/cinecode.mjs cast-sheet films/<slug> <kind>`. A rig used by more than
 one film of a project goes in its `cinecode/rigs/`; one that becomes part of the engine in `engine/cast/<kind>.mjs`
 (every file there is registered automatically) with a test in `test/rigs.test.mjs`.

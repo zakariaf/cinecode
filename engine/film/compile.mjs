@@ -24,14 +24,24 @@
 // flight from above.
 // An entrance never runs past its destination and back (the way in starts at the frame edge or at the destination,
 // whichever is nearer the entry side); near:<actor> keeps clear of the other's longer end and of a hoverer's wings.
+// Camera (round 6): an actor subject says whether its rig has a face (faceless: camera.mjs keeps only faces above the
+// captions); a world point "x:…,y:…" in "on" / "toOn" is framed as itself (in the air too); the provisional cameras
+// take the shot's "focus".
+// Depth (DESIGN §10): an actor's z (zAt: the scene actor's "z" or its starting anchor's, then each beat's "z" or the depth
+// of the place it places or moves it to (targetZ: an anchor's, 0 when it declares none; a carrier's; the actor's it goes
+// beside), eased over the beat; an entrance takes it at once; a "set" over its "dur"; a rider has its carrier's, and
+// hopping on or off eases between the two) is on its subjects (anchors too) and its actorsAt states, which sort farther
+// first; cameras of a scene using depth carry z and lens (buildCamera "depth"). An exit or entrance at a side is off
+// screen as its depth shows it; an actor on the painted ground off the stage is warned about (groundDepth).
 import { Actor, RouteLeg, JumpLeg, FlyLeg, groundPos, anchorPos, canHover, hoverProfile, REACTIONS, REACT_HOLD } from './actor.mjs';
-import { buildCamera, frameSubjects, clampFrame } from './camera.mjs';
+import { buildCamera, frameSubjects, clampFrame, depthScale } from './camera.mjs';
 import { skyList, mixGrade, mixStory, spanU, STORY, isNight } from './grade.mjs';
 import { chunkCaption } from './text.mjs';
 import { voiceFor } from '../audio/voice.mjs';
 import { FX_DUR, ONE_SHOT } from './fx.mjs';
-import { moodNames, stingNames, MUSIC_EXTRAS, RIM_DEFAULTS } from './validate.mjs';
-import { clamp, hash32, shortHash, parseTarget, rigPose, profile, probe } from './util.mjs';
+import { dissolveLen } from './frame.mjs';
+import { moodNames, stingNames, MUSIC_EXTRAS, RIM_DEFAULTS, DEPTH_DO } from './validate.mjs';
+import { clamp, hash32, shortHash, parseTarget, rigPose, profile, probe, lerp, easeIO } from './util.mjs';
 
 export const DEFAULT_HOLD = 0.5;
 export const estimateLine = text => String(text ?? '').trim().split(/\s+/).filter(Boolean).length / 2.6 + 0.3;
@@ -58,6 +68,7 @@ class Compiler {
     Object.assign(this, { film, voices, R: film.resolved, W: fmt.width || 1920, H: fmt.height || 1080, fps: fmt.fps || 24, captionMode: fmt.captions || 'dialogue' });
     this.lines = []; this.rawSfx = []; this.fx = []; this.captions = []; this.shots = []; this.scenes = []; this.cards = []; this.custom = []; this.warnings = [];
     this.marks = {};
+    this.zs = new Map();        // actor → its depth changes [{ t0, t1, z0, z1 }] (DESIGN §10)
   }
   q(t) { return Math.round(t * this.fps) / this.fps; }
   warn(msg) { this.warnings.push(msg); }
@@ -72,6 +83,7 @@ class Compiler {
       t = d;
     }
     film.scenes.forEach((sc, i) => { t = this.scene(sc, i, t); });
+    this.scenes.forEach((rec, i) => this.scopeCustom(rec, i));
     const end = film.titles?.end;
     if (end) { const d = this.q(end.dur ?? 5); this.cards.push({ kind: 'end', t0: t, t1: t + d, lines: end.lines?.length ? end.lines : ['The End'] }); t += d; }
     this.duration = this.q(t);
@@ -115,6 +127,8 @@ class Compiler {
       }
       left = left.filter(e => !batch.includes(e));
     }
+    // (depth: an actor's starting z, its own or its starting anchor's; a rider has its carrier's)
+    for (const [id, a] of Object.entries(sc.actors || {})) { const z = a.on !== undefined ? 0 : a.z ?? anchorZ(S, a.at) ?? 0; if (z && actors.has(id)) this.zs.set(actors.get(id), [{ t0: T0, t1: T0, z0: z, z1: z }]); }
     let t = T0;
     sc.shots.forEach((sh, i) => { t = this.shot(rec, sh, i, t); });
     rec.t1 = t;
@@ -126,6 +140,7 @@ class Compiler {
     this.glances(rec);
     for (const s of rec.shots) this.camera(rec, s);
     this.finishExits(rec);
+    this.groundDepth(rec);
     this.moveSounds(rec);
     return t;
   }
@@ -141,7 +156,8 @@ class Compiler {
       if (!shot) continue;
       const dir = mv.side === 'left' ? -1 : 1, m = this.offMargin(A, mv.final.s);
       let need = mv.final.x;
-      for (let tt = mv.t1; tt < shot.t1; tt += 1 / 12) { const c = shot.cameraAt(tt), e = c.cx + dir * (W / 2 / c.zoom + m); need = dir > 0 ? Math.max(need, e) : Math.min(need, e); }
+      // (off the stage: out of the view its depth sees, W/2/(zoom × p) either side of the camera's centre)
+      for (let tt = mv.t1; tt < shot.t1; tt += 1 / 12) { const c = shot.cameraAt(tt), p = depthScale(c, this.zAt(A, tt)), e = c.cx + dir * (W / 2 / (p === 1 ? c.zoom : c.zoom * p) + m); need = dir > 0 ? Math.max(need, e) : Math.min(need, e); }
       if ((need - mv.final.x) * dir < 1) continue;
       const pts = L.args.pts, y = pts[pts.length - 1][1], L2 = new RouteLeg({ ...L.args, pts: [...pts, [need, y]] });
       const t1 = mv.t1 + L2.T - L.T, next = A.moves.find(o => o !== mv && o.t0 > mv.t0);
@@ -150,6 +166,32 @@ class Compiler {
       mv.legs[mv.legs.length - 1] = L2; mv.t1 = t1;
       mv.end = groundPos(S, need, y, A.k); mv.final = { ...mv.end, mode: 'off' };
     }
+  }
+  // A custom beat lives for its dur, on into the next shots of its scene and, when the next scene dissolves in, into
+  // the dissolve (frame.mjs draws the scene's last shot on, fading, over the next one). "scope": "shot" ends it at its
+  // shot's cut (frame.mjs draws it only in its own shot and before its end; its sounds from the cut on are dropped
+  // here); "scope": "scene" says it carries on. A warning: one drawn on into a later shot without saying so, or that
+  // ends partway through the dissolve (it vanishes from the fading picture). Frame k is drawn at k / fps, so this goes
+  // by frames, as the drawing does (a beat that fills its shot can end a hair after the next shot's first frame).
+  scopeCustom(rec, i) {
+    const fps = this.fps, frame = t => Math.round(t * fps) / fps, cut = new Map(), next = this.scenes[i + 1];
+    // the dissolve's last frame (the compiler holds the plan's scenes and shots)
+    const d = next?.transition === 'dissolve' ? dissolveLen(this, i + 1) : 0;
+    let last = null;
+    for (let k = Math.round(rec.t1 * fps); k / fps - rec.t1 < d; k++) last = k / fps;
+    for (const c of this.custom) {
+      if (c.scene !== rec.id) continue;
+      const own = rec.shots.find(s => s.id === c.shot);
+      if (c.beat.scope === 'shot') { cut.set(c, own.t1); continue; }
+      if (c.beat.scope !== undefined || !c.def?.draw) continue;
+      const into = rec.shots.filter(s => s.index > own.index && frame(s.t0) < c.t1).map(s => s.id);
+      if (last !== null && frame(rec.t1) < c.t1 && c.t1 <= last) into.push(`the dissolve to ${next.shots[0].id}, where it vanishes partway (a dur of ${(Math.ceil((last - c.t0) * 100 + 1e-6) / 100).toFixed(2)} s or more lets it fade out with the picture)`);
+      if (!into.length) continue;
+      let n = 0;
+      for (let k = Math.round(own.t1 * fps); k / fps < c.t1; k++) n++;
+      this.warn(`shot ${own.id}: custom beat "${c.name}" (${(c.t1 - c.t0).toFixed(2)} s from ${(c.t0 - own.t0).toFixed(2)} s) runs ${(c.t1 - own.t1).toFixed(2)} s (${n} frame${n > 1 ? 's' : ''}) past the shot's end, so it is drawn on into ${into.join(', ')}: "scope": "shot" ends it at the cut, "scope": "scene" keeps it on`);
+    }
+    if (cut.size) this.rawSfx = this.rawSfx.filter(e => !(cut.has(e.of) && e.t >= cut.get(e.of)));
   }
   initOff(rec, A, side, t, a = {}) {
     const S = rec.S, y = S.laneAt(side === 'left' ? S.area.x0 : S.area.x1);
@@ -173,11 +215,15 @@ class Compiler {
       try { dur = this.beat(rec, srec, b, T + start); }
       catch (e) { throw new Error(`shot ${sh.id}: ${b.do ?? Object.keys(b)[0]} beat: ${e.message}`, { cause: e }); }
       dur = Math.max(0, dur || 0);
+      if (b.do !== undefined) dur = Math.max(dur, this.depthBeat(rec, b, T + start, dur));
       const end = start + dur;
-      if (b.with) gEnd = Math.max(gEnd, end); else { gStart = start; gEnd = end; }
+      // "hold": false (a custom beat or an sfx): it plays its whole dur but takes no time here, so neither the next
+      // beat, its group nor the shot's length waits for it
+      const held = b.hold === false && (b.do === 'custom' || b.sfx !== undefined) ? start : end;
+      if (b.with) gEnd = Math.max(gEnd, held); else { gStart = start; gEnd = held; }
       if (b.id) byId[b.id] = { start, end };
       srec.beats.push({ beat: b, t0: T + start, t1: T + end });
-      maxEnd = Math.max(maxEnd, end);
+      maxEnd = Math.max(maxEnd, held);
     }
     const len = sh.dur ?? (maxEnd + (sh.hold ?? DEFAULT_HOLD));
     srec.t1 = Math.max(T + 1 / this.fps, this.q(T + len));
@@ -241,8 +287,9 @@ class Compiler {
     const d = b.do, S = rec.S;
     if (d === 'custom') {
       const dur = b.dur ?? 1, def = this.film.custom?.custom?.[b.name];
-      this.custom.push({ name: b.name, t0: t, t1: t + dur, beat: b, scene: rec.id, shot: srec.id, def, params: { ...b, ...(b.params || {}) }, seed: hash32(`${srec.id}|${b.name}|${t.toFixed(3)}`) });
-      for (const e of def?.sfx || []) this.rawSfx.push({ t: t + (e.at ?? 0), name: e.name, gain: e.gain ?? 1, pan: e.pan, params: e.params || {}, shot: srec.id, where: null });
+      const c = { name: b.name, t0: t, t1: t + dur, beat: b, scene: rec.id, shot: srec.id, def, params: { ...b, ...(b.params || {}) }, seed: hash32(`${srec.id}|${b.name}|${t.toFixed(3)}`) };
+      this.custom.push(c);
+      for (const e of def?.sfx || []) this.rawSfx.push({ t: t + (e.at ?? 0), name: e.name, gain: e.gain ?? 1, pan: e.pan, params: e.params || {}, shot: srec.id, where: null, of: c });
       return dur;
     }
     if (d === 'enter') return this.enter(rec, srec, b, t);
@@ -644,17 +691,18 @@ class Compiler {
   provisional(rec, srec, t, override = {}) {
     const spec = srec.def.camera || {}, ids = this.subjectIds(rec, srec);
     const subs = ids.map(id => this.subject(rec, id, t, override[id])).filter(Boolean);
-    const F = frameSubjects(subs, spec.size || (ids.length ? 'wide' : 'establishing'), { W: this.W, H: this.H, angle: spec.angle, S: rec.S, zoomK: spec.zoom || 1 });
+    const F = frameSubjects(subs, spec.size || (ids.length ? 'wide' : 'establishing'), { W: this.W, H: this.H, angle: spec.angle, S: rec.S, zoomK: spec.zoom || 1, focus: spec.focus, z: spec.z, lens: rec.S.lens });
     return clampFrame(rec.S, F, this.W, this.H);
   }
   // Where an actor entering or leaving at a side is out of frame: past the edge of every view the shot may show then
   // (its framing now and, for a pan, a push-in or a pull-out, the framings at either end of the move). edge: a point
-  // just inside the present view.
-  offscreenX(rec, srec, A, side, t, override, y) {
+  // just inside the present view. za: the actor's depth there (a view at depth c shows it out to W/2/(zoom × p) either
+  // side of its centre, p = (D − c)/(D + za − c): farther than the stage, it must go farther out; DESIGN §10).
+  offscreenX(rec, srec, A, side, t, override, y, za = 0) {
     const cam = this.provisional(rec, srec, t, override), spec = srec.def.camera || {}, ids = this.subjectIds(rec, srec), W = this.W, H = this.H;
     const views = [cam], frame = (list, size) => {
       const subs = list.map(id => this.subject(rec, id, t, override[id])).filter(Boolean);
-      return subs.length ? clampFrame(rec.S, frameSubjects(subs, size, { W, H, angle: spec.angle, S: rec.S, zoomK: spec.zoom || 1 }), W, H) : null;
+      return subs.length ? clampFrame(rec.S, frameSubjects(subs, size, { W, H, angle: spec.angle, S: rec.S, zoomK: spec.zoom || 1, focus: spec.focus, z: spec.z, lens: rec.S.lens }), W, H) : null;
     };
     const size = spec.size || (ids.length ? 'wide' : 'establishing');
     if (spec.move === 'pan' && ids.length >= 2) views.push(frame([ids[0]], size), frame([ids[ids.length - 1]], size));
@@ -663,8 +711,11 @@ class Compiler {
       const k = spec.zoomTo ? Math.min(1, spec.zoomTo) : 1 / 1.3;
       for (const v of views.slice()) if (v) views.push(clampFrame(rec.S, { ...v, zoom: v.zoom * k }, W, H));
     }
-    const ext = views.filter(Boolean).map(v => v.cx + (side === 'left' ? -1 : 1) * W / 2 / v.zoom);
-    const half = W / 2 / cam.zoom, far = side === 'left' ? Math.min(...ext) : Math.max(...ext);
+    // (a camera pulled back through depth ends on more of the stage: its zoom × (D − zTo)/(D − z); DESIGN §10)
+    if (spec.zTo < (spec.z ?? 0)) { const D = rec.S.lens, k = (D - (spec.z ?? 0)) / (D - spec.zTo); for (const v of views.slice()) if (v) views.push({ ...v, zoom: v.zoom * k, z: spec.zTo }); }
+    const vz = v => (za ? v.zoom * Math.max(0.05, depthScale({ z: v.z ?? spec.z ?? 0, lens: rec.S.lens }, za)) : v.zoom);
+    const ext = views.filter(Boolean).map(v => v.cx + (side === 'left' ? -1 : 1) * W / 2 / vz(v));
+    const half = W / 2 / vz(cam), far = side === 'left' ? Math.min(...ext) : Math.max(...ext);
     const m = this.offMargin(A, rec.S.scaleAt(cam.cx, y) * A.k);
     return { off: side === 'left' ? far - m : far + m, edge: side === 'left' ? cam.cx - half + 30 : cam.cx + half - 30, cam };
   }
@@ -696,16 +747,18 @@ class Compiler {
       return this.addMove(A, t, legs, 'enter', end, b, { framing: 'all', from: p0 });
     }
     const side = fromT.side;
-    // destination: given, or a third of the way into the frame from the entry side
+    // (the depth it comes in at: the beat's or its destination's, else its own; DESIGN §10)
+    const za = this.targetZ(rec, b, t) ?? this.zAt(A, t);
+    // destination: given, or a third of the way into the frame from the entry side (as its depth shows it)
     let dest;
     if (b.to) dest = this.place(rec, A, b.to, t, null, air);
     else {
-      const cam = this.provisional(rec, srec, t), half = this.W / 2 / cam.zoom, x = cam.cx + (side === 'left' ? -half * 0.45 : half * 0.45);
+      const cam = this.provisional(rec, srec, t), p = za ? Math.max(0.05, depthScale({ z: cam.z ?? 0, lens: S.lens }, za)) : 1, half = this.W / 2 / (cam.zoom * p), x = cam.cx + (side === 'left' ? -half * 0.45 : half * 0.45);
       dest = this.place(rec, A, `x:${Math.round(x)}`, t);
     }
     dest = hover(dest);
     const yRef = dest.mode === 'ground' || dest.hover != null ? dest.y : S.laneAt(dest.x);
-    const { off, edge } = this.offscreenX(rec, srec, A, side, t, { [A.id]: dest }, yRef);
+    const { off, edge } = this.offscreenX(rec, srec, A, side, t, { [A.id]: dest }, yRef, za);
     // the way in runs from off screen past the frame edge to the destination; a destination nearer the entry side than
     // the edge is walked straight to (never past it and back)
     let ex = clamp(edge, S.area.x0 + 20, S.area.x1 - 20);
@@ -736,7 +789,8 @@ class Compiler {
       ({ legs, end } = this.path(rec, A, p0, dest, kind, gait, mult));
     } else {
       const yRef = p0.mode === 'ground' ? p0.y : S.laneAt(p0.x);
-      const { off, edge } = this.offscreenX(rec, srec, A, T.side, t, {}, yRef);
+      // (off screen at the depth it leaves at: the beat's, else its own)
+      const { off, edge } = this.offscreenX(rec, srec, A, T.side, t, {}, yRef, b.z ?? this.zAt(A, t));
       const ex = clamp(edge, S.area.x0 + 20, S.area.x1 - 20), e = S.nearestWalkable(ex, yRef) || [ex, yRef];
       if (A.rig.flies && A.rig.gaits?.fly && p0.mode !== 'ground') {
         const hi = { ...groundPos(S, off, e[1], A.k), y: e[1] - 300, mode: 'air', depth: e[1] };
@@ -749,6 +803,71 @@ class Compiler {
     const dur = this.addMove(A, t, legs, 'exit', end, b, { framing: 'start', from: p0, final: T.kind === 'side' ? { ...end, mode: 'off' } : null, side: T.kind === 'side' ? T.side : null });
     if (T.kind === 'side') { const mv = A.moves[A.moves.length - 1]; A.visEv.push({ t: t + dur, visible: false, src: mv }); A.visEv.sort((a, c) => a.t - c.t); }
     return dur;
+  }
+
+  // ───────────── depth (DESIGN §10) ─────────────
+  // An actor's z at t: its depth changes eased in turn (0 before any); a rider has its carrier's.
+  zAt(A, t) {
+    const C = A.carrierAt(t);
+    if (C && C !== A) return this.zAt(C, t);
+    let z = 0;
+    for (const e of this.zs.get(A) || []) { if (t < e.t0) break; z = t >= e.t1 ? e.z1 : lerp(e.z0, e.z1, easeIO((t - e.t0) / (e.t1 - e.t0))); }
+    return z;
+  }
+  // The depth a beat takes an actor to: its own "z", else that of the place it goes to (t: when it gets there): a named
+  // anchor's (0 when it declares none: a named place is on the stage unless it says otherwise), the carrier's it lands
+  // on ("on:X"), the actor's it goes beside ("near:X", "left-of:X", …, or an actor's name). undefined: it keeps its
+  // depth (a point "x:…", a side, a beat without a place).
+  targetZ(rec, b, t) {
+    if (b.z !== undefined) return b.z;
+    const to = b.to ?? (b.do === 'place' && typeof b.at === 'string' ? b.at : undefined);
+    if (to === undefined) return undefined;
+    const T = parseTarget(to), S = rec.S;
+    if (T.kind === 'name' && S.anchorNames.includes(T.name)) return S.anchor(T.name).z ?? 0;
+    const O = rec.actors.get(T.kind === 'name' ? T.name : T.who);
+    return O && ['name', 'on', 'near', 'left-of', 'right-of', 'behind', 'front-of'].includes(T.kind) ? this.zAt(O, t) : undefined;
+  }
+  // A beat that changes an actor's depth (targetZ), eased over the beat (dur: the action's; a "set" takes its own "dur";
+  // an entrance takes it at once, from off screen, or appears at its place's depth and then eases to its destination's).
+  // A rider hopping off starts from its carrier's depth (keeping it when the hop goes to a point), and one hopping on
+  // eases to its carrier's by the landing. → how long the change itself takes (a set's dur).
+  depthBeat(rec, b, t, dur) {
+    const A = rec.actors.get(b.who);
+    if (!A || !DEPTH_DO.includes(b.do)) return 0;
+    const list = this.zs.get(A) || [], add = (t0, t1, z0, z1) => { list.push({ t0, t1, z0, z1 }); list.sort((p, q) => p.t0 - q.t0); this.zs.set(A, list); };
+    // (riding until now: the carrier's depth, where it starts from)
+    const C = A.carrierAt(t - 1e-6), z0 = C && C !== A ? this.zAt(C, t) : this.zAt(A, t);
+    if (b.do === 'enter') {
+      const F = b.from !== undefined ? parseTarget(b.from) : null, at = F && F.kind !== 'side' ? this.targetZ(rec, { to: b.from }, t) : undefined;
+      const z1 = this.targetZ(rec, b, t + dur);
+      if (at !== undefined) { if (at !== z0) add(t, t, at, at); if (z1 !== undefined && z1 !== at) add(t, t + dur, at, z1); }
+      else if (z1 !== undefined && z1 !== z0) add(t, t, z1, z1);
+      return 0;
+    }
+    const d = b.do === 'set' ? b.dur ?? 0 : dur, z1 = this.targetZ(rec, b, t + d) ?? (C && C !== A ? z0 : undefined);
+    if (z1 !== undefined && !(z1 === z0 && z0 === this.zAt(A, t))) add(t, t + d, z0, z1);
+    return b.do === 'set' && b.z !== undefined ? d : 0;
+  }
+  // The scene uses depth: an actor in it is ever off the stage.
+  usesDepth(rec) { return [...rec.actors.values()].some(A => (this.zs.get(A) || []).some(e => e.z0 || e.z1)); }
+  // An actor standing (on the ground, a perch, a hollow) off the stage on a set that paints its stage (a ground layer or
+  // props): its depth draws it away from the painted spot it stands on (smaller or larger, nearer the frame centre or
+  // farther from it), so it slides over the ground as the camera moves, and it is drawn behind (z > 0) or in front of
+  // (z < 0) everything on the stage whatever its ground y. Said once per actor and scene, of a depth it holds (not
+  // while a beat changes it: a hop onto a carrier off the stage); fliers in the air may have any depth.
+  groundDepth(rec) {
+    const S = rec.S, painted = (S.def.layers || []).some(l => l.k === 1 && !l.front) || (S.def.props || []).length > 0;
+    if (!painted) return;
+    for (const A of rec.actors.values()) {
+      const list = this.zs.get(A) || [];
+      if (!list.some(e => e.z0 || e.z1)) continue;
+      for (let t = rec.t0; t < rec.t1; t += 0.25) {
+        const z = this.zAt(A, t), mode = A.posAt(t)?.mode;
+        if (Math.abs(z) < 1 || !A.visibleAt(t) || !['ground', 'perch', 'hollow'].includes(mode) || list.some(e => t > e.t0 && t < e.t1)) continue;
+        this.warn(`${rec.id}: ${A.id} stands on ${mode === 'ground' ? 'the ground' : `a ${mode}`} at z ${Math.round(z)} (${(t - rec.t0).toFixed(2)} s into the scene) on set ${S.id}, which paints its stage: off the stage it slides over the ground as the camera moves and is drawn ${z > 0 ? 'behind everything on the stage whatever its ground y (and beyond the set\'s nearest backdrop layer, behind that layer and the painted ground too)' : 'in front of everything on the stage whatever its ground y'}. Keep figures that stand at z 0; depth is for fliers, effect pieces (api.item) and sets with no painted ground`);
+        break;
+      }
+    }
   }
 
   // ───────────── framing subjects ─────────────
@@ -807,17 +926,23 @@ class Compiler {
       const real = override ? pos : A.posAt(t), now = real.x !== pos.x || real.y !== pos.y ? [box[0] + real.x - pos.x, box[1] + real.y - pos.y, box[2] + real.x - pos.x, box[3] + real.y - pos.y] : null;
       let head = [pos.x + face * pr.head[0] * s, yb + pr.head[1] * s], restHead = [pos.x + face * rest.head[0] * s, y0 + rest.head[1] * s];
       if (turn) { head = turn.pt(head); restHead = turn.pt(restHead); }
-      return { id, box, head, rest: restHead, hh: A.sz.headHeight * s, face, vx, key: pos.key ?? pos.y, moving, now };
+      // (faceless: a rig with no expression beyond 'neutral', a planet or a prop, or one that says faceless: true: no
+      // head for the captions to spare)
+      const faceless = typeof A.rig.faceless === 'boolean' ? A.rig.faceless : !(A.rig.expressions || []).some(e => e !== 'neutral');
+      return { id, box, head, rest: restHead, hh: A.sz.headHeight * s, face, vx, key: pos.key ?? pos.y, moving, now, faceless, z: this.zAt(A, t) };
     }
     const T = parseTarget(id);
-    let x, y, s, raised = false;
-    if (T.kind === 'name' && S.anchorNames.includes(T.name)) { const a = S.anchor(T.name); x = a.x; y = a.y; s = a.s; raised = a.type !== 'ground'; }
-    else if (T.kind === 'x' || T.kind === 'xy') { x = T.x; y = T.kind === 'xy' ? T.y : S.laneAt(T.x); s = S.scaleAt(x, y); }
+    let x, y, s, raised = false, z = 0;
+    if (T.kind === 'name' && S.anchorNames.includes(T.name)) { const a = S.anchor(T.name); x = a.x; y = a.y; s = a.s; raised = a.type !== 'ground'; z = a.z || 0; }
+    else if (T.kind === 'x') { x = T.x; y = S.laneAt(T.x); s = S.scaleAt(x, y); }
+    // (a world point "x:…,y:…", on the ground or in the air: itself the thing to look at, at the size things have on
+    // the set's lane below it)
+    else if (T.kind === 'xy') { x = T.x; y = T.y; s = S.scaleAt(x, S.laneAt(x)); raised = true; }
     else return null;
     // a ground point is framed like a figure standing there; a raised anchor (a stone's top, a branch, a hollow)
     // is itself the thing to look at, so close shots centre on it
-    if (raised) return { id, box: [x - 60 * s, y - 60 * s, x + 60 * s, y + 50 * s], head: [x, y], rest: [x, y], hh: 40 * s, face: 0, vx: 0 };
-    return { id, box: [x - 60 * s, y - 110 * s, x + 60 * s, y], head: [x, y - 75 * s], rest: [x, y - 75 * s], hh: 40 * s, face: 0, vx: 0 };
+    if (raised) return { id, box: [x - 60 * s, y - 60 * s, x + 60 * s, y + 50 * s], head: [x, y], rest: [x, y], hh: 40 * s, face: 0, vx: 0, z };
+    return { id, box: [x - 60 * s, y - 110 * s, x + 60 * s, y], head: [x, y - 75 * s], rest: [x, y - 75 * s], hh: 40 * s, face: 0, vx: 0, z };
   }
 
   camera(rec, srec) {
@@ -826,7 +951,7 @@ class Compiler {
     const W = this.W, H = this.H;
     const win = [srec.t0, srec.t1], subjectsAt = (t, list) => list.map(id => this.subject(rec, id, t, null, win)).filter(Boolean);
     const othersAt = (t, list) => subjectsAt(t, [...rec.actors.keys()].filter(id => !list.includes(id) && rec.actors.get(id).place0));
-    const cam = buildCamera({ spec, size, ids, subjectsAt, othersAt, t0: srec.t0, t1: srec.t1, S: rec.S, W, H, seed: hash32(srec.id) });
+    const cam = buildCamera({ spec, size, ids, subjectsAt, othersAt, t0: srec.t0, t1: srec.t1, S: rec.S, W, H, seed: hash32(srec.id), depth: this.usesDepth(rec) });
     // staging the camera can't frame at the size asked for: subjects too far apart for a two-shot of that size; or an
     // actor framed far under its own size because something else in "on" sets the framing: an anchor or other place
     // (no actor comes near its size), or a much bigger actor (under a sixth of its own size)
@@ -1023,13 +1148,17 @@ class Compiler {
   plan() {
     const scenes = this.scenes, shots = this.shots.sort((a, b) => a.t0 - b.t0), fps = this.fps;
     const fx = this.fx.map(e => ({ ...e, t1: e.t1 ?? scenes.find(s => s.id === e.scene)?.t1 })), overlays = [], custom = this.film.custom?.overlays || {};
-    const field = (rec, n, p = {}) => { if (FX_DUR[n] && !ONE_SHOT.has(n)) fx.push({ name: n, t0: rec.t0, t1: rec.t1, scene: rec.id, seed: hash32(`${rec.id}|${n}`), density: p.density ?? p.n ?? 1, color: p.color, fade: false }); };
+    // (kept to some shots: a stretch per run of them, each with its scene's edges, the only place a screen rain fades)
+    const field = (rec, n, p = {}, spans) => { if (FX_DUR[n] && !ONE_SHOT.has(n)) for (const [t0, t1] of spans ?? [[rec.t0, rec.t1]]) fx.push({ name: n, t0, t1, scene: rec.id, seed: hash32(`${rec.id}|${n}`), density: p.density ?? p.n ?? 1, color: p.color, fade: false, ...(spans ? { edges: [rec.t0, rec.t1] } : {}) }); };
+    // an overlay's "shots" (ids of the scene's shots): the stretches of the scene they cover, consecutive shots joined
+    const spansOf = (rec, ids) => rec.shots.filter(s => ids.includes(s.id)).reduce((out, s) => { const l = out[out.length - 1]; if (l && l[1] === s.t0) l[1] = s.t1; else out.push([s.t0, s.t1]); return out; }, []);
     for (const rec of scenes) {
       for (const n of rec.sc.fx || []) field(rec, n);
       (rec.sc.overlays || []).forEach((o, i) => {
         const name = typeof o === 'string' ? o : o?.name, params = (o && typeof o === 'object' && o.params) || {}, def = custom[name];
-        if (def && typeof def.draw === 'function') overlays.push({ scene: rec.id, name, params, layer: def.layer || 'world', def, seed: hash32(`${rec.id}|${name}|${i}`), t0: rec.t0, t1: rec.t1 });
-        else field(rec, name, params);
+        const shots = Array.isArray(o?.shots) ? o.shots : null;
+        if (def && typeof def.draw === 'function') overlays.push({ scene: rec.id, name, params, layer: def.layer || 'world', def, seed: hash32(`${rec.id}|${name}|${i}`), t0: rec.t0, t1: rec.t1, ...(shots ? { shots } : {}) });
+        else field(rec, name, params, shots ? spansOf(rec, shots) : undefined);
       });
       // rim light: start is a mark (film time) or seconds from the scene start
       const r = rec.sc.rim;
@@ -1048,8 +1177,9 @@ class Compiler {
       actorsAt: (t, sceneId = null) => {
         const rec = sceneId ? scenes.find(s => s.id === sceneId) : sceneAt(t); if (!rec) return [];
         const shot = shotAt(t), own = shot?.scene === rec.id ? shot : null, out = [];
-        for (const A of rec.actors.values()) { if (!A.place0) continue; const st = A.state(t, fps); st.shot = own?.id ?? rec.shots[rec.shots.length - 1]?.id ?? null; out.push(st); }
-        return out.sort((a, b) => a.key - b.key);
+        for (const A of rec.actors.values()) { if (!A.place0) continue; const st = A.state(t, fps); st.shot = own?.id ?? rec.shots[rec.shots.length - 1]?.id ?? null; st.z = this.zAt(A, t); out.push(st); }
+        // (farther first: by depth, then by key; DESIGN §10)
+        return out.sort((a, b) => b.z - a.z || a.key - b.key);
       },
       cast: Object.fromEntries(Object.entries(this.film.cast || {}).map(([id, c]) => [id, { rig: c.rig, name: c.name ?? id, scale: c.scale ?? 1 }])),
     };
@@ -1069,6 +1199,12 @@ function gestureProfile(A, g, t) {
     A._gp.set(key, { box: r.bounds.slice(), head: r.head.slice() });
   }
   return A._gp.get(key);
+}
+// The depth of an anchor that declares one (undefined: a place on the stage, or not an anchor: the actor keeps its
+// depth).
+function anchorZ(S, target) {
+  const T = target === undefined ? null : parseTarget(target);
+  return T?.kind === 'name' && S.anchorNames.includes(T.name) ? S.anchor(T.name).z : undefined;
 }
 // Turning by th about (cx, cy) (world): a point, and a box (the box of its turned corners).
 function turnAbout(cx, cy, th) {

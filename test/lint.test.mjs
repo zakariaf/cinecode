@@ -452,6 +452,94 @@ test('a head the frame edge cuts near its eyes, and a sliver of an actor, are ed
   assert.equal(lintPlan(left(0.5), { rules: ['edge-cut'] }).warnings.filter(i => i.shot === 'a3').length, 0);
 });
 
+// The plan with one actor drawn by its rig changed (R: fields over the rig's): a rig with no face is one with only the
+// 'neutral' expression, or one that says faceless: true.
+function rigged(plan, id, R = { expressions: ['neutral'] }) {
+  const p = Object.create(plan), memo = new Map(), as = r => { if (!memo.has(r)) memo.set(r, { ...r, ...R }); return memo.get(r); };
+  p.actorsAt = (t, sc) => plan.actorsAt(t, sc).map(a => (a.id === id ? { ...a, R: as(a.R) } : a));
+  return p;
+}
+
+test('a rig with no face has no head to cut, crown with a halo or hide under a caption; its sliver and framed region are judged by its body', async () => {
+  const { plan } = await broken();
+  // a head cut near its eyes: none for the same tortoise without a face (by its expressions or its own flag)
+  const win = mid(shotOf(plan, 'a1')), { a } = actorAt(plan, (win[0] + win[1]) / 2, 'tortoise'), hh = (a.headBox[2] - a.headBox[0]) / 1.2;
+  const cut = shove(plan, 'tortoise', win, 0, 0.1 * hh - a.head[1]), heads = p => lintPlan(p, { rules: ['edge-cut'], hints: false }).warnings.filter(i => i.shot === 'a1');
+  assert.equal(heads(cut).length, 1);
+  assert.deepEqual(heads(rigged(cut, 'tortoise')).map(i => i.message), []);
+  assert.deepEqual(heads(rigged(cut, 'tortoise', { faceless: true })).map(i => i.message), []);
+  assert.equal(heads(rigged(cut, 'tortoise', { expressions: ['neutral'], faceless: false })).length, 1, 'a rig that says it has a face');
+  // a sliver of it is still a sliver (its body), said without a head
+  const w3 = mid(shotOf(plan, 'a3')), s3 = actorAt(plan, (w3[0] + w3[1]) / 2, 'tortoise').sil.box;
+  const sl = lintPlan(rigged(shove(plan, 'tortoise', w3, -(s3[2] - 0.2 * (s3[2] - s3[0])), 0), 'tortoise'), { rules: ['edge-cut'], hints: false }).warnings.filter(i => i.shot === 'a3');
+  assert.equal(sl.length, 1, JSON.stringify(sl));
+  assert.match(sl[0].message, /only a sliver of tortoise is in frame \(\d+% of it, at the left edge\): /);
+  // the moon over its top is no halo
+  const moon = compile(await loadFilm(moonFilm())), s = moon.shots[0], mw = [s.t0 + 0.3, s.t1 - 0.3], mt = (mw[0] + mw[1]) / 2;
+  const m = actorAt(moon, mt, 'pip'), [d] = skyDiscs(s.set, m.info.camera, s.skyAt(mt), moon.W, moon.H), mh = (m.a.headBox[2] - m.a.headBox[0]) / 1.2;
+  const crowned = shove(moon, 'pip', mw, d.x - m.a.head[0], d.y + d.r + 0.6 * mh - m.a.head[1]);
+  assert.equal(lintPlan(crowned, { rules: ['halo'], hints: false }).warnings.length, 1);
+  assert.deepEqual(lintPlan(rigged(crowned, 'pip'), { rules: ['halo'] }).warnings, []);
+  // a caption over where its face would be is no caption-face
+  const [u0, u1] = mid(shotOf(plan, 'b2')), tm = (u0 + u1) / 2, z = frameInfo(plan, tm).camera.zoom, grown = perturb(plan, u0, u1, x => (x.id === 'hare' ? { ...x, s: x.s * 1.6 } : x));
+  const h = frameInfo(grown, tm).actors.find(x => x.id === 'hare').head, dx = (plan.W / 2 - h[0]) / z, dy = (plan.H / 2 - h[1]) / z;
+  const over = perturb(plan, u0, u1, x => (x.id === 'hare' ? { ...x, s: x.s * 1.6, x: x.x + dx, y: x.y + dy, key: x.y + dy } : x));
+  assert.ok(lintPlan(over, { rules: ['caption-face'] }).warnings.length >= 1);
+  assert.deepEqual(lintPlan(rigged(over, 'hare'), { rules: ['caption-face'] }).warnings, []);
+  // a close-up frames it around its head point, as the camera does: measured the same, named without "head and shoulders"
+  const [f0, f1] = mid(shotOf(plan, 'a4')), huge = perturb(plan, f0, f1, x => (x.id === 'fox' ? { ...x, s: x.s * 2.4 } : x));
+  const sized = p => lintPlan(p, { rules: ['subject-size'] }).warnings.filter(i => i.shot === 'a4').map(i => i.message), faced = sized(huge), bareFox = sized(rigged(huge, 'fox'));
+  assert.ok(faced.length && faced.every(m => /fox's head and shoulders region (fills|is not in frame)/.test(m)), faced.join('\n'));
+  assert.deepEqual(bareFox, faced.map(m => m.replace('head and shoulders region', 'head-point region')));
+});
+
+// ───────────── kept warnings ─────────────
+test('a shot\'s "lint": { "allow", "note" } keeps its warnings of those rules (with the note, no fix tried), never errors; a bad block is a film.json problem', async () => {
+  const film = brokenFilm(), shot = id => film.scenes.flatMap(s => s.shots).find(s => s.id === id);
+  shot('a5').lint = { allow: ['timing'], note: 'a flash of the whole meadow, on purpose' };
+  shot('a1').lint = { allow: ['tangent'], note: 'feet on the frame edge: the grass line' };
+  for (const id of ['a7', 'a8']) shot(id).lint = { allow: ['collision'], note: 'they bump into each other' };
+  const plan = compile(await loadFilm(film));
+  const r = lintPlan(plan, { rules: ['timing', 'collision'] });
+  assert.deepEqual(r.warnings.filter(i => i.shot === 'a5'), []);
+  const k = r.kept.filter(i => i.shot === 'a5');
+  assert.equal(k.length, 1, JSON.stringify(r.kept));
+  assert.equal(k[0].rule, 'timing'); assert.equal(k[0].severity, 'warning'); assert.equal(k[0].note, 'a flash of the whole meadow, on purpose');
+  assert.ok(r.errors.some(i => i.shot === 'a7' && i.rule === 'collision'), 'errors are never kept');
+  assert.ok(r.kept.some(i => i.shot === 'a8' && i.rule === 'collision'), 'a collision while a beat brings them together is a warning: kept');
+  assert.ok(r.warnings.some(i => i.rule === 'timing' && i.shot !== 'a5'), 'other shots keep their warnings');
+  assert.equal(r.stats.byRule.timing, r.warnings.filter(i => i.rule === 'timing').length);
+  // a framing fault kept: no fix tried, so none in its message
+  const win = mid(shotOf(plan, 'a1')), { sil } = actorAt(plan, (win[0] + win[1]) / 2, 'tortoise');
+  const t = lintPlan(shove(plan, 'tortoise', win, 0, plan.H - 3 - sil.box[3]), { rules: ['tangent'] });
+  assert.deepEqual(t.warnings, []);
+  assert.equal(t.kept.length, 1);
+  assert.match(t.kept[0].message, /^tortoise's outline ends \d px above the bottom edge of the frame \(a tangent\)( \([\d.–]+ s\))?$/);
+  // the report: lint.json lists them apart, lint.jpg draws them
+  const dir = mkdtempSync(join(tmpdir(), 'cinecode-kept-'));
+  try {
+    const out = await writeLintReport(plan, r, dir);
+    const j = JSON.parse(readFileSync(out.json, 'utf8'));
+    assert.equal(j.counts.kept, r.kept.length); assert.equal(j.counts.warnings, r.warnings.length);
+    assert.equal(j.kept[0].note, r.kept[0].note);
+    assert.equal(out.tiles, r.errors.length + r.warnings.length + r.kept.length);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+  // malformed blocks: every problem with its path
+  const bad = brokenFilm(), sh = bad.scenes[0].shots;
+  sh[0].lint = { allow: ['tangent', 'floating', 'nope'] };
+  sh[1].lint = { allow: 'tangent', note: 'x', why: 1 };
+  sh[2].lint = ['tangent'];
+  const p2 = compile(await loadFilm(bad));
+  assert.throws(() => lintPlan(p2), e => {
+    assert.equal(e.name, 'ValidationError');
+    const m = e.problems.map(q => q.message);
+    for (const re of [/^scenes\[0\]\.shots\[0\]\.lint\.allow\[1\]: "floating" is an error: errors are never kept/, /^scenes\[0\]\.shots\[0\]\.lint\.allow\[2\]: unknown rule "nope"/,
+      /^scenes\[0\]\.shots\[0\]\.lint\.note: say why/, /^scenes\[0\]\.shots\[1\]\.lint\.why: unknown field/, /^scenes\[0\]\.shots\[1\]\.lint\.allow: must be a non-empty array/, /^scenes\[0\]\.shots\[2\]\.lint: must be an object/]) assert.ok(m.some(x => re.test(x)), `${re} in ${m.join('\n')}`);
+    assert.equal(m.length, 6, m.join('\n'));
+    return true;
+  });
+});
+
 // ───────────── the moon on a head ─────────────
 // (the hill's sky is open: its moon shows over the slope in a low full shot, where a meadow's trees hide it)
 function moonFilm(time = 'night') {

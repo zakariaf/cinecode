@@ -2,7 +2,8 @@
 
 When a film needs something the engine doesn't have (a comet, mist that parts, a glow around a lantern, a new sound,
 a new animal or place), it goes in the film's own `films/<slug>/custom.mjs`. cinecode loads it together with
-`film.json`; `check` reports `, custom.mjs` when it does, and every problem in it as a check error.
+`film.json`; `check` reports `, custom.mjs` when it does, and every problem in it as a check error. Look at the
+[built-in effects](#built-in-effects) first: they are used the same way.
 
 ```js
 // films/<slug>/custom.mjs: every export is optional
@@ -40,9 +41,40 @@ import { grade } from 'cinecode/engine/film/grade.mjs';    // any other engine f
 | `films/<slug>/kits/` | `export default (params) => makeSet({ … })` | the file name (see sets.md, "Adding a kit") |
 | `cinecode/effects/`, `cinecode/rigs/`, `cinecode/kits/` | the same, shared by every film of a project | the nearest `cinecode/` folder above the film, up to the project root (the folder with `.git`) |
 
-Files whose name starts with `_` are skipped (helpers they import). Each kind has a gate that checks it the way the
+Files whose name starts with `_` are skipped (helpers they import). A rig, kit or effect named like a built-in one
+replaces it for the whole film: `check` marks the file in its list (`cinecode/effects/rows.mjs (replaces the built-in
+custom beat "sizerow")`) and adds the same note to the warnings, so give your own pieces names of their own unless you
+mean to replace one. Each kind has a gate that checks it the way the
 engine will use it and draws review images: `cinecode verify-effect <film> [names…]`, `cinecode verify-rig <file>`,
 `cinecode verify-kit <file>`; the `build-effect`, `build-rig` and `build-kit` skills walk through them.
+
+## Built-in effects
+
+These come with the engine (`engine/effects/`), as custom beats and overlays exactly like a film's own: name one in
+`film.json` and the film gets it. Each file's header lists its params; the skill's
+`node .claude/skills/cinecode/scripts/inventory.mjs effects` prints them all.
+
+| effect | as | layer | draws |
+|---|---|---|---|
+| `skydot` | overlay | `grade` | a planet seen with the naked eye: a steady point of light with a soft glow at a world point (`x`, `y`) or an anchor (`at`) |
+| `sunglow` | overlay or custom beat | `grade` | the Sun's glow, at a `planet` actor with body `sun` (`who`) or at a point of the frame (`x`, `y`, fractions, off the frame too) |
+| `starstream` | custom beat | `sky` | travelling through space: star streaks streaming out of a vanishing point (`fx`, `fy`) |
+| `eyepiece` | custom beat | `screen` | the view through a telescope: black outside a round field (`r`), or the field opening to fill the frame (`open`) |
+| `lightpulse` | custom beat | `grade` | light travelling from the Sun (`from`) to a planet (`to`), flashing on its lit limb |
+| `orbit` | custom beat | `back` | a planet's orbit as a dotted arc drawing itself in around a sun off to one `side` |
+| `sizerow` | custom beat | `depth` | small worlds (`body`, default Earths) popping in across a planet's equator, to true scale |
+| `moonlets` | custom beat | `depth` | a planet's many moons appearing and going round in its ring plane, passing behind and in front of it |
+| `debris` | custom beat | `depth` | chunks of ice and rock drifting past at many depths: a dolly flies through them |
+
+```json
+{ "do": "custom", "name": "eyepiece", "at": 0, "dur": 3, "scope": "shot" }
+{ "do": "custom", "name": "sizerow", "who": "saturn", "dur": 4.4, "with": "prev", "hold": false }
+"overlays": [{ "name": "skydot", "params": { "x": 1640, "y": 480, "size": 4 } }]
+```
+
+Film code can draw a world too: `import { drawBody, globeOf, atDepth, radiusOf } from 'cinecode/paint/planets'` (the
+`planet` rig's painter, `drawBody(ctx, 'mars', cx, cy, R, { t })`; `globeOf(api, who)`, a planet actor's globe on
+screen at its depth; `atDepth(ctx, api, z)`, the world transform of a depth; `radiusOf(body)`, true radii in km).
 
 ## Two rules
 
@@ -80,7 +112,15 @@ export const custom = {
 ```
 
 - The beat lasts `dur` seconds (default 1) and takes that time in the beat timeline like any other beat
-  ([storyboard.md](storyboard.md#timing-rules)): use `with` / `after` to lay it over other beats.
+  ([storyboard.md](storyboard.md#timing-rules)): use `with` / `after` to lay it over other beats. Laid `"with":
+  "prev"` over a line, a beat longer than the line holds the next line back until it ends; `"hold": false` plays it
+  for its whole `dur` while the next beats go on (the shot doesn't wait for it either).
+- It lasts its whole `dur`, on into the later shots of its scene and, from the scene's last shot, into the fading
+  picture of a dissolve; the plan warns when it does that without saying so (`warnings.mjs`, with the shots and the
+  frames). `"scope": "shot"` ends it at its shot's cut (drawn only in its own shot, until its end; its `sfx` from the
+  cut on are dropped; `u` still runs over the full `dur`); `"scope": "scene"` keeps it on and silences the warning.
+  Every field of the beat arrives in `api.params`, and the engine reads `scope` and `hold` itself: don't give your
+  own params those names.
 - Every field of the beat, and of its `params` object, arrives in `api.params` (`api.params.who` above).
 - `sfx` entries are `{ at, name, gain, pan, params }`; `name` is a built-in effect or one of your `sounds`.
 - A beat naming a custom effect that `custom.mjs` doesn't have is a warning, not an error: it only takes its time.
@@ -102,13 +142,17 @@ export const overlays = {
 };
 ```
 
-A scene's `overlays` list holds custom overlay names or the built-in fields (`leaves`, `rain`, `fireflies`, `motes`,
-`mist`), as a name or `{ "name", "params" }`; an unknown name is a check error. The overlay's `params` arrive in
-`api.params`.
+A scene's `overlays` list holds custom overlay names, built-in overlays (`skydot`, `sunglow`) or the built-in fields
+(`leaves`, `rain`, `fireflies`, `motes`, `mist`), as a name or `{ "name", "params", "shots" }`; an unknown name is a
+check error. The overlay's `params` arrive in `api.params`. With `"shots": ["2.1", "2.4"]` (a non-empty list of the
+scene's shot ids) it draws only in those shots, including the fading picture of a dissolve out of the scene when its
+last shot is listed; a built-in field covers each run of consecutive listed shots.
 
 An overlay can follow an actor through the scene, which is how a reskinned rig gets what it lacks (a firefly is a
 butterfly plus a glow, [cast.md](cast.md)): on the `grade` layer, take `api.actor(id)` (null while it is off stage),
-its world `box`, and draw at `api.toScreen` of its centre, sized by `api.cam.zoom` × the actor's `s`.
+its world `box`, and draw at `api.toScreen` of its centre, sized by `api.cam.zoom` × the actor's `s`. An actor off
+the stage (`api.actor(id).z` not 0) is drawn at its depth's scale: place it with `api.project([x, y, a.z])`, which
+returns its screen point and its scale ([depth](#depth)).
 
 ## Props
 
@@ -124,6 +168,9 @@ The engine has no props: an object the story turns on is built from what it has.
   overlay that draws the object at its `box`. `api.actor` still returns it at opacity 0 (its `alpha` is 0), and the
   camera frames it with `on`, so a shot can follow the kite. There is no hidden start: the stand-in is drawn in the
   first frame of its first shot (and in the opening card's dissolve into it), so draw the object over it.
+- **Part of something big** (the edge of a planet's rings, a tree's crown, a roof): no stand-in is needed to frame
+  it closer. A `zoom` above 1 crops into a subject with no face, a camera `focus` puts any point of the subjects at the
+  frame's centre, and `on` takes a point of the set (`"x:1840,y:886"`): [storyboard.md](storyboard.md#framing-part-of-a-subject).
 - **Held, or on a string**: draw it from the human's hand. `api.actor` gives no hand point, but the human rig's own
   `draw` with no canvas returns its anchors in world coordinates without drawing (not turned for a slope). The
   animal rigs return only `head`, `mouth` and `bounds`: take a paw from the `box`.
@@ -147,6 +194,7 @@ Overlays and custom beats name the layer they draw on. In the order a frame is d
 |---|---|---|
 | `sky` | after the sky, before any land (the horizon is at `api.toScreen([x, api.set.horizon])`) | screen pixels |
 | `back` | after the set's back layers, before props and actors | world |
+| `depth` | run before the set is drawn; draws only by handing pieces to `api.item([x, y, z], draw)`, which the frame sorts with the props and actors by depth ([depth](#depth)) | world, at each piece's depth |
 | `world` | after props, actors and the built-in world effects (the default) | world |
 | `front` | after the set's front layers (foreground grass, branches) | world |
 | `grade` | after the time-of-day grade and the rim light: emitted light (a lamp, a comet) goes here, or the night grade turns it grey | screen pixels |
@@ -167,7 +215,7 @@ Overlays get `draw(ctx, api)`, custom beats `draw(ctx, u, api)`. `api` holds:
 | `st`, `su` | seconds since the scene started, and the scene's progress 0..1 |
 | `lt` | seconds since the shot started |
 | `scene`, `shot` | the plan's scene and shot records (`id`, `t0`, `t1`, …) |
-| `set` | the set: `set.anchor(name)`, `set.scaleAt(x, y)`, `set.inWater(x, y)`, `set.groundAt(x)` (a ridge set's ground line; null on the others), `set.horizon` (world y), `set.props` (each prop's `id`, `bounds` `[x0, y0, x1, y1]` and `solid` footprint), … |
+| `set` | the set: `set.anchor(name)`, `set.scaleAt(x, y)`, `set.inWater(x, y)`, `set.groundAt(x)` (a ridge set's ground line; null on the others), `set.horizon` (world y), `set.props` (each prop's `id`, `bounds` `[x0, y0, x1, y1]` and `solid` footprint), `set.lens` (for depth), … |
 | `cam` | the camera: `{ cx, cy, zoom }`, the world point at the centre of the frame and the zoom |
 | `W`, `H` | the frame size in pixels |
 | `plan` | the whole compiled plan |
@@ -175,13 +223,45 @@ Overlays get `draw(ctx, api)`, custom beats `draw(ctx, u, api)`. `api` holds:
 | `params` | the overlay's params, or the beat's fields and params |
 | `seed` | a seed for this overlay in this scene, or for this beat |
 | `name` | the overlay's or beat's name |
-| `actor(id)` | an actor on stage: its draw state (`x`, `y`, `s` scale, `face` ±1, `alpha` 0..1, `st` with pose, expression and talk, `asleep`, `speaking`, `R` its rig, …) plus `head` and `mouth` points and its `box` `[x0, y0, x1, y1]`, all in world coordinates; `null` while it is off stage (not yet entered, or exited). An actor faded to 0 is still returned. The human's hands: see [props](#props) |
+| `actor(id)` | an actor on stage: its draw state (`x`, `y`, `z` its depth, `s` scale, `face` ±1, `alpha` 0..1, `st` with pose, expression and talk, `asleep`, `speaking`, `R` its rig, …) plus `head` and `mouth` points and its `box` `[x0, y0, x1, y1]`, all in world coordinates; `null` while it is off stage (not yet entered, or exited). An actor faded to 0 is still returned. The human's hands: see [props](#props) |
 | `anchor(name)` | an anchor of the set: `{ x, y, s, type, … }` |
-| `toScreen([x, y])`, `toWorld([x, y])` | map a point between world and screen pixels |
+| `toScreen([x, y])`, `toWorld([x, y])` | map a point between world and screen pixels (on the stage) |
+| `project([x, y, z])` | a world point at depth z → `[sx, sy, s, a]`: its screen point, screen px per world px there, and its near fade (0: don't draw it) |
+| `item([x, y, z], draw)` | on the `depth` layer only: hand the frame a piece to draw in the depth sort ([depth](#depth)) |
 | `silhouette(ctx, actor)` | draw an actor (an id, or a state from `plan.actorsAt`) in screen space exactly as the frame draws it (slope pitch, turn squash, wading cut), without shadows; use it for masks and cut-outs instead of calling the rig yourself |
 
 Custom beats also get `u` (0..1 across the beat), `bt` (seconds since the beat started), `dur` and `beat` (the beat
 object itself).
+
+## Depth
+
+An actor, an anchor or an effect piece can be off the stage: `z` world px behind it (positive) or in front of it
+(negative), drawn at its depth's scale and sorted by depth before ground y
+([storyboard.md](storyboard.md#depth)). `api.actor(id).z` is an actor's depth; `api.set.lens` the kit's lens.
+
+- **To place something at an actor's depth** on any layer, `api.project([x, y, z])` → `[sx, sy, s, a]`: the screen
+  point, its scale (screen px per world px; the stage's is `api.cam.zoom`) and its near fade (0 when the camera has
+  come too near: don't draw it). `atDepth(ctx, api, z)` from `cinecode/paint/planets` sets ctx to the world transform
+  of a depth.
+- **To be hidden by what is nearer, and hide what is farther**, draw on the `depth` layer. It runs before the set is
+  drawn and draws only through `api.item([x, y, z], draw)`: each piece is sorted by z (farther first), then by its y,
+  with the props and actors, and its `draw(ctx, P)` gets ctx in the world transform of its depth (globalAlpha = its
+  fade) and `P = { x, y, s, z, a }` (its screen point, scale, depth and fade). Anything drawn straight on ctx there
+  lands behind the set's layers, and `api.item` on another layer throws.
+
+```js
+export const custom = {
+  pebbles: {
+    layer: 'depth',
+    draw(ctx, u, api) {
+      const a = api.actor(api.params.who); if (!a) return;
+      for (const [dx, dz] of [[-80, -300], [60, 400]]) {           // one in front of the actor, one behind it
+        api.item([a.x + dx, a.y - 40, (a.z || 0) + dz], c => { c.fillStyle = '#9a8f80'; c.beginPath(); c.arc(a.x + dx, a.y - 40, 12, 0, 7); c.fill(); });
+      }
+    },
+  },
+};
+```
 
 ## Sounds
 

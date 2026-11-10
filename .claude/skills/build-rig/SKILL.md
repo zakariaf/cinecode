@@ -5,17 +5,18 @@ description: Build a new cinecode rig (a character or a prop the camera frames: 
 
 # Build a rig
 
-Use this after the cinecode skill's "reuse, adapt, build" step decided that nothing built in reads as the thing. A rig is one file that default-exports the rig; cinecode registers it by its `kind` when the film loads, and from then on it is cast, staged, framed, lit, linted and sheeted exactly like a built-in.
+Use this after the cinecode skill's "reuse, adapt, build" step decided that nothing built in reads as the thing (the built-in rigs include things too: `planet` for any planet, moon or the Sun, `telescope`; `inventory.mjs cast` lists them all). A rig is one file that default-exports the rig; cinecode registers it by its `kind` when the film loads, and from then on it is cast, staged, framed, lit, linted and sheeted exactly like a built-in.
 
 - One film: `films/<slug>/rigs/<kind>.mjs`. Several films of the project: `cinecode/rigs/<kind>.mjs` at the project root.
+- Give it a `kind` of its own: one named like a built-in rig replaces that rig for the whole film (`check` lists the file with "replaces the built-in rig …").
 - CINECODE below is cinecode's own folder, `${CLAUDE_SKILL_DIR}/../../..`. The CLI is `cinecode` (if it isn't on the PATH: `node ${CLAUDE_SKILL_DIR}/../../../bin/cinecode.mjs`).
 
 ## Steps
 
-1. **Pick a model to learn from** and read it: four legs `CINECODE/engine/cast/fox.mjs` (or `badger`, `deer`: `leg()`, `quadFeet()`), a bird `songbird.mjs` or `owl.mjs` (perching, `fly` gait), something tiny `mouse.mjs` or `beetle.mjs`, a prop `CINECODE/films/strawberry-race/rigs/strawberry.mjs` (a pose per state, `expressions: ['neutral']`). Draw it: `cinecode cast-sheet fox -o out/fox.jpg` and look.
+1. **Pick a model to learn from** and read it: four legs `CINECODE/engine/cast/fox.mjs` (or `badger`, `deer`: `leg()`, `quadFeet()`), a bird `songbird.mjs` or `owl.mjs` (perching, `fly` gait), something tiny `mouse.mjs` or `beetle.mjs`, a prop `CINECODE/films/strawberry-race/rigs/strawberry.mjs` (a pose per state, `expressions: ['neutral']`) or `CINECODE/engine/cast/telescope.mjs`; a thing whose sizes come from its params `CINECODE/engine/cast/planet.mjs` (`sizes(params)`, `upright`, `noShadow`). Draw it: `cinecode cast-sheet fox -o out/fox.jpg` and look.
 2. **Start from the starter**, which passes the gate: `mkdir -p films/<slug>/rigs && cp ${CLAUDE_SKILL_DIR}/starter.mjs films/<slug>/rigs/<kind>.mjs`. Set `kind` (the file name), `label`, then run the gate once to see a pass.
 3. **Reshape it** pose by pose: body and head shapes, limbs, the face, colours as `params` (so the cast can recolour it), then `height`/`headHeight`/`width` to match the drawing. Rerun the gate after each big change.
-4. **Gate**: `cinecode verify-rig films/<slug>/rigs/<kind>.mjs` until every check passes, then **Read both review images** it writes to `films/<slug>/out/verify/` and fix what looks wrong (below). Both are required before the rig goes into `film.json`.
+4. **Gate**: `cinecode verify-rig films/<slug>/rigs/<kind>.mjs` until every check passes, then **Read both review images** it writes to `out/verify/` beside the folder that holds the rig: `films/<slug>/out/verify/` for a film's rig, `cinecode/out/verify/` for a project's (the gate prints both paths). Fix what looks wrong (below). Both are required before the rig goes into `film.json`.
 5. **Use it**: `"cast": { "rex": { "rig": "<kind>", "params": { … } } }`. `cinecode check` lists `rigs/<kind>.mjs`; then sheet and strip the shots with it (`cinecode sheet films/<slug> --shots=1.3@0.2,1.3@0.5,1.3@0.8 --cols=3`).
 
 ## The contract
@@ -30,9 +31,13 @@ Use this after the cinecode skill's "reuse, adapt, build" step decided that noth
 | `poses` | named pose objects, **numbers only**, `stand` required; give `sit`, `sleep`, `alert` (the `sit`/`sleep`/`wake` beats use them), `lie`, `perch` when it can. **Every pose carries every key** (a key one pose lacks pops when a gesture blends into it). |
 | `gaits`, `speeds`, `stride`, `steps` | `walk` (and `run`; `fly` for a flier) as `phase => pose`, phase 0..1 per stride, looping (phase 0 = phase 1). `speeds` (units per second) and `stride` (units per cycle) at scale 1. `footAt()` plants a foot and sweeps it back one stride so feet don't slide; `feet(pose)` → `[[x, y, planted], …]` and `steps` (phases where a foot lands) make footsteps and the slide check work. |
 | `gestures` | `gest(dur, [[u, deltas], …])` (starts and ends on its base pose), or `{ dur, keys, at(u, base) }`; `jumpAt()` for jumps (sets `lift`). |
-| `expressions` | default all eleven (neutral, happy, laugh, sad, surprised, angry, sleepy, smug, worried, scared, determined); `['neutral']` for a thing with no face (no talk or blink checks). |
+| `expressions` | default all eleven (neutral, happy, laugh, sad, surprised, angry, sleepy, smug, worried, scared, determined); `['neutral']` for a thing with no face (no talk or blink checks; the camera crops into it with a `zoom` above 1, and lint's face rules skip it). |
 | `flies`, `perch` | a flier needs `flies: true` and a `fly` gait (it can hover with `"height"`); `perch: true` stands on branches. |
-| optional | `shadowW` (ground shadow half-width), `mount(pose, params)` (a riding point), `lookTime`, `hangPoses`, `breathPeriod`. |
+| `sizes(params)` | → `{ height, headHeight, width, speeds, stride }` when they depend on the params (a body preset, an age); the engine frames, routes and lints each actor by it. Without it a `size` param scales them. |
+| `upright` | `true`: the drawing stays vertical on a slope; `false`: it pitches with the ground. Default: animals pitch, the human and the fliers stay upright. |
+| `noShadow`, `shadowW`, `shadowA` | `true`: no contact shadow under it; that shadow's half-width in units (default `width` / 2); its opacity (default 0.26). The sun's cast shadow is the frame's (none at a perch, at night, or on a set without ground). |
+| `faceless` | `true` / `false`: whether it has a face, when its `expressions` alone would say otherwise (default: no face when only `neutral`). |
+| optional | `mount(pose, params)` (a riding point), `lookTime` (s a look takes), `feet(pose)` and `steps` (see `gaits`), `hangPoses` (poses whose legs hang below the ground on purpose), `breathPeriod`. |
 
 `paint(T, pose, F, o)` draws in **local units**: origin = the contact point (feet), +x forward (mirrored for `face: -1` by the engine, never by you), ground y = 0, up is negative y. `T` records the bounds of everything filled or stroked: draw only through `T`. `F` is the face: `F.eye` (`open`, `wide`, `happy`), `F.lid`, `F.tilt`, `F.cheek`, `F.browY`, `F.browT`, `F.smile`, `F.open` (mouth, follows the voice), `F.round`, `F.look` (−1..1 head turn), `F.pitch` (−1..1 head up/down; `pitchPose()` applies it), `F.breath`. `o.P` params, `o.t` scene time (ear and tail sway), and set `o.out.head = T.map(x, y)` and `o.out.mouth = T.map(x, y)`: the camera composes close-ups on the head, captions avoid it, the mouth is where talking happens.
 

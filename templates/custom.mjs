@@ -13,8 +13,10 @@ import { rng } from 'cinecode/lib';
 
 // ───────────── custom beats ─────────────
 // Used in film.json as { "do": "custom", "name": "glints", "dur": 1.6, "who": "pip" }. The beat lasts `dur` seconds
-// (default 1). draw(ctx, u, api) is called on every frame of the beat; u goes 0 → 1 across it. Every field of the
-// beat (and of its "params" object) arrives in api.params. `sfx` lists sounds to play at seconds from the beat's start.
+// (default 1), on into the next shots if its shot ends first ("scope": "shot" ends it at the cut), and the next beat
+// waits for it ("hold": false: it doesn't). draw(ctx, u, api) is called on every frame of the beat; u goes 0 → 1
+// across it. Every field of the beat (and of its "params" object) arrives in api.params. `sfx` lists sounds to play at
+// seconds from the beat's start. The engine has built-in effects too (docs/effects.md): use them by name.
 export const custom = {
   glints: {
     layer: 'world',                       // world coordinates, drawn after the actors (see docs/effects.md for layers)

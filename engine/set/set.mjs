@@ -1,16 +1,27 @@
 // A set: painted parallax layers, depth-sorted props, anchors, walkable ground, routing and a sky.
 // Everything an actor can touch (ground, stump tops, branches, hollows, stones, water) is defined once,
 // as data, and both the painting and the staging read that same data.
+// Depth (DESIGN §10): S.lens (the kit's `lens`, default LENS), an anchor's `z` (its depth off the stage), and layers
+// drawn scaled by a camera's depth (cam.z) and faded as it reaches them.
 import { rng, clamp, lerp, canvas } from '../core/lib.mjs';
 import { branchTop } from '../paint/nature.mjs';
 import { inkSilhouette } from '../paint/brush.mjs';
 import { SKY_TIMES, SKY_W, SKY_H, skyCanvases, skyHaze } from '../paint/sky.mjs';
+import { declaredTime, declareTime, timeClash } from '../film/grade.mjs';
 
 export { SKY_TIMES };
 export const MIN_ZOOM = 0.6;                       // at 1920×1080
 export const MAX_VIEW = { w: 1920 / MIN_ZOOM, h: 1080 / MIN_ZOOM };   // widest world rect a camera may show
 export const INK_FADE = 24;                        // a prop's silhouette ink fades out over this many units above its inkFloor
 export const CLOSE_PX = 24e6;                      // the most pixels one close sprite of a prop may hold (~96 MB)
+// Depth (DESIGN §10): a camera at depth 0 stands LENS world px in front of the stage (z = 0; a kit's `lens` overrides
+// it: about a 45° view across a 1920-px frame at zoom 1). Whatever is nearer the lens than NEAR × the lens is not drawn;
+// it fades out from NEAR_FADE × the lens (nearFade: 0..1 at distance d from the lens D, eased).
+export const LENS = 2304, NEAR = 0.1, NEAR_FADE = 0.25;
+export const nearFade = (d, D) => { const u = clamp((d - NEAR * D) / ((NEAR_FADE - NEAR) * D)); return u * u * (3 - 2 * u); };
+// A layer with parallax k seen from a camera at depth c (lens D): its scale about the frame centre relative to the
+// stage, r, and its near fade, a (k = 0: the sky, at infinity).
+export const layerDepth = (k, c, D) => ({ r: (D - c) / (D - k * c), a: k > 0 ? nearFade(D / k - c, D) : 1 });
 
 // The sprite resolution a prop drawn at screen scale `scale` (device px per world unit) uses: its base `res` until the
 // sprite would be enlarged more than 1.25×, then the smallest of res·2, res·4, … (and `max` itself) that is not, up to
@@ -69,6 +80,43 @@ export function clampCamera(S, cam, W = 1920, H = 1080) {
   return out;
 }
 
+// ───────────── times of day ─────────────
+// A kit not under Earth's sky declares its own times (makeSet's `times`), and those are then all the times it has:
+// { name: { grade, sun, haze } }, each with a painter in `skies` (an empty entry for one of Earth's eight, SKY_TIMES,
+// which keeps the engine's light and sky).
+//   grade: 'neutral' (default: the picture as painted, under the house vignette), one of Earth's eight (its grade), or
+//          { sl, mul, vig, con } (as grade.mjs GR: soft-light wash rgba, multiply tint rgb, vignette, contrast ≥ 1;
+//          what it leaves out is neutral)
+//   sun:   null (default: no sun, so no cast shadows), one of Earth's eight (its sun), or { len, a } (as grade.mjs SUN)
+//   haze:  [r, g, b], the colour far layers fade toward (default none: they are drawn as painted)
+// The frame looks a time's light up by its name (grade.mjs), so a name means one light in the whole film: two kits may
+// declare the same name only with the same light (the same once its defaults are filled in). A set's times are
+// declared (declareTime) once the whole set has passed its checks.
+// A set with no ground to shade (space: makeSet's `groundShadows: false`) takes no shadow at any time: no figure, flier
+// or prop casts one, and no figure draws its contact shadow (frame.mjs).
+const isRGB = (v, n) => Array.isArray(v) && v.length === n && v.every(c => Number.isFinite(c) && c >= 0 && c <= 255);
+const GRADE_OK = { sl: v => Array.isArray(v) && v.length === 4 && isRGB(v.slice(0, 3), 3) && v[3] >= 0 && v[3] <= 1, mul: v => isRGB(v, 3), vig: v => Number.isFinite(v) && v >= 0 && v <= 1, con: v => Number.isFinite(v) && v >= 1 };
+function declareTimes(id, times, skies) {
+  const names = Object.keys(times);
+  if (!names.length) throw new Error(`set ${id}: times: declare at least one time, or leave times out for Earth's eight`);
+  for (const name of names) {
+    const sp = times[name], bad = msg => { throw new Error(`set ${id}: times.${name}: ${msg}`); };
+    if (!sp || typeof sp !== 'object' || Array.isArray(sp)) bad('must be an object { grade, sun, haze }');
+    for (const k of Object.keys(sp)) if (!['grade', 'sun', 'haze'].includes(k)) bad(`unknown field "${k}" (grade, sun, haze)`);
+    if (SKY_TIMES.includes(name)) { if (Object.keys(sp).length) bad(`"${name}" is one of Earth's times: its light is the engine's (give yours a name of its own)`); continue; }
+    if (typeof skies?.[name] !== 'function') bad(`no sky painter (give the kit skies.${name}: (ctx, rnd, w, h) => …)`);
+    const { grade: g, sun, haze } = sp;
+    if (!(g == null || g === 'neutral' || SKY_TIMES.includes(g) || (g && typeof g === 'object' && !Array.isArray(g) && Object.entries(g).every(([k, v]) => Object.hasOwn(GRADE_OK, k) && GRADE_OK[k](v)))))
+      bad(`grade must be 'neutral', one of ${SKY_TIMES.join(', ')}, or { sl: [r, g, b, a], mul: [r, g, b], vig, con }`);
+    if (!(sun == null || sun === false || SKY_TIMES.includes(sun) || (sun && typeof sun === 'object' && Number.isFinite(sun.len) && sun.len >= 0 && Number.isFinite(sun.a) && sun.a >= 0 && sun.a <= 1)))
+      bad(`sun must be null (no sun), one of ${SKY_TIMES.join(', ')}, or { len, a } (len ≥ 0, a 0..1)`);
+    if (!(haze == null || isRGB(haze, 3))) bad('haze must be [r, g, b] (0..255)');
+    const by = timeClash(name, sp);
+    if (by) bad(`"${name}" is already declared with another light by set ${by} (a time's name means one light in a film)`);
+  }
+  return names;
+}
+
 // ───────────── the set ─────────────
 export function makeSet(def) {
   const { id, W, H, refX, refY } = def;
@@ -96,14 +144,18 @@ export function makeSet(def) {
     region = bandPoly(x0, x1, x => walk.ground(x) - 3, x => walk.ground(x) + band + 3, 12);
   }
   const regionBox = region ? polyBox(region) : { ...area };
+  const times = def.times ? declareTimes(id, def.times, def.skies) : null;     // the kit's own times, or Earth's
+  if (times && def.defaultSky && !times.includes(def.defaultSky)) throw new Error(`set ${id}: defaultSky "${def.defaultSky}" is not one of its times (${times.join(', ')})`);
+  if (def.groundShadows !== undefined && typeof def.groundShadows !== 'boolean') throw new Error(`set ${id}: groundShadows must be true or false (false: no ground to shade, so no figure, flier or prop throws a shadow)`);
 
   const S = {
     id, def, W, H, refX, refY, area, view, bounds: { ...view }, light, walk,
     horizon: def.horizon, laneY: def.laneY, baseS: def.baseS,
     ambience: { day: null, night: null, ...(def.ambience || {}) },
-    skyNames: Object.keys(def.skies || {}).length ? Object.keys(def.skies) : SKY_TIMES.slice(),
-    defaultSky: def.defaultSky || 'morning',
+    skyNames: times ? times.slice() : Object.keys(def.skies || {}).length ? Object.keys(def.skies) : SKY_TIMES.slice(),
+    defaultSky: def.defaultSky || (times ? times[0] : 'morning'),
     props, stones, region, ridge, built: false, L: [],
+    lens: def.lens ?? LENS,
   };
 
   // ── perspective and ground ──
@@ -151,7 +203,7 @@ export function makeSet(def) {
     if (y == null) y = S.laneAt(x);
     const depth = a.depth ?? (type === 'ground' ? y : prop ? (prop.base ?? prop.y) + 1 : y);
     const s = a.s ?? S.scaleAt(x, type === 'ground' ? y : depth);
-    return { name, x, y, s, type, depth, ...(a.clip ? { clip: a.clip } : {}), ...(a.prop ? { prop: a.prop } : {}), ...(a.face ? { face: a.face } : {}), ...(a.k != null ? { k: a.k } : {}), surface: a.surface || (type === 'ground' ? S.surfaceAt(x, y) : type === 'perch' ? 'wood' : 'stone'), ...out };
+    return { name, x, y, s, type, depth, ...(a.clip ? { clip: a.clip } : {}), ...(a.prop ? { prop: a.prop } : {}), ...(a.face ? { face: a.face } : {}), ...(a.k != null ? { k: a.k } : {}), ...(a.z ? { z: a.z } : {}), surface: a.surface || (type === 'ground' ? S.surfaceAt(x, y) : type === 'perch' ? 'wood' : 'stone'), ...out };
   };
   S.anchors = () => S.anchorNames.map(S.anchor);
 
@@ -360,10 +412,12 @@ export function makeSet(def) {
     return 0;
   };
   const hazeList = h => (!h ? [] : typeof h === 'string' ? [[h, 1]] : h);
+  // the haze colour of a crossfade and the share of it that hazes (a time a kit declares without a haze has none)
+  const hazeOf = name => { const d = declaredTime(name); return d ? d.haze : skyHaze(name).split(',').map(Number); };
   const mixHaze = hz => {
-    let r = 0, g = 0, b = 0, n = 0;
-    for (const [name, a] of hz) { if (!(a > 0)) continue; const [cr, cg, cb] = skyHaze(name).split(',').map(Number); r += cr * a; g += cg * a; b += cb * a; n += a; }
-    return n ? [r / n, g / n, b / n] : [255, 255, 255];
+    let r = 0, g = 0, b = 0, n = 0, all = 0;
+    for (const [name, a] of hz) { if (!(a > 0)) continue; all += a; const c = hazeOf(name); if (!c) continue; const [cr, cg, cb] = c; r += cr * a; g += cg * a; b += cb * a; n += a; }
+    return n ? [r / n, g / n, b / n, n / all] : [255, 255, 255, all ? 0 : 1];
   };
   // A layer's paint times a colour (rgb 0..255; its alpha kept, exactly), blurred like the layer: cached per colour and blur.
   const shaded = (ly, rgb, px) => {
@@ -385,9 +439,15 @@ export function makeSet(def) {
     const t = opts.t ?? 0, haze = hazeList(opts.haze), hazeK = opts.hazeAmount ?? 0.55;
     for (const ly of S.L) {
       if ((!!ly.front || ly.k > 1) !== front) continue;           // k > 1 layers are nearer than the ground: front
+      if (opts.layers && !opts.layers(ly)) continue;              // (some only: the frame's depth sort draws a layer on its own)
+      // depth (DESIGN §10): a camera moved through depth (cam.z) draws the layer (at z = D(1/k − 1)) scaled about the
+      // frame centre by (D − z)/(D − k·z), the p of its depth, fading it out as the camera comes near it
+      const kd = cam.z ? layerDepth(ly.k, cam.z, cam.lens ?? S.lens) : null;
+      if (kd && kd.a <= 0) continue;
+      if (kd) { ctx.save(); ctx.translate(cam.cx, cam.cy); ctx.scale(kd.r, kd.r); ctx.translate(-cam.cx, -cam.cy); ctx.globalAlpha *= kd.a; }
       const dx = (cam.cx - refX) * (1 - ly.k), dy = (cam.cy - refY) * (1 - ly.k) * 0.4, b = dofPx(ly, opts.dof);
       const img = b ? blurred(ly, b) : ly.c, w = ly.c.width / ly.res, h = ly.c.height / ly.res;
-      const hz = !front && ly.k < 1 && haze.length ? haze : null;
+      const hm = !front && ly.k < 1 && haze.length ? mixHaze(haze) : null, hz = hm && hm[3] > 0 ? hm : null;
       // a shade (ly.shade(S) → { rgb, a } | null: a far range by night): the layer's own paint times rgb, crossfaded in
       // by a, so it never darkens what lies behind the layer and a blurred edge takes it like the rest
       const sh = ly.shade?.(S), sa = sh ? clamp(sh.a ?? 0) : 0;
@@ -400,16 +460,27 @@ export function makeSet(def) {
         sx.setTransform(1, 0, 0, 1, 0, 0);
         if (hz) {
           // (the haze is shaded with the paint, as if laid on the layer before its shade)
-          const hc = mixHaze(hz).map((v, i) => Math.round(v * (sa > 0.004 ? 1 - sa * (1 - sh.rgb[i] / 255) : 1)));
-          sx.globalCompositeOperation = 'source-atop'; sx.fillStyle = `rgba(${hc.join(',')},${hazeK * (1 - ly.k) * (def.hazeScale ?? 1)})`; sx.fillRect(0, 0, cw, ch);
+          const hc = hz.slice(0, 3).map((v, i) => Math.round(v * (sa > 0.004 ? 1 - sa * (1 - sh.rgb[i] / 255) : 1)));
+          sx.globalCompositeOperation = 'source-atop'; sx.fillStyle = `rgba(${hc.join(',')},${hazeK * (1 - ly.k) * (def.hazeScale ?? 1) * hz[3]})`; sx.fillRect(0, 0, cw, ch);
         }
         ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(scratch.c, 0, 0); ctx.restore();
       } else ctx.drawImage(img, ly.E.x0 + dx, ly.E.y0 + dy, w, h);
       if (ly.anim) { ctx.save(); ctx.translate(dx, dy); ly.anim(ctx, t, S, opts); ctx.restore(); }
+      if (kd) ctx.restore();
     }
   };
   S.drawBack = (ctx, cam, opts) => drawLayers(ctx, cam, false, opts);
   S.drawFront = (ctx, cam, opts) => drawLayers(ctx, cam, true, opts);
+  // The painted layers in drawing order with their depths, for the frame's depth sort (DESIGN §10; D: the lens): a
+  // layer with parallax k is at z = D(1/k − 1) (k ≤ 0: at infinity); a front one (k > 1, or marked front) is never behind
+  // the stage. The stage's own (k 1: its ground) is a floor, not a wall: it reaches back to the nearest backdrop (the
+  // nearest layer with 0 < k < 1; none: to infinity), so what is between the stage and that backdrop shows over it.
+  S.layerDepths = (D = S.lens) => {
+    if (!S.built) S.build();
+    const zOf = k => (k > 0 ? D * (1 / k - 1) : Infinity), isFront = ly => !!ly.front || ly.k > 1;
+    const backdrop = Math.min(Infinity, ...S.L.filter(ly => !isFront(ly) && ly.k > 0 && ly.k < 1).map(ly => zOf(ly.k)));
+    return S.L.map(ly => ({ ly, front: isFront(ly), z: isFront(ly) ? Math.min(0, zOf(ly.k)) : ly.k === 1 ? backdrop : zOf(ly.k) }));
+  };
   S.propsSorted = () => {
     if (!S.built) S.build();
     return props.map(p => ({ y: p.y, id: p.id, kind: 'prop', solid: p.solid, bounds: p.bounds, draw: ctx => drawProp(ctx, p) })).sort((a, b) => a.y - b.y || (a.id < b.id ? -1 : 1));
@@ -418,6 +489,7 @@ export function makeSet(def) {
   // ── sky: screen space, slow drift; a list of [name, weight] crossfades ──
   const side = light[0] < 0 ? -1 : 1;
   S.skyCanvases = name => {
+    if (times && !times.includes(name)) name = S.defaultSky;       // a kit with its own times shows its default for any other
     const custom = def.skies?.[name];
     if (typeof custom === 'function') {
       if (!S._sky) S._sky = new Map();
@@ -448,5 +520,6 @@ export function makeSet(def) {
   };
 
   S.clampCamera = (cam, Wf = 1920, Hf = 1080) => clampCamera(S, cam, Wf, Hf);
+  for (const n of times || []) if (!SKY_TIMES.includes(n)) declareTime(n, def.times[n], id);   // the set is whole: its times are the film's
   return S;
 }

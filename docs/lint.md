@@ -58,9 +58,24 @@ rule: its severity, how many issues it found, what it catches and how to fix it.
 what was measured, the tile tells you whether it matters.
 
 `lint.json` holds the same issues for scripts: the film's format and duration, counts, the limits used, each rule's
-severity (`rules`) and fix (`fixes`), and `errors` and `warnings` as lists of
-`{ rule, severity, t, t0, t1, frame, shot, scene, actor, other, message, box, marks, frames, samples }` (`box` in
-frame pixels, `frames` the two times of a cut issue).
+severity (`rules`) and fix (`fixes`), and `errors`, `warnings` and `kept` as lists of
+`{ rule, severity, t, t0, t1, frame, shot, scene, actor, other, message, note, box, marks, frames, samples }` (`box`
+in frame pixels, `frames` the two times of a cut issue, `note` a kept warning's reason).
+
+## Kept warnings
+
+Some warnings are deliberate: a wide shot of a tiny mouse, a tangent you like, a crop into a planet that lint judges as
+if the whole planet should be in frame. Mark them on the shot, with the rules and the reason:
+
+```json
+{ "id": "2.3", "camera": { "size": "full", "on": ["saturn"], "focus": [0.95, 0.5], "zoom": 2 },
+  "lint": { "allow": ["subject-size"], "note": "a crop into the edge of the rings" }, "beats": [ … ] }
+```
+
+That shot's warnings of those rules are then **kept**: listed apart (`kept` in `lint.json`, drawn last on `lint.jpg`
+in green with the note, no fix tried) and no longer counted as warnings. `allow` is a non-empty list of rules that
+warn (`collision` too, the one error that is a warning while a beat brings two actors together); `note` is required.
+Errors are never kept. A malformed block stops `lint` with the problem's path, as `check` does.
 
 ## Rules
 
@@ -72,16 +87,22 @@ frame pixels, `frames` the two times of a cut issue).
 | `collision` | error (warning when a beat brings them together) | two characters drawn into each other |
 | `offscreen-speaker` | error | a speaker who can't be seen |
 | `subject-size` | warning | a shot's subject too small, too big or missing for the shot size |
-| `edge-cut` | warning | a head cut by the frame edge near the eyes, or a sliver of someone left in frame |
+| `edge-cut` | warning | a head cut by the frame edge near the eyes (not for a rig with no face), or a sliver of someone left in frame |
 | `tangent` | warning | an outline just touching a frame edge |
-| `halo` | warning | the sun or moon touching or behind a head |
-| `caption-face` | warning | a caption over a speaker's face |
+| `halo` | warning | the sun or moon touching or behind a head (of a rig with a face) |
+| `caption-face` | warning | a caption over a speaker's face (a rig with a face) |
 | `cut-jump` | warning | two near-identical framings cut together |
 | `continuity` | warning | someone changing pose or place across a cut without it being seen |
 | `axis` | warning | two talking characters swapping sides across a cut |
 | `teleport` | error | someone jumping between two frames |
 | `scale` | warning | someone drawn at the wrong size for where they stand |
 | `timing` | warning | very short shots (or ones a dissolve leaves too little of), overlapping lines, captions too fast to read |
+
+**Rigs with no face** (only the `neutral` expression, like the `planet` and `telescope` rigs and prop rigs, or a rig
+that sets `faceless: true`): their head point is only where close shots frame them. The rules about heads and faces
+skip them (`edge-cut`'s head cut near the eyes, `halo`, `caption-face`); the others judge them by their body (a sliver,
+a tangent) or by what the camera frames (`subject-size` and `offscreen-speaker` name it "body", "upper part" or
+"head-point region").
 
 ### floating
 
@@ -135,6 +156,12 @@ frames looser on purpose: a two-shot fitted to the width or height of the pair, 
 track with fast runners, a subject still entering or leaving, a static shot whose subject crosses the frame, a
 push-in or pull-out to another size (judged at its starting size), and a small cast member the closest zoom can't
 enlarge. Fix: change the size, stage the subjects closer together, or cut between singles.
+
+It does not know a shot that frames part of a subject on purpose ([storyboard.md](storyboard.md#framing-part-of-a-subject):
+a `focus`, a `zoom` above 1 on subjects with no face, a point in `on`) or one that moves the camera through depth
+(`z`, `zTo`: a subject off the stage grows by its own depth's scale, not the stage zoom's), so it can warn there
+that the subject is missing or too big. Look at the frame, and keep the warning on the shot when the frame is right
+([kept warnings](#kept-warnings)).
 
 A `zoom` rarely clears it: the accepted range scales with `zoom` too (`"zoom": 1.12` on a full shot accepts 34%–91%),
 so a zoom only helps when the camera can't reach the size's framing (its closest zoom, or the edge of the set). A
@@ -221,9 +248,9 @@ characters a second. Fix: hold the shot longer (`hold`, `dur`), space the lines 
 
 Lint after the contact sheets look right and again after voicing (real line lengths move the staging). It is not a
 replacement for looking: it measures boxes and points, so it can't see a character hidden in shadow, a confusing
-eyeline or a dull shot. Some warnings are deliberate (a wide shot of a tiny mouse, a tangent you like); keep those and
-say so. Trying the fixes recompiles the film, so a film with many framing faults lints more slowly.
+eyeline or a dull shot. Some warnings are deliberate (a wide shot of a tiny mouse, a tangent you like); keep those on
+their shot (`"lint": { "allow": [rules], "note": "why" }`, [kept warnings](#kept-warnings)) and say so. Trying the fixes recompiles the film, so a film with many framing faults lints more slowly.
 
 From code, `lintPlan(plan, { step, occlusion, rules })` in `engine/lint/lint.mjs` runs the same checks on a compiled
-plan (`occlusion: false` ignores what hides a speaker; `rules` limits the run to the named rules), and
+plan (→ `{ errors, warnings, kept, stats }`) (`occlusion: false` ignores what hides a speaker; `rules` limits the run to the named rules), and
 `writeLintReport(plan, result, outDir)` writes the report.

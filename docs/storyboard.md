@@ -9,9 +9,10 @@ validator is `engine/film/validate.mjs`; the compiler that turns it into a timed
 
 Contents: [top level](#top-level) · [format and titles](#format-and-titles) · [voices and cast](#voices-and-cast) ·
 [sets](#sets) · [score](#score) · [scenes](#scenes) · [places](#places) · [shots](#shots) · [camera](#camera) ·
-[beats](#beats) · [timing rules](#timing-rules) · [say](#say) · [do](#do-actions) · [sfx](#sfx) · [fx](#fx) ·
-[music](#music) · [title](#title) · [mark](#mark) · [wait](#wait) · [captions](#captions) ·
-[§9 extensions](#9-extensions-at-a-glance) · [checking](#checking-a-storyboard)
+[framing part of a subject](#framing-part-of-a-subject) · [beats](#beats) · [timing rules](#timing-rules) ·
+[say](#say) · [do](#do-actions) · [depth](#depth) · [sfx](#sfx) · [fx](#fx) · [music](#music) · [title](#title) ·
+[mark](#mark) · [wait](#wait) · [captions](#captions) · [extensions](#extensions-at-a-glance) ·
+[checking](#checking-a-storyboard)
 
 A complete small example is `templates/film.json` (what `cinecode new` gives you). A large one is
 `films/seventy-six-summers/film.json`.
@@ -98,8 +99,8 @@ The id `narrator` is the narrator; every other voice id is referred to by a cast
 ```
 
 A set is an instance of a kit (a painted location; see [sets.md](sets.md)). `kit` is required; `params` is passed to
-the kit (the built-in kits read only `seed`, which changes the random details of the painting). Two sets may use the
-same kit.
+the kit (the built-in kits read `seed`, which changes the random details of the painting; `space` also reads
+`milky`, `nebula` and `tint`). Two sets may use the same kit.
 
 ## Score
 
@@ -129,13 +130,13 @@ music cue with `"motif": n` states the motif's first n notes. See [sound.md](sou
 |---|---|
 | `id` | required, unique in the film |
 | `set` | required: a key of `sets` |
-| `time` | time of day: `dawn`, `morning`, `noon`, `afternoon`, `golden`, `sunset`, `twilight`, `night`, or a change across the scene `{ "from": "golden", "to": "twilight" }` (the change happens over the middle 80% of the scene). Default: the kit's default time. |
+| `time` | time of day: `dawn`, `morning`, `noon`, `afternoon`, `golden`, `sunset`, `twilight`, `night`, or a change across the scene `{ "from": "golden", "to": "twilight" }` (the change happens over the middle 80% of the scene). A kit that is not under Earth's sky has times of its own instead (the `space` kit: `space`): only those are valid on it. A name the kit doesn't have is a check error (it is never lit like morning). Default: the kit's default time. |
 | `grade` | a story grade on top of the time of day: `memory` (sepia storybook plate with a torn page edge), `dream` (soft, bloomed), `none` |
-| `transition` | how the scene begins: `cut`, `fade` (0.35 s through black on each side), `dissolve` (0.8 s, but never more than 40% of the shot it opens or of the shot it leaves: a 1.2 s shot dissolves in over 0.48 s; there is no field to change it). Default: `dissolve` when the set or the time changes from the previous scene, else `cut`. |
+| `transition` | how the scene begins: `cut`, `fade` (0.35 s through black on each side), `dissolve` (0.8 s, but never more than 40% of the shot it opens or of the shot it leaves: a 1.2 s shot dissolves in over 0.48 s; there is no field to change it). Default: `dissolve` when the set or the time changes from the previous scene, else `cut`. In a dissolve the last scene shows through the new one's first shot, through anything drawn over it too: a scene that opens on a full-frame effect (the `eyepiece` beat's black field) wants `"transition": "cut"`. |
 | `music` | the scene's music cue: a mood name, `"none"` (silence; the score fades out over 0.3 s), or `{ "mood", "intensity", "motif", "motifVoice", "hold", "downbeat", "tempo" }`. Leave it out to continue the previous scene's mood and intensity. See [music](#music). |
 | `ambience` | `"auto"` (default: the set's day or night bed by the time of day), `"none"`, or an ambience name (`meadow-day`, `meadow-night`, `forest-day`, `forest-night`, `stream`, `village-day`, `village-night`, `wind-hill`) |
 | `fx` | built-in effects for the whole scene: `["fireflies", "mist"]` (`leaves`, `rain`, `fireflies`, `motes`, `mist`) |
-| `overlays` | drawings for the whole scene: built-in effect names as above, or overlays from `custom.mjs`: `["comet", { "name": "far-hill", "params": { "frac": 0.04 } }]`. See [effects.md](effects.md). |
+| `overlays` | drawings for the whole scene: built-in effect names as above, built-in overlays (`skydot`, `sunglow`: [effects.md](effects.md#built-in-effects)), or overlays from `custom.mjs`: `["comet", { "name": "far-hill", "params": { "frac": 0.04 } }]`. `{ "name", "params", "shots": ["2.1", "2.4"] }` draws only in those shots of the scene (a non-empty list of its shot ids; a built-in field covers each run of consecutive listed shots, and a `rain` fades only at the scene's start and end). See [effects.md](effects.md). |
 | `rim` | a rim light on every visible actor, drawn after the grade: `{ "dir", "color", "strength", "start", "rise", "width" }`, see below |
 | `actors` | who is in the scene at its start, see below |
 | `shots` | required, at least one |
@@ -147,10 +148,11 @@ least 2 is drawn), `start` a [mark](#mark) name or seconds from the scene start 
 
 **Scene actors.** Each entry is one of:
 
-- `{ "at": <place>, "face": "left" | "right", "pose": <pose>, "expr": <expression>, "height": <units> }`: on stage
-  from the start. `at` is required. Without `face`, an actor faces the set's centre (or the way the anchor says).
-  Without `pose` it stands (or perches, on a perch). `height` starts a flier [hovering](#hovering) that many units
-  above `at` (no `pose` with it).
+- `{ "at": <place>, "face": "left" | "right", "pose": <pose>, "expr": <expression>, "height": <units>, "z": <px> }`:
+  on stage from the start. `at` is required. Without `face`, an actor faces the set's centre (or the way the anchor
+  says). Without `pose` it stands (or perches, on a perch). `height` starts a flier [hovering](#hovering) that many
+  units above `at` (no `pose` with it). `z` puts it off the stage ([depth](#depth)); without it, the anchor's `z`, if
+  it has one.
 - `{ "on": <actor>, "pose": <pose> }`: riding another actor of the scene from the start (default pose `sit`). The
   carrier must start on stage and not be a rider itself.
 - `{ "offstage": "left" | "right" }`: not visible; brought in later with an [`enter`](#do-actions) beat.
@@ -169,7 +171,7 @@ Everywhere a beat or an actor needs a place (`at`, `to`, `from`, camera `on`), i
 |---|---|
 | `"stump_front"` | an anchor of the scene's set ([sets.md](sets.md) lists them; `cinecode set-sheet` draws them) |
 | `"x:1500"` | that x on the set's main lane (or on the slope of a ridge set); give a `y` for anywhere else |
-| `"x:1500,y:1060"` | an exact ground point in set coordinates (y grows downward; bigger y = nearer the camera) |
+| `"x:1500,y:1060"` | an exact ground point in set coordinates (y grows downward; bigger y = nearer the camera). In a camera's `on`, `toOn` or `focus` it is the point itself, in the air too |
 | `"near:fox"` | beside that actor, on the side the mover comes from, facing it. The gap allows for the mover's front (a flier arriving to hover: its beating wings), the other actor's longer end (head or tail, as it may turn to face the mover) and about a fifth of their two heights (two mice: about 10 world px between them) |
 | `"left-of:fox"`, `"right-of:fox"` | beside that actor on that side, with the same gap |
 | `"behind:fox"`, `"front-of:fox"` | a little further from / nearer to the camera than that actor |
@@ -199,6 +201,7 @@ nobody could stand), only kept inside the set's area.
 | `grade`, `gradeTo` | this shot's story grade, and a grade to blend to across the shot (`"none"` = no story grade): `"grade": "memory", "gradeTo": "none"` |
 | `music` | a music cue starting at the shot's first frame (same forms as the scene's `music`) |
 | `fadeIn`, `fadeOut` | seconds of fade from / to black at the shot's start / end |
+| `lint` | `{ "allow": ["subject-size"], "note": "why" }`: the shot's [lint](lint.md#kept-warnings) warnings of those rules are intended. Lint lists them as kept, with the note and no fix tried. Errors can't be kept. |
 | `note` | free text for people; ignored |
 
 Shot boundaries land on frames. A shot is at least one frame long.
@@ -212,11 +215,13 @@ Shot boundaries land on frames. A shot is at least one frame long.
 | field | values | default |
 |---|---|---|
 | `size` | `establishing` (the whole view), `wide` (subject ≈ 18% of the frame height), `full` (whole body ≈ 60%), `medium` (waist up ≈ 75%), `close` (head and shoulders ≈ 70%), `extreme-close` (the face) | `wide` with subjects, else `establishing` |
-| `on` | actor ids and/or anchor names: the union of their regions is framed. Not `x:…,y:…` points (a `check` problem): to frame a point in the air, frame a stand-in actor hovering there (an actor faded to 0 is still framed) | the actors the shot's beats name, else everyone on stage |
+| `on` | actor ids, anchor names and/or points of the set (`x:…` or `x:…,y:…`): the union of their regions is framed. `"x:1500"` is framed like a figure standing on the lane there (an anchor's box), `"x:1500,y:700"` as the point itself, in the air too, at the size things have on the lane below it. Points must lie inside the set | the actors the shot's beats name, else everyone on stage |
 | `move` | `static`, `push-in`, `pull-out`, `pan`, `track`, `tilt-up`, `tilt-down`, `handheld` | `static` |
 | `angle` | `eye`, `low` (subjects sit lower, under more sky), `high` (higher, over more ground) | `eye` |
-| `zoom` | multiplier on the size's zoom (`0.8` = a little wider) | 1 |
+| `zoom` | multiplier on the size's zoom: `0.8` a little wider, `1.3` tighter. With a subject that has a face the frame still keeps every such head in it and above the captions (it cuts the body, never the head). When no subject has a face (a planet, a prop) a zoom above 1 crops into the size's framing: [framing part of a subject](#framing-part-of-a-subject) | 1 |
+| `focus` | `[fx, fy]` (a point of the subjects' box: `[0, 0]` its top left, `[1, 1]` its bottom right), `"head"` (their heads' mean) or a world point `"x:…,y:…"`: that point at the centre of the frame, at the size's zoom × `zoom`: [framing part of a subject](#framing-part-of-a-subject) | none |
 | `offset` | `[x, y]`: frame fractions when both are ≤ 2 in size (`[0.16, 0]` moves the subject right of centre), else world pixels | none |
+| `z`, `zTo` | the camera's depth at the shot's start and at its move's end, world px (positive: toward the stage, a dolly in; negative: pulled back), each under 3/4 of the set's lens (1728 on the built-in kits): [depth](#depth) | 0 |
 | `dof` | depth of field: `true`, `false` or a blur radius. Everything behind the subjects is blurred; every subject in `on` and in `toOn` (anchors too) stays sharp for the whole shot. | on for `close` and `extreme-close`; elsewhere automatic as the set is enlarged |
 
 Moves:
@@ -231,13 +236,14 @@ Moves:
 - `pan` needs two subjects, `"on": [from, to]`: it holds on the first for the first 12% of the shot, moves, and holds
   on the last for the last 12%.
 - `track` follows the subjects at a constant zoom, smoothed, keeping them inside the frame; with fast runners it
-  frames looser so the background never sweeps faster than about a frame width a second.
+  frames looser so the background never sweeps faster than about a frame width a second. A track on a crop or with a
+  `focus` keeps its composition and offset (it doesn't pull the subjects back to the middle).
 - `tilt-up` / `tilt-down` start 0.32 of a frame height below / above the framing and end on it.
 - `handheld` adds a small seeded drift to the framing.
 
 Moves are eased over the whole shot unless confined (below). Framing keeps lead room in the direction a single subject
-faces, keeps headroom, keeps heads above the caption band, and is clamped to the set's view so the frame never shows
-unpainted edges.
+faces, keeps headroom, keeps the heads of subjects with a face above the caption band, and is clamped to the set's view
+so the frame never shows unpainted edges.
 
 What gets framed is each subject's poses over the shot, not the peaks of its gestures and jumps. A `static` or
 `handheld` `close` shot follows a gesture that holds the head in one place for 0.5 s or more and would take it out
@@ -257,6 +263,31 @@ far under its own size because an anchor or a much bigger actor sets the framing
 | `toOn` | …of these subjects (default: `on`): a push-in from a two-shot to a close-up of one of them |
 | `zoomTo` | the move ends at k × the starting zoom, about the subjects (ignored when `to` is given) |
 | `moveAt`, `moveDur` | the move happens only between these seconds of the shot (eased); the camera holds before and after. Works with any move. |
+
+### Framing part of a subject
+
+A shot size frames a region of each subject (the body, waist up, head and shoulders, the face) whole. To frame a part
+of something (the edge of Saturn's rings, its cloud bands, a tree's crown) there are three ways, and none needs a
+hidden stand-in:
+
+- **A zoom on subjects with no face.** A rig with no face (only the `neutral` expression, like the `planet` and
+  `telescope` rigs and prop rigs, or one that says `faceless: true`) has no head to keep above the captions. When every
+  subject in the shot is one, a `zoom` above 1 crops into the size's framing about where it composes them, and the
+  `offset` then moves the frame as given: `{ "size": "full", "on": ["saturn"], "zoom": 1.6, "offset": [-0.3, 0.1] }`
+  frames the left part of Saturn with the rings. (With a subject that has a face, the zoom tightens but the frame
+  keeps that head in and above the captions.)
+- **A focus**, on any subject, faces included: `"focus": [0.95, 0.5]` puts the point 95% across and halfway down the
+  subjects' box at the centre of the frame (moved by `offset` and a low or high `angle`), at the size's zoom of the
+  whole subjects × `zoom`. `"head"` focuses their heads; `"x:1840,y:886"` a world point. Nothing else places a focused
+  frame: no lead room, headroom or caption band, no following a held gesture, no clearing actors in front. A push-in
+  zooms about the focus, a track holds it, and an establishing view centres on it.
+- **A point as the subject**: `"on": ["x:1840,y:886"]` frames that point of the set at the shot size (a box the size of
+  a standing hare at the lane's scale below it).
+
+Lint judges these shots by the whole subject, so `subject-size` can warn there (and `edge-cut`, when the crop leaves
+a sliver of a figure): keep them with the shot's `"lint": { "allow": ["subject-size"], "note": "a crop into the
+rings" }`. A hidden stand-in is still the way to
+give the camera a subject that moves through the air ([effects.md](effects.md#props)).
 
 ## Beats
 
@@ -297,6 +328,10 @@ Beats run **in sequence**: each starts when the previous one ends. Precisely:
 4. `"after": 0.4` delays any of the above by 0.4 s.
 5. The shot lasts until the latest beat ends plus `hold` (default 0.5 s), rounded to a frame, or exactly `dur` when
    given.
+6. A custom or sfx beat with `"hold": false` plays or draws its whole `dur` but ends, for the timeline, where it
+   starts: the next beat, its `with` group and the shot's length don't wait for it (the rule `fx`, `mark` and `music`
+   beats always follow). A long custom beat laid `"with": "prev"` over a line otherwise holds the next line back
+   until it ends.
 
 An example, with the times the compiler gives (the fox's `wave` lasts 1.6 s, the human's `nod` 0.9 s):
 
@@ -346,12 +381,12 @@ earlier `enter`).
 
 | action | fields | takes |
 |---|---|---|
-| `walk`, `run` | `to` (a place), `speed`, `gait`, `pose`, `face`, `wade`, `depth` | the route's length at the rig's pace |
-| `hop` | `to` (a place or `on:<actor>`), `speed`, `pose`, `face` | as walk, hopping (rigs without a hop gait repeat their jump, or walk) |
-| `fly` | `to`, `speed`, `pose`, `face`, `height` ([hovering](#hovering)); only rigs that fly | flight time |
-| `enter` | `from` (`left` / `right` or a place), `to` (a place; default about a quarter of the way into the frame), `run`, `speed`, `gait`, `pose`, `fly` (`true`: a flier flies in from above), `height` | as walk |
-| `exit` | `to` (`left` / `right`, or a place), `run`, `speed`, `gait` | as walk |
-| `place` | `to` (a place or `on:<actor>`), `face`, `pose`, `height` | 0: the actor is simply there, visible |
+| `walk`, `run` | `to` (a place), `speed`, `gait`, `pose`, `face`, `wade`, `depth`, `z` | the route's length at the rig's pace |
+| `hop` | `to` (a place or `on:<actor>`), `speed`, `pose`, `face`, `z` | as walk, hopping (rigs without a hop gait repeat their jump, or walk) |
+| `fly` | `to`, `speed`, `pose`, `face`, `height` ([hovering](#hovering)), `z`; only rigs that fly | flight time |
+| `enter` | `from` (`left` / `right` or a place), `to` (a place; default about a quarter of the way into the frame), `run`, `speed`, `gait`, `pose`, `fly` (`true`: a flier flies in from above), `height`, `z` | as walk |
+| `exit` | `to` (`left` / `right`, or a place), `run`, `speed`, `gait`, `z` | as walk |
+| `place` | `to` (a place or `on:<actor>`), `face`, `pose`, `height`, `z` | 0: the actor is simply there, visible |
 | `pose` | `pose`, `dur`, `expr` | `dur` (default 1) |
 | `gesture` | `name` (a gesture of the rig) | the gesture's length |
 | `look` | `to`: an actor, an anchor, a place, `left`, `right`, `up`, `sky`, `down`, `camera` or `none`; `tilt` (−1..1, the head's pitch) | 0.3 |
@@ -360,9 +395,9 @@ earlier `enter`).
 | `sit`, `stand`, `lie`, `sleep` | | 0.6 |
 | `wake` | `pose` (default: the pose before sleeping, or `stand`) | 0.75 |
 | `fade` | `to` (opacity 0..1), `dur` (default 1) | `dur` |
-| `set` | `params` (rig param changes from now on), `pose` (instant), `expr` | 0 |
+| `set` | `params` (rig param changes from now on), `pose` (instant), `expr`; `z` with `dur`: a change of depth over that time | 0 (with a `z`: its `dur`) |
 | `blink` | | 0.2 |
-| `custom` | `name` (in `custom.mjs` `custom`), `dur` (default 1), any other fields | `dur` |
+| `custom` | `name` (a built-in effect or one in `custom.mjs` `custom`), `dur` (default 1), `scope`, `hold`, any other fields | `dur` (`"hold": false`: 0) |
 
 Details:
 
@@ -420,8 +455,15 @@ Details:
   previous pose.
 - **set.** Changes rig params from that moment, e.g. a tortoise coming out of the water: `{ "do": "set", "who":
   "pebble", "params": { "wet": 0.6 } }`.
-- **custom.** Draws a custom beat from `custom.mjs` (see [effects.md](effects.md)). If `custom.mjs` has no such name the
-  beat only takes time (a warning).
+- **custom.** Draws a custom beat: a built-in effect ([effects.md](effects.md#built-in-effects)) or one from the
+  film's `custom.mjs` or effect files. If there is no such name the beat only takes time (a warning). The beat lasts
+  its whole `dur`: on into the later shots of its scene and, from the scene's last shot, into the fading picture of a
+  dissolve to the next scene. `"scope": "shot"` ends it at its shot's cut: it is drawn only in its own shot, until
+  its end (not in a dissolve's fading picture either), and its sounds from the cut on are dropped (`u` still runs over
+  the full `dur`, so it just stops partway). `"scope": "scene"` keeps the default and says so. Without a scope, a
+  beat still drawn on the first frame of a later shot, or one that ends partway through the dissolve out of its scene
+  (it vanishes from the fading picture), is a warning naming the shots and the frames. `"hold": false` lets the beat
+  play its whole `dur` without holding the next beat ([timing rules](#timing-rules)).
 
 ### Riding
 
@@ -469,6 +511,40 @@ less, with an `on:` target, or on a scene actor without `at`; a `pose` given wit
 `pose` (or a `set` with a `pose`) while the actor hovers. Land it first: a `fly` or `walk` to a place without
 `height`.
 
+### Depth
+
+Things can be in front of and behind each other, not only up and down the ground: a moon behind a planet, debris the
+camera flies through. `z` is world px off the **stage**, the plane the set stages on (its ground, props and anchors):
+positive is farther from the lens, negative nearer. A thing at depth z is drawn at p = (lens − c) / (lens + z − c) of
+its size about the frame centre, c being the camera's depth; the lens is the kit's (2304 world px on the built-in
+kits), so a camera at depth 0 sees z 2400 at about half size and z −900 at about 1.6×.
+
+- **Actors.** A scene actor's `"z"` (or its starting anchor's `z`). A beat that takes an actor somewhere (`place`,
+  `walk`, `run`, `hop`, `fly`, `enter`, `exit`) takes it to its own `"z"`, else to the depth of where it goes: a named
+  anchor's `z` (0 when the anchor has none), the carrier's for `on:<actor>`, the other actor's for `near:`,
+  `left-of:`, `right-of:`, `behind:`, `front-of:` or an actor's name. A point (`x:…`), a side, or a beat with no place
+  keeps the depth. The change is eased over the beat; a `set` with a `z` takes its `dur`. An `enter` takes its depth at
+  once (from a side it was off screen; from a place it appears at that place's depth, then eases to its
+  destination's), and an exit or entrance at a side starts or ends fully off screen at the actor's depth. A rider has
+  its carrier's depth (hopping on eases to it by the landing). A `"z"` on another action is ignored with a warning,
+  and one on a riding scene actor too.
+- **Draw order.** Depth first, then ground y: whatever is off the stage is drawn behind (z > 0) or in front of (z < 0)
+  everything on it, whatever its ground y. A painted layer with parallax k sits at z = lens × (1/k − 1) and hides what
+  is beyond it (a front layer what is behind it); the stage's own ground layer reaches back to the nearest backdrop, so
+  things between them still show over the ground.
+- **Stand on the stage.** Off the stage a figure is drawn away from the painted spot under it (it slides over the
+  ground as the camera moves) and throws no ground shadow, so figures that stand stay at z 0 on a set that paints its
+  stage: compile warns about one standing on the ground, a perch or a hollow at another depth (the skill's
+  `warnings.mjs` prints it). Depth is for fliers, effect pieces and sets with no painted ground (`space`).
+- **The camera.** `"z"` (its depth at the shot's start) and `"zTo"` (at the move's end) move it through depth, eased
+  over the move's window (`moveAt` / `moveDur`, else the whole shot), with any move: the near things grow faster than
+  the far, and the sky stays put. A `push-in` or `pull-out` `to` a size composes its end as seen from `zTo`: the
+  subjects frame as asked and only what lies at other depths changes (a dolly-zoom when the depth goes against the
+  zoom). Every other move travels along the camera's axis. Both must stay under 3/4 of the set's lens. Whatever comes
+  nearer the lens than 0.1 × it (or passes it) is not drawn, and it fades out from 0.25 × it.
+- **Framing** a subject off the stage is exact when the subjects share one depth (several depths are iterated).
+- **Effects** draw at depth on the overlay layer `depth` ([effects.md](effects.md#depth)).
+
 ## sfx
 
 ```json
@@ -485,6 +561,7 @@ less, with an `on:` target, or on a scene actor without `at`; a `pose` given wit
 | `params` | the generator's parameters (`size`, `weight`, `notes`, …) |
 | `dur` | length for continuous effects; the beat then takes `dur` seconds. Put the length in `params` instead (`"params": { "dur": 30 }`) and the beat takes no time while the sound plays on, across cuts: a bed of rain or wind under a whole scene |
 | `seed` | a fixed seed (default: from the name, time and shot) |
+| `hold` | `false`: a beat `dur` plays but takes no time (the next beat and the shot don't wait); default `true` |
 | `caption` | a sound caption such as `"[croak]"`, shown for max(1.2 s, `dur`) but counted as heard only for `dur` (give a long sound a `dur` if its caption should cross a cut; see [captions](#captions)); burned in only with `captions: "all"` |
 
 ## fx
@@ -596,9 +673,9 @@ Burned-in captions are always centred; only their band changes, the bottom or th
   sfx beat's `dur`), or until it has been up 0.6 s; otherwise it ends exactly at the cut. At a scene dissolve or fade,
   or at a shot's `fadeIn` or `fadeOut`, a caption that ends there fades out over 0.15 s by the boundary instead.
 
-## §9 extensions at a glance
+## Extensions at a glance
 
-These were added in DESIGN.md §9 and are documented in place above:
+These were added in DESIGN.md §9 (round 2) and §10–11 (round 6) and are documented in place above:
 
 | where | field |
 |---|---|
@@ -614,6 +691,12 @@ These were added in DESIGN.md §9 and are documented in place above:
 | sfx | names checked against the built-in list and `custom.mjs` `sounds` |
 | music | [stings `plunk`, `stab`, `swell`; `motif`, `motifVoice`, `hold`, `downbeat`, `tempo`](#music) |
 | top level | [`score`](#score) |
+| camera | [`focus`; `zoom` cropping subjects with no face; points in `on` / `toOn`](#framing-part-of-a-subject); [`z`, `zTo`](#depth) |
+| scene actors, moves, place, set | [`z`](#depth) |
+| custom beat | [`scope`, `hold`](#do-actions) |
+| sfx | [`hold`](#sfx) |
+| scene | [`overlays` `shots`](#scenes); `time` names a kit declares (`space`) |
+| shot | [`lint`](#shots) |
 
 ## Checking a storyboard
 
@@ -632,11 +715,14 @@ check failed after 0.2 s
 
 Invalid JSON is reported with its line and column (`film.json: invalid JSON at line 4, column 2: Expected ',' or '}'
 after property value`). Some things are only warnings and don't stop a render: an unknown field on a beat, an
-expression a rig doesn't have on a `say`, a speaker not in the scene without `vo`, a missing custom beat. Neither
-`check` nor `plan` prints warnings, and staging adds its own: a blocked route, a perch for a rig that can't perch, a
-two-shot staged too far apart, and an actor in `on` shown far under the size it would get alone because something
-else in `on` sets the framing (under 45% of it when an anchor does, under a sixth when a much bigger actor does; not
-in `wide` shots). The Claude Code skill's script prints both kinds:
+expression a rig doesn't have on a `say`, a speaker not in the scene without `vo`, a missing custom beat, a `z` on an
+action that can't change depth, and a film's rig, kit or effect named like a built-in one (it replaces it; `check`
+also marks the file in its list: "replaces the built-in …"). Neither `check` nor `plan` prints warnings, and staging
+adds its own: a blocked route, a perch for a rig that can't perch, a two-shot staged too far apart, an actor in `on`
+shown far under the size it would get alone because something else in `on` sets the framing (under 45% of it when an
+anchor does, under a sixth when a much bigger actor does; not in `wide` shots), a custom beat without a `scope`
+drawn on into a later shot or ending partway through a dissolve, and an actor standing off the stage on a painted set.
+The Claude Code skill's script prints both kinds:
 
 ```sh
 node .claude/skills/cinecode/scripts/warnings.mjs films/my-film
