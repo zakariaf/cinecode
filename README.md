@@ -102,7 +102,7 @@ plugin's skills: 36 agents in about six hours, then a 20-minute render.
 [Watch it](https://zakaria.dev/cinecode/#films) or [download the 1080p film](https://github.com/zakariaf/cinecode/releases/tag/our-solar-system). The folder holds the
 screenplay, the storyboard and the film's six effects of its own (the Sun's face, an orrery, a dive through Venus's
 clouds, Earth's night side, the pale ray of the "pale blue dot", the sunrise). The voice takes are in the release as
-`solar-system-voices.zip`: unzip it into `films/solar-system/voices/` and the film renders without a key:
+`solar-system-voices.zip`: unzip it inside `films/solar-system/` (it makes `voices/`) and the film renders without a key:
 
 ```sh
 node bin/cinecode.mjs render films/solar-system
