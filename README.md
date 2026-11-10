@@ -7,7 +7,7 @@ TTS); they are checked and cached on disk, so a voiced film re-renders the same 
 
 ![Seventy-Six Summers: the comet over the hill at the end of the film](docs/images/ending.jpg)
 
-Watch the films and read the docs at **[zakariaf.github.io/cinecode](https://zakariaf.github.io/cinecode/)**.
+Watch the films and read the docs at **[zakaria.dev/cinecode](https://zakaria.dev/cinecode/)**.
 
 ## How a film is made
 
