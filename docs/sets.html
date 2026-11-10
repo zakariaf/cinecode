@@ -1,0 +1,1086 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sets · cinecode</title><meta name="description" content="cinecode docs: Sets">
+<meta property="og:title" content="Sets · cinecode"><meta property="og:description" content="cinecode docs: Sets">
+<meta property="og:image" content="https://zakariaf.github.io/cinecode/films/seventy-six-summers.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../style.css"></head>
+<body><header class="top"><div class="wrap">
+  <a class="mark" href="../index.html">cine<span>code</span></a>
+  <nav><a href="../index.html#films">Films</a><a href="../index.html#install">Install</a><a href="../docs/storyboard.html" aria-current="page">Docs</a><a href="https://github.com/zakariaf/cinecode">GitHub</a></nav>
+</div></header><main class="docs wrap"><aside class="side"><p class="label">Docs</p><ul><li><a href="storyboard.html">Storyboard</a></li><li><a href="cast.html">Cast and rigs</a></li><li><a href="sets.html" aria-current="page">Sets</a></li><li><a href="effects.html">Effects</a></li><li><a href="sound.html">Voices, music and sound</a></li><li><a href="lint.html">Lint</a></li><li><a href="rendering.html">Rendering</a></li></ul>
+<p class="label">On this page</p><ul class="toc"><li><a href="#seeing-a-kit">Seeing a kit</a></li><li><a href="#coordinates-and-scale">Coordinates and scale</a></li><li><a href="#anchor-types">Anchor types</a></li><li><a href="#times-of-day">Times of day</a></li><li><a href="#ambience">Ambience</a></li><li><a href="#the-kits">The kits</a></li><li><a href="#adding-a-kit">Adding a kit</a></li></ul></aside><article class="prose"><h1 id="sets-kits-anchors-and-times-of-day"><a class="anchor" href="#sets-kits-anchors-and-times-of-day" aria-hidden="true">#</a>Sets: kits, anchors and times of day</h1>
+<p>A <strong>kit</strong> is a painted location: parallax layers of sky, far land and ground, props that sort in depth with the
+actors (a character behind a tree is hidden by it), named <strong>anchors</strong> where actors stand, a walkable region the
+actors route through, water and stepping stones, and the ambience it sounds like. A film names the kits it uses in
+<code>sets</code> and each scene picks one:</p>
+<pre><code class="language-json">&quot;sets&quot;: { &quot;meadow&quot;: { &quot;kit&quot;: &quot;meadow&quot; }, &quot;home&quot;: { &quot;kit&quot;: &quot;village&quot; } },
+&quot;scenes&quot;: [ { &quot;id&quot;: &quot;s01&quot;, &quot;set&quot;: &quot;meadow&quot;, &quot;time&quot;: &quot;dawn&quot;, … } ]
+</code></pre>
+<p><img src="images/kits.jpg" alt="The seven Earth kits (the eighth, space, is below)"></p>
+<p>Everything an actor can touch (ground, stump tops, branches, hollows, stones, water) is defined once, as data, and
+both the painting and the staging read that same data, so an actor sent to <code>stump_top</code> stands on the painted stump.</p>
+<h2 id="seeing-a-kit"><a class="anchor" href="#seeing-a-kit" aria-hidden="true">#</a>Seeing a kit</h2>
+<pre><code class="language-sh">node bin/cinecode.mjs set-sheet meadow,stream      # → out/set-sheet.jpg
+node bin/cinecode.mjs set-sheet films/my-film      # every kit, including the film&#39;s own → films/my-film/out/
+</code></pre>
+<p><img src="images/set-sheet-meadow.jpg" alt="set-sheet of the meadow: anchors (g ground, s surface, p perch, h hollow) with their scale, solid footprints in red,
+the walk region in green, water and a route"></p>
+<p>Each anchor is labelled with its name, the first letter of its type and the actor scale there (<code>s1.38</code>); the tick
+above it is a standing hare&#39;s height at that spot. Red ellipses are solid footprints, the dashed green line bounds
+the walkable region, blue outlines are water, teal ellipses are stepping stones, and a yellow polyline is the kit&#39;s
+sample route when it has one. The skill&#39;s inventory script prints the anchors as Markdown tables, and every prop&#39;s
+painted extent (its world box, e.g. the hill&#39;s <code>hawthorn</code> 2900–3340 × 436–770):
+<code>node .claude/skills/cinecode/scripts/inventory.mjs sets</code>. Custom drawing code reads the same boxes from
+<code>api.set.props</code> (<a href="effects.html#props">effects.md</a>).</p>
+<p>Two things the sheet doesn&#39;t show. A prop&#39;s painted extent beyond its footprint: a tree&#39;s crown has no anchor, so read
+its box from the inventory to stage something in it. And the front layer (foreground grass blades, ferns, low branches),
+which is drawn over the actors with its own parallax: in a low or close shot of a small actor near the bottom of the
+frame, blades can cross it. Check those shots on a contact sheet and move the actor up the ground, or change the
+framing.</p>
+<h2 id="coordinates-and-scale"><a class="anchor" href="#coordinates-and-scale" aria-hidden="true">#</a>Coordinates and scale</h2>
+<p>Set coordinates are world pixels; <code>y</code> grows downward, so a bigger <code>y</code> is nearer the camera. Actors get bigger toward
+the camera: on a flat kit <code>scale = baseS × (y − horizon) / (laneY − horizon)</code>, about 1.3 on most kits&#39; main lane
+(the <code>scale</code> column in the anchor tables is that number at the anchor). A ridge kit (the hill) has a slope instead of a
+flat floor: actors walk a band just below the crest line, so give places as <code>x:…</code> without <code>y</code>.</p>
+<p>Places in a storyboard are anchors, <code>x:1500</code> (that x on the main lane), <code>x:1500,y:1060</code>, or relative to an actor
+(<code>near:fox</code>); see <a href="storyboard.html#places">storyboard.md</a>. The camera centre is limited to the kit&#39;s view, and a frame
+never shows past the painted area.</p>
+<h2 id="anchor-types"><a class="anchor" href="#anchor-types" aria-hidden="true">#</a>Anchor types</h2>
+<div class="table"><table><thead><tr>
+<th>type</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>ground</code></td>
+<td>a spot on the ground. An actor sent here stands on it, or on the nearest walkable spot that is not inside a solid prop or another actor.</td>
+</tr>
+<tr>
+<td><code>surface</code></td>
+<td>the top of a prop (a stump, a rock, a bench seat, a stepping stone). Walking there walks to the foot of the prop and jumps up; leaving jumps down first. Fliers fly there. Stepping stones are also hopped across on routes over water.</td>
+</tr>
+<tr>
+<td><code>perch</code></td>
+<td>a point on a branch, for rigs that perch (owl, songbird, squirrel, butterfly). Fliers fly there; the squirrel jumps up from the foot of the tree. Others are warned.</td>
+</tr>
+<tr>
+<td><code>hollow</code></td>
+<td>an opening in a prop (the owl&#39;s hollow, the fox&#39;s den), see below.</td>
+</tr>
+<tr>
+<td><code>view</code></td>
+<td>a far landmark (the valley&#39;s): frame it with the camera&#39;s <code>on</code>, or <code>look</code> at it. Not a place to stand.</td>
+</tr>
+</tbody></table></div>
+<p>An anchor&#39;s name is a word of letters, digits, <code>_</code>, <code>.</code> and <code>-</code>, and never one a storyboard reads as something else:
+<code>left</code> and <code>right</code> are the sides <code>enter</code> and <code>exit</code> use, <code>x:…</code> a position, <code>near:…</code> and the like a place by an actor.
+<code>verify-kit</code> fails such a name. An anchor may also have a depth, <code>z</code> (<a href="storyboard.html#depth">storyboard.md</a>): an actor
+placed or moved there takes it (an anchor without one is on the stage, z 0).</p>
+<p>Any anchor can be a camera subject (<code>&quot;on&quot;: [&quot;den&quot;]</code>): it is framed as a box of about 120 × 110 world px (× the scale
+there), roughly a standing hare, so a small actor framed together with an anchor comes out small.</p>
+<p><strong>Hollows.</strong> An actor sent into a hollow (<code>&quot;do&quot;: &quot;run&quot;, &quot;to&quot;: &quot;den&quot;</code>) runs to the foot of the prop and jumps up into
+the opening (a flier flies in); <code>enter</code> with <code>&quot;from&quot;: &quot;den&quot;</code> appears in it and walks out. Inside, the actor is drawn
+clipped to the opening, in front of a dark hole (by day too): by day the occupant stands out against it, at night it shows
+only by the scene&#39;s <code>rim</code> light or a glow you draw. The openings are small and fixed: the forest&#39;s <code>den</code> is about 60 × 44
+world px at the foot of the oak (a mouse, a hedgehog, a frog fit; anything taller is cut by the opening); the meadow&#39;s
+<code>owl_hollow</code> is about 68 × 92 px, 360 px up the owl tree (for the owl, or another flier). The nearest ground is right
+in front of the prop: give it with a <code>y</code> (in front of the den, about <code>x:1490–1550,y:1028</code>); <code>x:</code> alone is the main
+lane, further down. A two-shot of someone in a hollow and someone on the ground in front of it works for small rigs
+(the den sits about 30 px above that ground); the owl&#39;s hollow is too high for one: cut between them.</p>
+<h2 id="times-of-day"><a class="anchor" href="#times-of-day" aria-hidden="true">#</a>Times of day</h2>
+<p>Every kit under Earth&#39;s sky paints all eight skies: <code>dawn</code>, <code>morning</code>, <code>noon</code>, <code>afternoon</code>, <code>golden</code>, <code>sunset</code>,
+<code>twilight</code>, <code>night</code>. A scene sets one with <code>time</code>, or a change <code>{ &quot;from&quot;: &quot;golden&quot;, &quot;to&quot;: &quot;twilight&quot; }</code> blended over
+the middle 80% of the scene; a shot can set its own (a time-lapse). Without <code>time</code> a scene uses the kit&#39;s default.</p>
+<p>A kit that is somewhere else (space, a cave, under the sea) declares times of its own instead, each with its sky and
+its light, and those are then the only times it has: the <code>space</code> kit has one, <code>space</code> (no grade but the vignette, no
+sun). A time a kit doesn&#39;t have, or a sky a kit paints without saying how it is lit, is a <code>check</code> error, never a
+morning in disguise. See <a href="#adding-a-kit">adding a kit</a>.</p>
+<p>The time of day is a sky and a grade over the whole picture: a soft-light wash, a multiply tint, a vignette and film
+grain. Dawn turns the land rose-gold, golden hour warm, twilight lavender; night is moonlit blue with a contrast
+stretch so close-ups keep real darks, and at night a close shot&#39;s vignette closes in around its subject. The sun
+casts every grounded figure&#39;s and solid prop&#39;s shadow across the ground, short at noon and long at dawn, golden hour
+and sunset; there are no cast shadows at twilight and night. Story grades (<code>memory</code>, <code>dream</code>) go on top
+(<a href="storyboard.html#scenes">storyboard.md</a>).</p>
+<h2 id="ambience"><a class="anchor" href="#ambience" aria-hidden="true">#</a>Ambience</h2>
+<p>With <code>&quot;ambience&quot;: &quot;auto&quot;</code> (the default) a scene plays its kit&#39;s day bed, or its night bed at <code>twilight</code> and <code>night</code>;
+a scene that changes between the two switches beds at its midpoint. The beds are synthesized
+(<a href="sound.html#ambience">sound.md</a>): <code>meadow-day</code>, <code>meadow-night</code>, <code>forest-day</code>, <code>forest-night</code>, <code>stream</code>,
+<code>village-day</code>, <code>village-night</code>, <code>wind-hill</code>.</p>
+<h2 id="the-kits"><a class="anchor" href="#the-kits" aria-hidden="true">#</a>The kits</h2>
+<p>Kits take one param, <code>seed</code> (<code>&quot;params&quot;: { &quot;seed&quot;: 2 }</code>), which changes the random details of the painting (<code>space</code>
+takes three more).</p>
+<h3 id="forest"><a class="anchor" href="#forest" aria-hidden="true">#</a>forest</h3>
+<p>A dirt path winding left to right between big trunks, misty depths behind; an old oak with a den between its roots, a fallen log, a mossy boulder, dappled light on the floor.</p>
+<ul>
+<li><strong>size:</strong> 4400 × 1400 world px; camera centre x 700–3700, y 380–1350; horizon y 720, main lane y ≈ 1066</li>
+<li><strong>default time:</strong> <code>morning</code>; <strong>ambience:</strong> <code>forest-day</code> by day, <code>forest-night</code> at twilight and night</li>
+<li><strong>ground:</strong> grass, dirt</li>
+<li><strong>solid props</strong> (actors route around them; lint flags standing inside one): <code>oak</code>, <code>elm</code>, <code>log</code>, <code>boulder</code>, <code>brambles</code></li>
+</ul>
+<div class="table"><table><thead><tr>
+<th>anchor</th>
+<th>type</th>
+<th>x</th>
+<th>y</th>
+<th>scale</th>
+</tr>
+</thead><tbody><tr>
+<td><code>path_west</code></td>
+<td>ground</td>
+<td>700</td>
+<td>1066</td>
+<td>1.32</td>
+</tr>
+<tr>
+<td><code>path_mid</code></td>
+<td>ground</td>
+<td>2100</td>
+<td>1066</td>
+<td>1.31</td>
+</tr>
+<tr>
+<td><code>path_east</code></td>
+<td>ground</td>
+<td>3500</td>
+<td>1057</td>
+<td>1.28</td>
+</tr>
+<tr>
+<td><code>oak_front</code></td>
+<td>ground</td>
+<td>1560</td>
+<td>1090</td>
+<td>1.41</td>
+</tr>
+<tr>
+<td><code>log_front</code></td>
+<td>ground</td>
+<td>2420</td>
+<td>1185</td>
+<td>1.77</td>
+</tr>
+<tr>
+<td><code>clearing</code></td>
+<td>ground</td>
+<td>1900</td>
+<td>1190</td>
+<td>1.79</td>
+</tr>
+<tr>
+<td><code>fern_corner</code></td>
+<td>ground</td>
+<td>3300</td>
+<td>1230</td>
+<td>1.94</td>
+</tr>
+<tr>
+<td><code>boulder_side</code></td>
+<td>ground</td>
+<td>980</td>
+<td>1160</td>
+<td>1.67</td>
+</tr>
+<tr>
+<td><code>den</code></td>
+<td>hollow (on <code>oak</code>)</td>
+<td>1488</td>
+<td>995</td>
+<td>1.08</td>
+</tr>
+<tr>
+<td><code>log_top</code></td>
+<td>surface (on <code>log</code>)</td>
+<td>2400</td>
+<td>1074</td>
+<td>1.53</td>
+</tr>
+<tr>
+<td><code>boulder_top</code></td>
+<td>surface (on <code>boulder</code>)</td>
+<td>812</td>
+<td>1112</td>
+<td>1.71</td>
+</tr>
+</tbody></table></div>
+<h3 id="hill"><a class="anchor" href="#hill" aria-hidden="true">#</a>hill</h3>
+<p>A long grassy slope rising left to right to a crest with an old standing stone, a hawthorn beyond it, hazy ranges behind. At night the hill re-lights itself for the moon: the slope sinks into cool shadow, the crest keeps a moonlit rim (its tussocks shaded whole), the far ranges drop back with the trees on their crests, and the standing stone is the brightest shape on the land.</p>
+<ul>
+<li><strong>size:</strong> 3300 × 1500 world px; camera centre x 800–2900, y 350–1250; a ridge set: the ground follows the slope, so give <code>x:</code> only</li>
+<li><strong>default time:</strong> <code>golden</code>; <strong>ambience:</strong> <code>wind-hill</code> by day, <code>meadow-night</code> at twilight and night</li>
+<li><strong>ground:</strong> grass, dirt</li>
+<li><strong>solid props</strong> (actors route around them; lint flags standing inside one): <code>standing_stone</code>, <code>rock_low</code>, <code>rock_mid</code>, <code>rock_high</code>, <code>hawthorn</code></li>
+<li><strong>the hawthorn&#39;s crown</strong> (no anchor): about x 2990–3330, y 440–650 (centre 3160, 545). The ground under its middle
+is at y 757, scale 1.3, so a flier hovering there needs <code>&quot;to&quot;: &quot;x:3160&quot;, &quot;height&quot;: 160</code> (height = (ground y − y) ÷
+scale): that is how a kite or a bird gets stuck in it</li>
+</ul>
+<div class="table"><table><thead><tr>
+<th>anchor</th>
+<th>type</th>
+<th>x</th>
+<th>y</th>
+<th>scale</th>
+</tr>
+</thead><tbody><tr>
+<td><code>hill_foot</code></td>
+<td>ground</td>
+<td>250</td>
+<td>1227</td>
+<td>1.40</td>
+</tr>
+<tr>
+<td><code>slope_low</code></td>
+<td>ground</td>
+<td>800</td>
+<td>1143</td>
+<td>1.40</td>
+</tr>
+<tr>
+<td><code>slope_mid</code></td>
+<td>ground</td>
+<td>1400</td>
+<td>938</td>
+<td>1.40</td>
+</tr>
+<tr>
+<td><code>slope_high</code></td>
+<td>ground</td>
+<td>1900</td>
+<td>818</td>
+<td>1.40</td>
+</tr>
+<tr>
+<td><code>crest</code></td>
+<td>ground</td>
+<td>2200</td>
+<td>797</td>
+<td>1.40</td>
+</tr>
+<tr>
+<td><code>stone_front</code></td>
+<td>ground</td>
+<td>2420</td>
+<td>807</td>
+<td>1.45</td>
+</tr>
+<tr>
+<td><code>stone_left</code></td>
+<td>ground</td>
+<td>2290</td>
+<td>789</td>
+<td>1.38</td>
+</tr>
+<tr>
+<td><code>stone_right</code></td>
+<td>ground</td>
+<td>2560</td>
+<td>781</td>
+<td>1.38</td>
+</tr>
+<tr>
+<td><code>beyond</code></td>
+<td>ground</td>
+<td>2860</td>
+<td>792</td>
+<td>1.43</td>
+</tr>
+<tr>
+<td><code>thorn_shade</code></td>
+<td>ground</td>
+<td>3060</td>
+<td>784</td>
+<td>1.40</td>
+</tr>
+<tr>
+<td><code>stone_top</code></td>
+<td>surface (on <code>standing_stone</code>)</td>
+<td>2426</td>
+<td>501</td>
+<td>1.32</td>
+</tr>
+</tbody></table></div>
+<h3 id="meadow"><a class="anchor" href="#meadow" aria-hidden="true">#</a>meadow</h3>
+<p>The meadow at the forest edge: an owl&#39;s hollow tree with a low branch on the left, an old stump on the right, a small lily pond in the right foreground, the forest wall behind opening onto far hills.</p>
+<ul>
+<li><strong>size:</strong> 2800 × 1500 world px; camera centre x 500–2300, y 300–1400; horizon y 700, main lane y ≈ 1036</li>
+<li><strong>default time:</strong> <code>morning</code>; <strong>ambience:</strong> <code>meadow-day</code> by day, <code>meadow-night</code> at twilight and night</li>
+<li><strong>ground:</strong> grass; water (1 area)</li>
+<li><strong>solid props</strong> (actors route around them; lint flags standing inside one): <code>owl_tree</code>, <code>stump</code>, <code>rock_a</code>, <code>rock_b</code>, <code>rock_c</code>, <code>bush</code></li>
+</ul>
+<div class="table"><table><thead><tr>
+<th>anchor</th>
+<th>type</th>
+<th>x</th>
+<th>y</th>
+<th>scale</th>
+</tr>
+</thead><tbody><tr>
+<td><code>tree_foot</code></td>
+<td>ground</td>
+<td>640</td>
+<td>1050</td>
+<td>1.34</td>
+</tr>
+<tr>
+<td><code>stump_front</code></td>
+<td>ground</td>
+<td>2050</td>
+<td>1075</td>
+<td>1.43</td>
+</tr>
+<tr>
+<td><code>stump_side</code></td>
+<td>ground</td>
+<td>1880</td>
+<td>1012</td>
+<td>1.19</td>
+</tr>
+<tr>
+<td><code>meadow_centre</code></td>
+<td>ground</td>
+<td>1400</td>
+<td>1060</td>
+<td>1.38</td>
+</tr>
+<tr>
+<td><code>meadow_left</code></td>
+<td>ground</td>
+<td>950</td>
+<td>1050</td>
+<td>1.34</td>
+</tr>
+<tr>
+<td><code>meadow_right</code></td>
+<td>ground</td>
+<td>1760</td>
+<td>1090</td>
+<td>1.49</td>
+</tr>
+<tr>
+<td><code>far_meadow</code></td>
+<td>ground</td>
+<td>1300</td>
+<td>900</td>
+<td>0.76</td>
+</tr>
+<tr>
+<td><code>foreground</code></td>
+<td>ground</td>
+<td>1550</td>
+<td>1260</td>
+<td>2.14</td>
+</tr>
+<tr>
+<td><code>pond_edge</code></td>
+<td>ground</td>
+<td>2200</td>
+<td>1200</td>
+<td>1.91</td>
+</tr>
+<tr>
+<td><code>pond_far</code></td>
+<td>ground</td>
+<td>2560</td>
+<td>1140</td>
+<td>1.68</td>
+</tr>
+<tr>
+<td><code>bush_side</code></td>
+<td>ground</td>
+<td>2540</td>
+<td>960</td>
+<td>0.99</td>
+</tr>
+<tr>
+<td><code>rock_top</code></td>
+<td>surface (on <code>rock_a</code>)</td>
+<td>1196</td>
+<td>1150</td>
+<td>1.84</td>
+</tr>
+<tr>
+<td><code>owl_hollow</code></td>
+<td>hollow (on <code>owl_tree</code>)</td>
+<td>436</td>
+<td>604</td>
+<td>1.20</td>
+</tr>
+<tr>
+<td><code>low_branch</code></td>
+<td>perch (on <code>owl_tree</code>)</td>
+<td>650</td>
+<td>672</td>
+<td>1.20</td>
+</tr>
+<tr>
+<td><code>branch_tip</code></td>
+<td>perch (on <code>owl_tree</code>)</td>
+<td>780</td>
+<td>652</td>
+<td>1.20</td>
+</tr>
+<tr>
+<td><code>stump_top</code></td>
+<td>surface (on <code>stump</code>)</td>
+<td>2050</td>
+<td>901</td>
+<td>1.20</td>
+</tr>
+</tbody></table></div>
+<h3 id="space"><a class="anchor" href="#space" aria-hidden="true">#</a>space</h3>
+<p>Deep space: a starfield with the Milky Way and faint nebula washes on a deep navy (not black), and no ground. Planets,
+moons and the Sun are actors (the <a href="cast.html#planet"><code>planet</code> rig</a>) held at its perch anchors on an invisible stage, so
+the camera frames, pushes in on and lints them like characters. The backdrop is drawn in screen space and barely moves
+when the camera zooms, so a push-in on a planet reads as travelling toward it while the stars stay put.</p>
+<p><img src="images/space.jpg" alt="The space kit: Saturn with Titan behind it (z 1500), and a crop into its rings with debris drifting past"></p>
+<ul>
+<li><strong>size:</strong> 3200 × 1800 world px; camera centre x −200–3400, y 0–1800; an invisible stage plane: far anchors (y 600) a
+little smaller, near ones (y 1400) a little bigger</li>
+<li><strong>time:</strong> its own, <code>space</code> (the only one: no grade but the house vignette, no sun); no ground to shade, so nothing
+throws a shadow at all (<code>groundShadows: false</code>). <strong>ambience:</strong> scenes there use <code>&quot;ambience&quot;: &quot;none&quot;</code></li>
+<li><strong>params:</strong> <code>seed</code> (another starfield), <code>milky</code> and <code>nebula</code> (0..1, default 1), <code>tint</code> (<code>violet</code>, <code>blue</code>, <code>teal</code>)</li>
+<li><strong>depth:</strong> with no painted ground, any actor may be off the stage: a scene actor&#39;s <code>&quot;z&quot;</code> of 2400 is about half size
+behind everything on the stage, −900 about 1.6× in front (<a href="storyboard.html#depth">storyboard.md</a>)</li>
+</ul>
+<div class="table"><table><thead><tr>
+<th>anchor</th>
+<th>type</th>
+<th>x</th>
+<th>y</th>
+<th>scale</th>
+</tr>
+</thead><tbody><tr>
+<td><code>centre</code>, <code>west</code>, <code>east</code></td>
+<td>perch</td>
+<td>1600, 900, 2300</td>
+<td>1000</td>
+<td>1.00</td>
+</tr>
+<tr>
+<td><code>far</code>, <code>far_west</code>, <code>far_east</code></td>
+<td>perch</td>
+<td>1600, 800, 2400</td>
+<td>600</td>
+<td>0.90</td>
+</tr>
+<tr>
+<td><code>near</code>, <code>near_west</code>, <code>near_east</code></td>
+<td>perch</td>
+<td>1600, 900, 2300</td>
+<td>1400</td>
+<td>1.10</td>
+</tr>
+<tr>
+<td><code>ground_&lt;each of the above&gt;</code></td>
+<td>ground</td>
+<td>the same x</td>
+<td>60 px below</td>
+<td>0.92–1.11</td>
+</tr>
+</tbody></table></div>
+<p>The <code>ground_*</code> anchors are walkable stage under each hold, for a walker or a hidden stand-in.</p>
+<h3 id="stream"><a class="anchor" href="#stream" aria-hidden="true">#</a>stream</h3>
+<p>A brook winding from the far meadow toward the viewer, cutting a path in two. Four stepping stones cross it (a stride apart for a hare, too far for a tortoise: routes hop across them), a frog&#39;s rock sits mid-stream, reeds and sedge line the banks. The water moves every frame.</p>
+<ul>
+<li><strong>size:</strong> 2800 × 1400 world px; camera centre x 700–2100, y 420–1350; horizon y 700, main lane y ≈ 1045</li>
+<li><strong>default time:</strong> <code>morning</code>; <strong>ambience:</strong> <code>stream</code> by day, <code>stream</code> at twilight and night</li>
+<li><strong>ground:</strong> grass, dirt; water (1 area); stepping stones <code>stone_1</code>, <code>stone_2</code>, <code>stone_3</code>, <code>stone_4</code>, <code>frog_rock</code></li>
+<li><strong>solid props</strong> (actors route around them; lint flags standing inside one): <code>bank_rock</code>, <code>willow_bush</code></li>
+</ul>
+<div class="table"><table><thead><tr>
+<th>anchor</th>
+<th>type</th>
+<th>x</th>
+<th>y</th>
+<th>scale</th>
+</tr>
+</thead><tbody><tr>
+<td><code>bank_left</code></td>
+<td>ground</td>
+<td>1000</td>
+<td>1052</td>
+<td>1.31</td>
+</tr>
+<tr>
+<td><code>bank_right</code></td>
+<td>ground</td>
+<td>1660</td>
+<td>1054</td>
+<td>1.31</td>
+</tr>
+<tr>
+<td><code>path_west</code></td>
+<td>ground</td>
+<td>500</td>
+<td>1055</td>
+<td>1.32</td>
+</tr>
+<tr>
+<td><code>path_east</code></td>
+<td>ground</td>
+<td>2300</td>
+<td>1055</td>
+<td>1.32</td>
+</tr>
+<tr>
+<td><code>near_left</code></td>
+<td>ground</td>
+<td>860</td>
+<td>1230</td>
+<td>1.97</td>
+</tr>
+<tr>
+<td><code>near_right</code></td>
+<td>ground</td>
+<td>1880</td>
+<td>1250</td>
+<td>2.04</td>
+</tr>
+<tr>
+<td><code>far_bank</code></td>
+<td>ground</td>
+<td>1640</td>
+<td>900</td>
+<td>0.74</td>
+</tr>
+<tr>
+<td><code>stone_1</code></td>
+<td>surface (on <code>stone_1</code>)</td>
+<td>1170</td>
+<td>1043</td>
+<td>1.27</td>
+</tr>
+<tr>
+<td><code>stone_2</code></td>
+<td>surface (on <code>stone_2</code>)</td>
+<td>1270</td>
+<td>1046</td>
+<td>1.29</td>
+</tr>
+<tr>
+<td><code>stone_3</code></td>
+<td>surface (on <code>stone_3</code>)</td>
+<td>1370</td>
+<td>1043</td>
+<td>1.27</td>
+</tr>
+<tr>
+<td><code>stone_4</code></td>
+<td>surface (on <code>stone_4</code>)</td>
+<td>1470</td>
+<td>1046</td>
+<td>1.29</td>
+</tr>
+<tr>
+<td><code>frog_rock</code></td>
+<td>surface (on <code>frog_rock</code>)</td>
+<td>1430</td>
+<td>1116</td>
+<td>1.55</td>
+</tr>
+</tbody></table></div>
+<h3 id="valley"><a class="anchor" href="#valley" aria-hidden="true">#</a>valley</h3>
+<p>A lookout knoll above a wide valley: the forest&#39;s edge on the left, a stream winding down through the meadows, the path, the wayside tree and the hill with its standing stone far off on the right. For openings, journeys seen from afar and night skies. Its <code>view</code> anchors are those far landmarks.</p>
+<ul>
+<li><strong>size:</strong> 2800 × 1400 world px; camera centre x 1000–1800, y 450–1150; horizon y 600, main lane y ≈ 1072</li>
+<li><strong>default time:</strong> <code>dawn</code>; <strong>ambience:</strong> <code>meadow-day</code> by day, <code>meadow-night</code> at twilight and night</li>
+<li><strong>ground:</strong> grass</li>
+<li><strong>solid props</strong> (actors route around them; lint flags standing inside one): <code>lookout_rock</code>, <code>gorse</code></li>
+</ul>
+<div class="table"><table><thead><tr>
+<th>anchor</th>
+<th>type</th>
+<th>x</th>
+<th>y</th>
+<th>scale</th>
+</tr>
+</thead><tbody><tr>
+<td><code>lookout</code></td>
+<td>ground</td>
+<td>1400</td>
+<td>1200</td>
+<td>1.00</td>
+</tr>
+<tr>
+<td><code>knoll_left</code></td>
+<td>ground</td>
+<td>1060</td>
+<td>1190</td>
+<td>0.98</td>
+</tr>
+<tr>
+<td><code>knoll_right</code></td>
+<td>ground</td>
+<td>2080</td>
+<td>1250</td>
+<td>1.08</td>
+</tr>
+<tr>
+<td><code>path_down</code></td>
+<td>ground</td>
+<td>1440</td>
+<td>1330</td>
+<td>1.22</td>
+</tr>
+<tr>
+<td><code>near</code></td>
+<td>ground</td>
+<td>1250</td>
+<td>1360</td>
+<td>1.27</td>
+</tr>
+<tr>
+<td><code>view_forest</code></td>
+<td>view</td>
+<td>500</td>
+<td>860</td>
+<td>0.43</td>
+</tr>
+<tr>
+<td><code>view_stream</code></td>
+<td>view</td>
+<td>1380</td>
+<td>960</td>
+<td>0.60</td>
+</tr>
+<tr>
+<td><code>view_tree</code></td>
+<td>view</td>
+<td>1680</td>
+<td>858</td>
+<td>0.43</td>
+</tr>
+<tr>
+<td><code>view_stone</code></td>
+<td>view</td>
+<td>2260</td>
+<td>733</td>
+<td>0.22</td>
+</tr>
+<tr>
+<td><code>lookout_rock</code></td>
+<td>surface (on <code>lookout_rock</code>)</td>
+<td>1866</td>
+<td>1170</td>
+<td>1.07</td>
+</tr>
+</tbody></table></div>
+<h3 id="village"><a class="anchor" href="#village" aria-hidden="true">#</a>village</h3>
+<p>A timber-and-plaster cottage under a thatched roof, a cottage garden behind a white picket fence with an open gate, a flagstone path to the door, a stone well, a bench under an old tree with a low branch, a lantern post by the gate and a cobbled lane; beyond a dry-stone wall, neighbours&#39; cottages and a far village with a church spire. At dusk the windows and the lantern light up.</p>
+<ul>
+<li><strong>size:</strong> 2800 × 1500 world px; camera centre x 600–2300, y 300–1350; horizon y 660, main lane y ≈ 1179</li>
+<li><strong>default time:</strong> <code>morning</code>; <strong>ambience:</strong> <code>village-day</code> by day, <code>village-night</code> at twilight and night</li>
+<li><strong>ground:</strong> grass, stone, gravel</li>
+<li><strong>solid props</strong> (actors route around them; lint flags standing inside one): <code>cottage</code>, <code>bed_left</code>, <code>bed_right</code>, <code>fence_left</code>, <code>gate_post_l</code>, <code>gate_post_r</code>, <code>fence_right</code>, <code>fence_side_l1</code>, <code>fence_side_l2</code>, <code>fence_side_r1</code>, <code>fence_side_r2</code>, <code>well</code>, <code>bench</code>, <code>lantern</code>, <code>tree</code>, <code>apple_tree</code>, <code>wheelbarrow</code></li>
+</ul>
+<div class="table"><table><thead><tr>
+<th>anchor</th>
+<th>type</th>
+<th>x</th>
+<th>y</th>
+<th>scale</th>
+</tr>
+</thead><tbody><tr>
+<td><code>door_front</code></td>
+<td>ground</td>
+<td>1050</td>
+<td>904</td>
+<td>0.76</td>
+</tr>
+<tr>
+<td><code>gate</code></td>
+<td>ground</td>
+<td>1050</td>
+<td>1098</td>
+<td>1.36</td>
+</tr>
+<tr>
+<td><code>garden_path</code></td>
+<td>ground</td>
+<td>1050</td>
+<td>990</td>
+<td>1.02</td>
+</tr>
+<tr>
+<td><code>window_left</code></td>
+<td>ground</td>
+<td>862</td>
+<td>904</td>
+<td>0.76</td>
+</tr>
+<tr>
+<td><code>window_right</code></td>
+<td>ground</td>
+<td>1210</td>
+<td>904</td>
+<td>0.76</td>
+</tr>
+<tr>
+<td><code>lantern_foot</code></td>
+<td>ground</td>
+<td>1510</td>
+<td>1094</td>
+<td>1.34</td>
+</tr>
+<tr>
+<td><code>well_side</code></td>
+<td>ground</td>
+<td>1522</td>
+<td>1000</td>
+<td>1.05</td>
+</tr>
+<tr>
+<td><code>well_front</code></td>
+<td>ground</td>
+<td>1650</td>
+<td>1050</td>
+<td>1.21</td>
+</tr>
+<tr>
+<td><code>bench_front</code></td>
+<td>ground</td>
+<td>2160</td>
+<td>1008</td>
+<td>1.08</td>
+</tr>
+<tr>
+<td><code>tree_foot</code></td>
+<td>ground</td>
+<td>2310</td>
+<td>950</td>
+<td>0.90</td>
+</tr>
+<tr>
+<td><code>lane_west</code></td>
+<td>ground</td>
+<td>300</td>
+<td>1174</td>
+<td>1.59</td>
+</tr>
+<tr>
+<td><code>lane_mid</code></td>
+<td>ground</td>
+<td>1400</td>
+<td>1179</td>
+<td>1.61</td>
+</tr>
+<tr>
+<td><code>lane_east</code></td>
+<td>ground</td>
+<td>2500</td>
+<td>1152</td>
+<td>1.52</td>
+</tr>
+<tr>
+<td><code>orchard</code></td>
+<td>ground</td>
+<td>560</td>
+<td>940</td>
+<td>0.87</td>
+</tr>
+<tr>
+<td><code>meadow_back</code></td>
+<td>ground</td>
+<td>1900</td>
+<td>880</td>
+<td>0.68</td>
+</tr>
+<tr>
+<td><code>foreground</code></td>
+<td>ground</td>
+<td>1500</td>
+<td>1300</td>
+<td>1.98</td>
+</tr>
+<tr>
+<td><code>chimney_top</code></td>
+<td>surface (on <code>cottage</code>)</td>
+<td>841</td>
+<td>248</td>
+<td>0.68</td>
+</tr>
+<tr>
+<td><code>roof_ridge</code></td>
+<td>surface (on <code>cottage</code>)</td>
+<td>1143</td>
+<td>356</td>
+<td>0.68</td>
+</tr>
+<tr>
+<td><code>well_rim</code></td>
+<td>surface (on <code>well</code>)</td>
+<td>1628</td>
+<td>943</td>
+<td>1.05</td>
+</tr>
+<tr>
+<td><code>bench_seat</code></td>
+<td>surface (on <code>bench</code>)</td>
+<td>2160</td>
+<td>909</td>
+<td>0.93</td>
+</tr>
+<tr>
+<td><code>bench_left</code></td>
+<td>surface (on <code>bench</code>)</td>
+<td>2110</td>
+<td>909</td>
+<td>0.93</td>
+</tr>
+<tr>
+<td><code>bench_right</code></td>
+<td>surface (on <code>bench</code>)</td>
+<td>2210</td>
+<td>909</td>
+<td>0.93</td>
+</tr>
+<tr>
+<td><code>low_branch</code></td>
+<td>perch (on <code>tree</code>)</td>
+<td>2254</td>
+<td>610</td>
+<td>0.76</td>
+</tr>
+<tr>
+<td><code>branch_tip</code></td>
+<td>perch (on <code>tree</code>)</td>
+<td>2109</td>
+<td>607</td>
+<td>0.76</td>
+</tr>
+</tbody></table></div>
+<h3 id="wayside"><a class="anchor" href="#wayside" aria-hidden="true">#</a>wayside</h3>
+<p>A great old tree beside the path, a long low branch reaching left over a shady nap spot among its roots, a signpost at the fork, open meadow and soft hills beyond.</p>
+<ul>
+<li><strong>size:</strong> 2800 × 1500 world px; camera centre x 700–2200, y 350–1350; horizon y 720, main lane y ≈ 1075</li>
+<li><strong>default time:</strong> <code>morning</code>; <strong>ambience:</strong> <code>meadow-day</code> by day, <code>meadow-night</code> at twilight and night</li>
+<li><strong>ground:</strong> grass, dirt</li>
+<li><strong>solid props</strong> (actors route around them; lint flags standing inside one): <code>way_tree</code>, <code>signpost</code>, <code>mile_stone</code></li>
+</ul>
+<div class="table"><table><thead><tr>
+<th>anchor</th>
+<th>type</th>
+<th>x</th>
+<th>y</th>
+<th>scale</th>
+</tr>
+</thead><tbody><tr>
+<td><code>nap</code></td>
+<td>ground</td>
+<td>1390</td>
+<td>1014</td>
+<td>1.06</td>
+</tr>
+<tr>
+<td><code>tree_shade</code></td>
+<td>ground</td>
+<td>1200</td>
+<td>1030</td>
+<td>1.12</td>
+</tr>
+<tr>
+<td><code>roots_front</code></td>
+<td>ground</td>
+<td>1600</td>
+<td>1040</td>
+<td>1.16</td>
+</tr>
+<tr>
+<td><code>path_west</code></td>
+<td>ground</td>
+<td>500</td>
+<td>1086</td>
+<td>1.32</td>
+</tr>
+<tr>
+<td><code>path_mid</code></td>
+<td>ground</td>
+<td>1400</td>
+<td>1075</td>
+<td>1.28</td>
+</tr>
+<tr>
+<td><code>path_east</code></td>
+<td>ground</td>
+<td>2400</td>
+<td>1084</td>
+<td>1.32</td>
+</tr>
+<tr>
+<td><code>sign</code></td>
+<td>ground</td>
+<td>2160</td>
+<td>1095</td>
+<td>1.35</td>
+</tr>
+<tr>
+<td><code>meadow_near</code></td>
+<td>ground</td>
+<td>1300</td>
+<td>1240</td>
+<td>1.88</td>
+</tr>
+<tr>
+<td><code>far_field</code></td>
+<td>ground</td>
+<td>2000</td>
+<td>930</td>
+<td>0.76</td>
+</tr>
+<tr>
+<td><code>way_branch</code></td>
+<td>perch (on <code>way_tree</code>)</td>
+<td>1310</td>
+<td>600</td>
+<td>0.96</td>
+</tr>
+<tr>
+<td><code>branch_end</code></td>
+<td>perch (on <code>way_tree</code>)</td>
+<td>1128</td>
+<td>597</td>
+<td>0.96</td>
+</tr>
+<tr>
+<td><code>branch_base</code></td>
+<td>perch (on <code>way_tree</code>)</td>
+<td>1447</td>
+<td>622</td>
+<td>0.96</td>
+</tr>
+</tbody></table></div>
+<h2 id="adding-a-kit"><a class="anchor" href="#adding-a-kit" aria-hidden="true">#</a>Adding a kit</h2>
+<p>A film can bring its own locations: one file per kit, <code>films/&lt;slug&gt;/kits/&lt;name&gt;.mjs</code>, that default-exports
+<code>(params) =&gt; set</code> (for every film of a project, <code>cinecode/kits/&lt;name&gt;.mjs</code> at the project root; <code>custom.mjs</code> may also
+export <code>kits</code> as <code>{ name: (params) =&gt; set }</code>). Use the name as a set&#39;s <code>kit</code>. <code>makeSet</code> from <code>cinecode/set</code> builds the
+set from a description. This example is a complete, working kit that passes the gate, <code>cinecode verify-kit films/&lt;slug&gt;/kits/glade.mjs</code>: a meadow glade with far hills and one boulder you can stand on (the <code>build-kit</code> skill&#39;s
+starter is a fuller one, painted with the house helpers).</p>
+<pre><code class="language-js">// films/&lt;slug&gt;/kits/glade.mjs: the kit takes its name from the file
+import { makeSet } from &#39;cinecode/set&#39;;
+
+const ground = x =&gt; 1000 + 12 * Math.sin(x / 300);    // the lane where actors stand by default (y at x)
+
+export default () =&gt; makeSet({
+  id: &#39;glade&#39;, W: 2400, H: 1400, refX: 1200, refY: 800,
+  area: { x0: -300, x1: 2900, y0: -300, y1: 1600 },  // the painted world: at least 3200 × 1800
+  view: { x0: 700, x1: 1700, y0: 350, y1: 1200 },      // where the camera centre may go
+  horizon: 700, laneY: 1000, baseS: 1.3, lane: ground,  // scale = baseS × (y − horizon) / (laneY − horizon)
+  layers: [
+    { k: 0.5, paint(x, r, S, E) {                       // far hills: parallax 0.5
+      x.fillStyle = &#39;#9fb8a6&#39;; x.beginPath(); x.moveTo(E.x0, 760);
+      for (let px = E.x0; px &lt;= E.x1; px += 40) x.lineTo(px, 690 - 40 * Math.sin(px / 260));
+      x.lineTo(E.x1, 760); x.lineTo(E.x1, E.y1); x.lineTo(E.x0, E.y1); x.closePath(); x.fill();
+    } },
+    { k: 1, paint(x, r, S, E) {                         // the ground the actors stand on
+      x.fillStyle = &#39;#7da35a&#39;; x.fillRect(E.x0, 720, E.x1 - E.x0, E.y1 - 720);
+      for (let i = 0; i &lt; 900; i++) { x.fillStyle = r() &lt; 0.5 ? &#39;#6f9550&#39; : &#39;#8db068&#39;; x.fillRect(E.x0 + r() * (E.x1 - E.x0), 730 + r() * 900, 14, 4); }
+    } },
+  ],
+  props: [{
+    id: &#39;boulder&#39;, x: 1500, y: 1030, solid: { rx: 70, ry: 20 }, bounds: [1420, 950, 1580, 1040],
+    paint(x) { x.fillStyle = &#39;#8a8478&#39;; x.beginPath(); x.ellipse(1500, 1030, 80, 70, 0, Math.PI, 0); x.fill(); },
+    anchors: { boulder_top: { x: 1500, y: 962, type: &#39;surface&#39; } },
+  }],
+  anchors: {
+    west: { x: 900, y: 1000 }, east: { x: 1750, y: 1010 },
+    centre: { x: 1200, y: 1020 }, front: { x: 1250, y: 1180 },
+  },
+  ambience: { day: &#39;meadow-day&#39;, night: &#39;meadow-night&#39; },
+});
+</code></pre>
+<pre><code class="language-json">&quot;sets&quot;: { &quot;glade&quot;: { &quot;kit&quot;: &quot;glade&quot; } }
+</code></pre>
+<p>The description:</p>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>id</code>, <code>W</code>, <code>H</code></td>
+<td>the kit&#39;s name and its nominal size in world pixels</td>
+</tr>
+<tr>
+<td><code>area</code></td>
+<td>the painted world <code>{ x0, x1, y0, y1 }</code> (default 0..W, 0..H). A frame never shows past it: the camera zooms in instead (the widest view any camera shows is 3200 × 1800 world px).</td>
+</tr>
+<tr>
+<td><code>view</code></td>
+<td>where the camera centre may go</td>
+</tr>
+<tr>
+<td><code>refX</code>, <code>refY</code></td>
+<td>the reference camera centre: parallax offsets are measured from it</td>
+</tr>
+<tr>
+<td><code>horizon</code>, <code>laneY</code>, <code>baseS</code>, <code>lane(x)</code></td>
+<td>perspective: the actor scale is <code>baseS</code> on the lane y and 0 at the horizon. <code>lane(x)</code> gives the main lane&#39;s y at x (default <code>laneY</code>). <code>scaleAt(x, y)</code> may replace the formula.</td>
+</tr>
+<tr>
+<td><code>layers</code></td>
+<td><code>[{ k, paint(ctx, rnd, S, E), front, outline, anim, shade }]</code>. <code>k</code> is the parallax factor (0.5 = far, 1 = the ground, &gt; 1 or <code>front: true</code> = drawn in front of the actors). <code>paint</code> draws once in world coordinates inside the extent <code>E</code> (<code>{ x0, x1, y0, y1 }</code>) with the seeded random <code>rnd()</code>; the result is cached. <code>outline: { w, color, alpha }</code> inks the layer&#39;s silhouette. <code>anim(ctx, t)</code> draws moving parts every frame (water shimmer). <code>shade(S)</code> → <code>{ rgb, a }</code> or <code>null</code> shades the layer&#39;s own paint: it is multiplied by <code>rgb</code> (0..255 each) and crossfaded in by <code>a</code> (before haze), so it never darkens what lies behind the layer and blurred edges take it too (the hill shades its far ranges by night this way).</td>
+</tr>
+<tr>
+<td><code>props</code></td>
+<td><code>[{ id, x, y, solid: { rx, ry }, bounds: [x0, y0, x1, y1], paint(ctx, rnd, S), anchors, top }]</code>: things that sort in depth with the actors by <code>y</code>. <code>solid</code> is the footprint ellipse actors route around. <code>bounds</code> is a hint of where it paints. <code>anchors</code> on a prop belong to it (a surface on its top).</td>
+</tr>
+<tr>
+<td><code>anchors</code></td>
+<td><code>{ name: { x, y, type, depth, face, clip, branch, at, s, surface, z } }</code> (names: see <a href="#anchor-types">anchor types</a>); type defaults to <code>ground</code>, <code>y</code> to the lane, <code>z</code> (its depth off the stage) to 0. For a <code>perch</code>, <code>branch: { pts, w0, w1 }</code> and <code>at</code> (0..1 along it). For a <code>hollow</code>, <code>clip</code> is the opening&#39;s polygon. <code>face</code> is the facing an actor placed there takes; <code>s</code> overrides the scale there; <code>surface</code> the footstep sound.</td>
+</tr>
+<tr>
+<td><code>walk</code></td>
+<td><code>{ region, ground, band, water, stones, paths }</code>: <code>region</code> the walkable polygon (default: the whole area); <code>ground(x)</code> and <code>band</code> make a ridge set; <code>water</code> a list of polygons; <code>stones</code> prop ids whose <code>top</code> ellipse (<code>{ x, y, rx, ry }</code>) can be stood on in water; <code>paths</code> <code>[{ poly, surface }]</code>: ground with its own footstep sound (<code>surface</code> defaults to <code>dirt</code>).</td>
+</tr>
+<tr>
+<td><code>surface</code></td>
+<td>the footstep surface everywhere else (default <code>grass</code>)</td>
+</tr>
+<tr>
+<td><code>sampleRoute</code></td>
+<td><code>[from, to]</code>, anchor names or <code>[x, y]</code> points: a route drawn on the set sheet</td>
+</tr>
+<tr>
+<td><code>light</code></td>
+<td>the light direction for ink and shading (default from the upper left)</td>
+</tr>
+<tr>
+<td><code>defaultSky</code></td>
+<td>the time of day when a scene gives none (default <code>morning</code>, or the first of the kit&#39;s own <code>times</code>)</td>
+</tr>
+<tr>
+<td><code>skies</code></td>
+<td><code>{ name: (ctx, rnd, w, h) =&gt; … }</code>: a sky painter for a time (screen space, w × h, drawn to cover the frame); one of Earth&#39;s eight names replaces that sky&#39;s painting</td>
+</tr>
+<tr>
+<td><code>times</code></td>
+<td>a kit not under Earth&#39;s sky: <code>{ name: { grade, sun, haze } }</code>, each with a painter in <code>skies</code>; they are then all the times the kit has, and the first is its default. <code>grade</code>: <code>&#39;neutral&#39;</code> (default: the picture as painted, under the house vignette), one of Earth&#39;s eight (its grade), or <code>{ sl: [r, g, b, a], mul: [r, g, b], vig, con }</code>; <code>sun</code>: <code>null</code> (default: no sun, no cast shadows), one of Earth&#39;s eight, or <code>{ len, a }</code>; <code>haze</code>: <code>[r, g, b]</code> that far layers fade toward (default none). <code>{ night: {} }</code> among them keeps Earth&#39;s night as it is. A time&#39;s name means one light in a film: two kits may declare the same name only with the same light.</td>
+</tr>
+<tr>
+<td><code>groundShadows</code></td>
+<td><code>false</code>: no ground to shade (space), so no figure, flier or prop throws a shadow and no figure draws its contact shadow</td>
+</tr>
+<tr>
+<td><code>lens</code></td>
+<td>world px from a camera at depth 0 to the stage (default 2304: about a 45° view across a 1920-px frame at zoom 1); it sets how depth scales things (<a href="storyboard.html#depth">storyboard.md</a>), and camera <code>z</code> / <code>zTo</code> must stay under 3/4 of it</td>
+</tr>
+<tr>
+<td><code>ambience</code></td>
+<td><code>{ day, night }</code> bed names for <code>&quot;ambience&quot;: &quot;auto&quot;</code></td>
+</tr>
+</tbody></table></div>
+<p>Paint in the house style with the helpers in <code>engine/paint/</code> (<code>nature.mjs</code>: trees, foliage, grass; <code>scenery.mjs</code>:
+ridges, meadow floors, tree lines; <code>water.mjs</code>; <code>structures.mjs</code>: cottages, fences, walls; <code>atmos.mjs</code>: paper
+texture, haze, mist; <code>brush.mjs</code>: gouache dabs and ink) and look at <code>engine/set/kits/meadow.mjs</code> for a full kit. Use
+the random function you are given, never <code>Math.random()</code>, so every render paints the same picture. Check a new kit
+with its gate, <code>node bin/cinecode.mjs verify-kit films/&lt;slug&gt;/kits/&lt;name&gt;.mjs</code>: at least 4 anchors with usable names
+and sane scales on walkable ground, every route between them clear, the area and parallax covering every camera, and
+every time of day (Earth&#39;s eight, or the kit&#39;s own) with a light and painted: at least 90% of a preview frame under
+each time&#39;s grade must be more than near-black, so a night sky or space is a deep blue, not black. It writes two
+review images to <code>out/verify/</code> beside the folder that holds the kit: <code>films/&lt;slug&gt;/out/verify/</code> for a film&#39;s kit,
+<code>cinecode/out/verify/</code> for a project&#39;s (the gate prints the paths). Then
+<code>node bin/cinecode.mjs set-sheet films/&lt;slug&gt; &lt;name&gt;</code>: anchors, solid footprints, the walk region and water are
+drawn over it. A kit for every film belongs in <code>engine/set/kits/&lt;name&gt;.mjs</code> (registered automatically under its file
+name) with a test in <code>test/sets.test.mjs</code>.</p>
+
+<p class="edit"><a href="https://github.com/zakariaf/cinecode/blob/main/docs/sets.md">This page on GitHub</a></p></article></main><footer><div class="wrap"><p>cinecode is open source under the MIT licence · © 2026 Zakaria Fatahi · <a href="https://github.com/zakariaf/cinecode">github.com/zakariaf/cinecode</a></p>
+<p>Every picture, movement, note and sound in these films is made by code. Only the voices come from a model (Gemini TTS).</p></div></footer></body></html>

@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cast and rigs · cinecode</title><meta name="description" content="cinecode docs: Cast and rigs">
+<meta property="og:title" content="Cast and rigs · cinecode"><meta property="og:description" content="cinecode docs: Cast and rigs">
+<meta property="og:image" content="https://zakariaf.github.io/cinecode/films/seventy-six-summers.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../style.css"></head>
+<body><header class="top"><div class="wrap">
+  <a class="mark" href="../index.html">cine<span>code</span></a>
+  <nav><a href="../index.html#films">Films</a><a href="../index.html#install">Install</a><a href="../docs/storyboard.html" aria-current="page">Docs</a><a href="https://github.com/zakariaf/cinecode">GitHub</a></nav>
+</div></header><main class="docs wrap"><aside class="side"><p class="label">Docs</p><ul><li><a href="storyboard.html">Storyboard</a></li><li><a href="cast.html" aria-current="page">Cast and rigs</a></li><li><a href="sets.html">Sets</a></li><li><a href="effects.html">Effects</a></li><li><a href="sound.html">Voices, music and sound</a></li><li><a href="lint.html">Lint</a></li><li><a href="rendering.html">Rendering</a></li></ul>
+<p class="label">On this page</p><ul class="toc"><li><a href="#what-every-rig-has">What every rig has</a></li><li><a href="#expressions">Expressions</a></li><li><a href="#human">human</a></li><li><a href="#animal-rigs">Animal rigs</a></li><li><a href="#worlds-and-things">Worlds and things</a></li><li><a href="#adding-a-rig">Adding a rig</a></li></ul></aside><article class="prose"><h1 id="the-cast-rigs"><a class="anchor" href="#the-cast-rigs" aria-hidden="true">#</a>The cast: rigs</h1>
+<p>Every actor in a film is an instance of a <strong>rig</strong>: a character drawn by code in the hand-inked, cel-shaded look, with
+named poses, gaits (walk cycles), gestures and facial expressions. A film&#39;s <code>cast</code> picks a rig for each actor and sets
+its look with <code>params</code>:</p>
+<pre><code class="language-json">&quot;cast&quot;: {
+  &quot;pebble&quot;: { &quot;rig&quot;: &quot;tortoise&quot;, &quot;name&quot;: &quot;Pebble&quot;, &quot;voice&quot;: &quot;pebble&quot;, &quot;scale&quot;: 1.35,
+              &quot;params&quot;: { &quot;shell&quot;: &quot;#4b4630&quot;, &quot;moss&quot;: &quot;#6e8b3d&quot;, &quot;star&quot;: 0.35, &quot;lids&quot;: 0.3 } },
+  &quot;nell&quot;:   { &quot;rig&quot;: &quot;human&quot;, &quot;name&quot;: &quot;Nell&quot;, &quot;voice&quot;: &quot;nell&quot;,
+              &quot;params&quot;: { &quot;age&quot;: &quot;elder&quot;, &quot;build&quot;: &quot;slight&quot;, &quot;hairStyle&quot;: &quot;bun&quot;, &quot;glasses&quot;: &quot;#b08a3a&quot;, &quot;scarf&quot;: &quot;#5e7b3f&quot; } }
+}
+</code></pre>
+<p><img src="images/rigs.jpg" alt="The fourteen character rigs, standing (not to scale)"></p>
+<p>Two more are things, not characters: the <a href="#planet"><code>planet</code></a> (a planet, moon or the Sun, for films in space) and the
+<a href="#telescope"><code>telescope</code></a>.</p>
+<p>To see every pose, gait phase, gesture key frame and expression of a rig, labelled:</p>
+<pre><code class="language-sh">node bin/cinecode.mjs cast-sheet hare,human          # → out/cast-sheet.jpg
+node bin/cinecode.mjs cast-sheet films/my-film      # every rig, including the film&#39;s own custom rigs → films/my-film/out/
+</code></pre>
+<p>The rig lists below come from the code (<code>engine/cast/*.mjs</code>). The skill&#39;s inventory script prints the same live
+lists as Markdown: <code>node .claude/skills/cinecode/scripts/inventory.mjs cast</code>.</p>
+<h2 id="what-every-rig-has"><a class="anchor" href="#what-every-rig-has" aria-hidden="true">#</a>What every rig has</h2>
+<div class="table"><table><thead><tr>
+<th></th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td>size</td>
+<td><code>height</code> (top to feet) and <code>width</code> (body length) in units at scale 1. On screen an actor is <code>units × set scale × cast scale</code> world pixels; the set scale grows toward the camera (about 1.3 on most kits&#39; main lane).</td>
+</tr>
+<tr>
+<td>speeds</td>
+<td>world units per second at scale 1, per gait. A beat&#39;s <code>speed</code> multiplies it.</td>
+</tr>
+<tr>
+<td>poses</td>
+<td>named still poses: <code>&quot;pose&quot;: &quot;sit&quot;</code> on a scene actor, <code>{ &quot;do&quot;: &quot;pose&quot;, &quot;pose&quot;: &quot;alert&quot; }</code>. Pose changes blend smoothly.</td>
+</tr>
+<tr>
+<td>gaits</td>
+<td>walk cycles used by moves: <code>walk</code>, <code>run</code>, and rig-specific ones (<code>trot</code>, <code>hop</code>, <code>scurry</code>, <code>fly</code>, <code>glide</code>), chosen with a move&#39;s <code>gait</code>. Feet plant on the ground while the body moves.</td>
+</tr>
+<tr>
+<td>gestures</td>
+<td>short motions with a fixed length: <code>{ &quot;do&quot;: &quot;gesture&quot;, &quot;who&quot;: &quot;fox&quot;, &quot;name&quot;: &quot;bow&quot; }</code>. They layer in the order they start (one started during another takes over from the pose at that moment).</td>
+</tr>
+<tr>
+<td>expressions</td>
+<td><code>expr</code> on a scene actor, a <code>say</code> line, an <code>emote</code>, <code>pose</code> or <code>set</code> beat</td>
+</tr>
+<tr>
+<td>params</td>
+<td>the look: colours (any CSS hex colour) and a few rig-specific switches</td>
+</tr>
+<tr>
+<td>a face</td>
+<td>a rig with only the <code>neutral</code> expression (the planet, the telescope, a prop rig), or one that sets <code>faceless: true</code>, has no face: the camera keeps no head of it above the captions, so a <code>zoom</code> above 1 crops into it (<a href="storyboard.html#framing-part-of-a-subject">framing part of a subject</a>), and lint&#39;s face rules skip it</td>
+</tr>
+</tbody></table></div>
+<p>Every actor also gets <strong>idle life</strong> without being asked: it breathes, blinks every few seconds (seeded, so every render is
+the same), glances at whoever starts speaking (and keeps looking at them if it was never told where to look), and
+moves its mouth from the voice&#39;s loudness while it speaks. An expression change happens behind a quick blink while the
+mouth eases between the two faces, except at a cut; a line&#39;s <code>expr</code> holds until a beat changes it, unless it is a
+reaction (<code>surprised</code>, <code>laugh</code>, <code>laughing</code>, <code>scared</code>), which passes 0.4 s after the line
+(<a href="storyboard.html#do-actions">expressions</a>).</p>
+<p><code>perch</code> rigs (owl, songbird, squirrel, butterfly) can stand on a set&#39;s <code>perch</code> anchors (branches); <code>flies</code> rigs (owl,
+songbird, butterfly) can <code>fly</code>. A flight ends standing somewhere (the ground, a surface, a perch, a hollow, or riding
+another actor), or, with <code>&quot;height&quot;</code>, hovering in the air, flapping, where it can talk and gesture
+(<a href="storyboard.html#hovering">hovering</a>). Any actor can carry a rider
+(<a href="storyboard.html#riding">riding</a>); the tortoise has a riding point on its shell, other rigs carry riders on the top
+centre of their drawing. In water, only the frog may stand without wading (lint <code>in-water</code>).</p>
+<p><code>look</code> tilts the head of every rig except the beetle, the butterfly and the songbird: <code>up</code> all the way up, <code>down</code> all
+the way down, <code>sky</code> a moderate look up (about 16°), an actor or a place along the line to it, and a look&#39;s <code>&quot;tilt&quot;</code>
+(−1..1; + up, − down) sets the pitch outright. On a small rig in a wide or full shot the tilt is only a few pixels: a
+pose reads better there (the mouse&#39;s <code>alert</code>). The deer&#39;s long neck stays up, so its head barely drops even at −1.</p>
+<p><strong>An animal the engine doesn&#39;t have.</strong> Writing a rig is a big job (<a href="#adding-a-rig">adding a rig</a>); for a short film,
+reskin the nearest rig with <code>params</code> and cast <code>scale</code>, and draw what it lacks as an overlay that follows the actor
+(<code>api.actor(id).box</code> in <a href="effects.html">effects.md</a>): light on the <code>grade</code> layer, anything else on <code>world</code>. Some
+substitutions that read well: a firefly is a small butterfly with dark wings and a yellow body (<code>scale</code> 0.6) plus a
+glow overlay; a crow a near-black songbird (<code>scale</code> 1.3; loosely, a bat); a rabbit a hare at <code>scale</code> 0.7; a rat a
+mouse; a wolf or a dog a grey or brown fox; a ladybird a red beetle (no spots); a turtle a tortoise. Look at it on a
+contact sheet before you commit, and name the substitution in the screenplay. A prop (a strawberry, a kite, a
+lantern) is built the same way: a small static rig or a hidden stand-in with an overlay (<a href="effects.html#props">effects.md</a>).
+To frame part of something big (a planet&#39;s rings) no stand-in is needed: crop with the camera&#39;s <code>zoom</code> or <code>focus</code>.</p>
+<p><strong>Cast scale vs. size.</strong> Use the cast&#39;s <code>scale</code> (0.1–10) to make one actor bigger or smaller than the rig&#39;s default.
+The framing, routing and lint all account for it.</p>
+<h2 id="expressions"><a class="anchor" href="#expressions" aria-hidden="true">#</a>Expressions</h2>
+<p>The animal rigs share eleven expressions:</p>
+<div class="table"><table><thead><tr>
+<th>expression</th>
+<th>face</th>
+</tr>
+</thead><tbody><tr>
+<td><code>neutral</code></td>
+<td>relaxed, a slight smile</td>
+</tr>
+<tr>
+<td><code>happy</code></td>
+<td>smile, raised brows, cheeks up</td>
+</tr>
+<tr>
+<td><code>laugh</code></td>
+<td>eyes closed in a smile, mouth open</td>
+</tr>
+<tr>
+<td><code>sad</code></td>
+<td>lids lowered, brows up in the middle, frown</td>
+</tr>
+<tr>
+<td><code>surprised</code></td>
+<td>eyes wide, brows high, round open mouth</td>
+</tr>
+<tr>
+<td><code>angry</code></td>
+<td>slanted brows down, narrowed eyes, frown</td>
+</tr>
+<tr>
+<td><code>sleepy</code></td>
+<td>heavy lids</td>
+</tr>
+<tr>
+<td><code>smug</code></td>
+<td>half-lidded, one-sided smile</td>
+</tr>
+<tr>
+<td><code>worried</code></td>
+<td>brows up in the middle, a small frown</td>
+</tr>
+<tr>
+<td><code>scared</code></td>
+<td>eyes wide, small pupils, mouth open</td>
+</tr>
+<tr>
+<td><code>determined</code></td>
+<td>brows down, set mouth</td>
+</tr>
+</tbody></table></div>
+<p>Seen side-on some faces read differently from their names. On the hedgehog, the mouse and the badger, <code>sad</code> (a
+heavy lid slanted up toward the snout, the frown hidden in profile) reads as a scowl, close to <code>angry</code>: <code>worried</code>
+reads anxious and <code>sleepy</code> weary, and a pose or the music can carry the sadness. Talking opens the badger&#39;s mouth to a
+dark red gape with fangs and shows the fox&#39;s teeth, which read as a snarl on a gentle line in a close-up (frame those
+lines medium), and the deer&#39;s dropped white jaw reads as a grin. Draw the faces with <code>cast-sheet</code> before a close-up.</p>
+<p>The owl adds <code>one-eye</code>. The human has its own set: <code>neutral</code>, <code>happy</code>, <code>sad</code>, <code>surprised</code>, <code>angry</code>, <code>sleepy</code>,
+<code>worried</code>, <code>laughing</code>, <code>curious</code> (note <code>laughing</code>, not <code>laugh</code>). An expression a rig doesn&#39;t have is a <code>check</code>
+problem on <code>emote</code>, <code>pose</code> and <code>set</code> beats, and a warning on <code>say</code> lines and scene actors.</p>
+<h2 id="human"><a class="anchor" href="#human" aria-hidden="true">#</a>human</h2>
+<p><img src="images/humans.jpg" alt="Human variants at true relative size"></p>
+<p>One parametric rig for children, teens, adults and elders, drawn side-on: a true profile head (one eye, the nose on the face edge, the ear mid-head) on a three-quarter body. Height 141 units
+for the default child; the age sets the proportions (an adult is about 215 units, an elder about 205 and a little
+stooped). Speeds depend on age and build (a child walks about 92 units/s; an elder walks slower and shorter).</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>idle</code>, <code>idle-weight-shift</code>, <code>sit</code> / <code>sit-ground</code> (on the ground; the hips sit behind the
+contact point, where the feet will stand when she gets up), <code>sit-seat</code> (on a seat: place her on a surface anchor such
+as the village&#39;s <code>bench_seat</code>), <code>crouch</code>, <code>kneel</code>, <code>lie</code>, <code>sleep</code>, <code>look-up</code>, <code>hands-on-hips</code>, <code>arms-crossed</code>,
+<code>reach-up</code>, <code>carry</code>, <code>hold-hand-out</code>. A direct sit ↔ stand blend goes through a crouch, so she leans over her feet
+as she rises.</li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>run</code></li>
+<li><strong>gestures</strong> (seconds): <code>wave</code> 1.8, <code>nod</code> 0.9, <code>shake-head</code> 1.1, <code>shrug</code> 1.2, <code>laugh</code> 1.8, <code>jump-for-joy</code> 1.3
+(leaves the ground), <code>point</code> 1.3 (follows her eyeline: look <code>up</code> first to point at the sky, or at someone to point
+at them; a gesture beat passes only its <code>name</code>, so a <code>to</code> on it is ignored), <code>point-up</code> 1.3, <code>point-down</code> 1.3,
+<code>bow</code> 1.7, <code>gasp</code> 1.1, <code>beckon</code> 1.7, <code>clap</code> 1.4</li>
+<li><strong>expressions:</strong> <code>neutral</code>, <code>happy</code>, <code>sad</code>, <code>surprised</code>, <code>angry</code>, <code>sleepy</code>, <code>worried</code>, <code>laughing</code>, <code>curious</code></li>
+<li><strong>head pitch:</strong> <code>look</code> <code>to</code> <code>up</code> / <code>sky</code> / <code>down</code> (or a look&#39;s <code>tilt</code>) tilts the head; the eyes follow.</li>
+</ul>
+<p><strong>Params.</strong> Colours accept hex (<code>#3b2a20</code>) or a name: <code>red</code>, <code>blue</code>, <code>green</code>, <code>yellow</code>, <code>orange</code>, <code>pink</code>, <code>purple</code>,
+<code>brown</code>, <code>black</code>, <code>white</code>, <code>grey</code>, <code>blonde</code>, <code>ginger</code>, <code>navy</code>, <code>teal</code>, <code>cream</code>, <code>brass</code>, <code>gold</code>, <code>silver</code>, <code>copper</code>,
+<code>bronze</code>, <code>tortoiseshell</code>, <code>steel</code>, <code>moss</code>, <code>olive</code>, <code>ochre</code>, <code>mustard</code>, <code>rust</code>, <code>tan</code>, <code>beige</code>, <code>khaki</code>, <code>maroon</code>,
+<code>plum</code>, <code>lavender</code>, <code>sky</code>, <code>charcoal</code>, <code>ivory</code>.</p>
+<div class="table"><table><thead><tr>
+<th>param</th>
+<th>values</th>
+<th>default</th>
+</tr>
+</thead><tbody><tr>
+<td><code>age</code></td>
+<td><code>child</code>, <code>teen</code>, <code>adult</code>, <code>elder</code></td>
+<td><code>child</code></td>
+</tr>
+<tr>
+<td><code>build</code></td>
+<td><code>slight</code>, <code>slim</code>, <code>average</code>, <code>sturdy</code></td>
+<td><code>average</code></td>
+</tr>
+<tr>
+<td><code>height</code></td>
+<td>multiplier, 0.6–1.5</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>skin</code>, <code>eyes</code>, <code>hair</code></td>
+<td>colours</td>
+<td>by age</td>
+</tr>
+<tr>
+<td><code>blush</code></td>
+<td>0..1</td>
+<td>0.5</td>
+</tr>
+<tr>
+<td><code>hairStyle</code></td>
+<td><code>short</code>, <code>long</code>, <code>ponytail</code>, <code>bun</code>, <code>braids</code>, <code>curly</code>, <code>bald</code>, <code>cap</code></td>
+<td>by age (<code>short</code>; teens <code>ponytail</code>)</td>
+</tr>
+<tr>
+<td><code>beard</code></td>
+<td><code>none</code>, <code>short</code>, <code>full</code> (adults and elders only)</td>
+<td><code>none</code></td>
+</tr>
+<tr>
+<td><code>top</code></td>
+<td><code>shirt</code>, <code>cardigan</code> (an open knit cardigan in the <code>shirt</code> colour over <code>under</code>)</td>
+<td><code>shirt</code> (elders: <code>cardigan</code>)</td>
+</tr>
+<tr>
+<td><code>shirt</code>, <code>under</code></td>
+<td>colours</td>
+<td>by age</td>
+</tr>
+<tr>
+<td><code>bottom</code></td>
+<td><code>trousers</code>, <code>shorts</code>, <code>skirt</code>, <code>dress</code></td>
+<td>by age (children: <code>shorts</code>)</td>
+</tr>
+<tr>
+<td><code>pants</code></td>
+<td>trousers / shorts colour</td>
+<td>by age</td>
+</tr>
+<tr>
+<td><code>dress</code></td>
+<td>dress colour; also the colour of a skirt</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>dressStyle</code></td>
+<td><code>smock</code> (loose from a yoke), <code>fitted</code></td>
+<td>children <code>smock</code>, others <code>fitted</code></td>
+</tr>
+<tr>
+<td><code>hem</code></td>
+<td>skirt / dress length: 1 = knee, 2 = ankle (0.4–1.95)</td>
+<td>by age (elders long)</td>
+</tr>
+<tr>
+<td><code>shoes</code></td>
+<td>colour, or <code>null</code> / <code>&quot;none&quot;</code> for bare feet</td>
+<td>brown</td>
+</tr>
+<tr>
+<td><code>socks</code></td>
+<td>colour</td>
+<td>cream</td>
+</tr>
+<tr>
+<td><code>scarf</code>, <code>glasses</code>, <code>hat</code>, <code>apron</code>, <code>backpack</code></td>
+<td><code>true</code> (default colour), a colour, or <code>false</code></td>
+<td><code>false</code></td>
+</tr>
+<tr>
+<td><code>scarfLength</code></td>
+<td>0.4–2.5 (a child in an adult&#39;s scarf trails it)</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>tear</code></td>
+<td>0..1: a bead on the lower lid; from 0.7 a wet streak down the cheek</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>view</code></td>
+<td><code>profile</code> (one eye, nose on the face edge), <code>three-quarter</code> (the older head with both eyes)</td>
+<td><code>profile</code></td>
+</tr>
+</tbody></table></div>
+<h2 id="animal-rigs"><a class="anchor" href="#animal-rigs" aria-hidden="true">#</a>Animal rigs</h2>
+<p>Params are colours unless noted. Gesture lengths are in seconds; a gesture beat takes that long.</p>
+<h3 id="badger"><a class="anchor" href="#badger" aria-hidden="true">#</a>badger</h3>
+<p>Height 35 units, length 92. Speeds (units/s at scale 1): walk 36, run 120.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>alert</code>, <code>sit</code>, <code>upright</code>, <code>cheer</code>, <code>sleep</code>, <code>rest</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>run</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.8, <code>laugh</code> 1.4, <code>jump</code> 0.9, <code>cheer</code> 1.6, <code>wave</code> 1.6, <code>dig</code> 1.6, <code>sniff</code> 1.4</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>coat</code> <code>#8d8a86</code>, <code>face</code> <code>#f2efe8</code>, <code>dark</code> <code>#2e2a28</code>, <code>leg</code> <code>#433e3a</code>, <code>claw</code> <code>#d8cdb8</code></li>
+</ul>
+<h3 id="beetle"><a class="anchor" href="#beetle" aria-hidden="true">#</a>beetle</h3>
+<p>Height 7.5 units, length 11. Speeds (units/s at scale 1): walk 11, run 26.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>alert</code>, <code>sit</code>, <code>sleep</code>, <code>rest</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>run</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.6, <code>laugh</code> 1, <code>jump</code> 0.6, <code>wave</code> 1.2</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>shell</code> <code>#2e3a5a</code>, <code>leg</code> <code>#1e1e28</code></li>
+</ul>
+<h3 id="butterfly"><a class="anchor" href="#butterfly" aria-hidden="true">#</a>butterfly</h3>
+<p>Height 17 units, length 10. Speeds (units/s at scale 1): walk 4, fly 80, glide 70. Perches; flies.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>sit</code>, <code>open</code>, <code>alert</code>, <code>sleep</code>, <code>rest</code>, <code>perch</code></li>
+<li><strong>gaits:</strong> <code>fly</code>, <code>glide</code>, <code>walk</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.6, <code>laugh</code> 1, <code>jump</code> 0.7, <code>flutter</code> 1, <code>wave</code> 1</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>col</code> <code>#f2b24a</code>, <code>col2</code> <code>#e0884a</code>, <code>tip</code> <code>#3a2a30</code>, <code>spot</code> <code>#fbf3e0</code>, <code>body</code> <code>#3a2a30</code></li>
+</ul>
+<h3 id="deer"><a class="anchor" href="#deer" aria-hidden="true">#</a>deer</h3>
+<p>Height 143 units, length 100. Speeds (units/s at scale 1): walk 72, run 580.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>alert</code>, <code>graze</code>, <code>sit</code>, <code>sleep</code>, <code>rest</code>, <code>lie</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>run</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.9, <code>laugh</code> 1.4, <code>jump</code> 1.1, <code>graze</code> 2.4, <code>flick</code> 0.6, <code>stamp</code> 0.8</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>coat</code> <code>#a8805a</code>, <code>belly</code> <code>#efe4d0</code>, <code>muzzle</code> <code>#f2ece0</code>, <code>earIn</code> <code>#d9b8a0</code>, <code>hoof</code> <code>#2e2420</code>, <code>eye</code> <code>#2a1810</code>, <code>antler</code> <code>#d8c8a8</code>, <code>antlers</code> 0</li>
+</ul>
+<h3 id="fox"><a class="anchor" href="#fox" aria-hidden="true">#</a>fox</h3>
+<p>Height 83 units, length 92. Speeds (units/s at scale 1): walk 52, trot 148, run 500.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>alert</code>, <code>sit</code>, <code>lie</code>, <code>sleep</code>, <code>crouch</code>, <code>leap</code>, <code>rest</code>, <code>walk</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>trot</code>, <code>run</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.8, <code>laugh</code> 1.4, <code>jump</code> 0.9, <code>wave</code> 1.6, <code>point</code> 1.4, <code>sniff</code> 1.4, <code>bow</code> 1.6</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>coat</code> <code>#c8642e</code>, <code>cream</code> <code>#f4ede0</code>, <code>sock</code> <code>#2b2222</code>, <code>eye</code> <code>#a8721c</code></li>
+</ul>
+<h3 id="frog"><a class="anchor" href="#frog" aria-hidden="true">#</a>frog</h3>
+<p>Height 19 units, length 24. Speeds (units/s at scale 1): walk 26, hop 26, run 92. <code>walk</code> and <code>hop</code> are the same small
+hops (slow: 300 world px take about 9 s); <code>run</code> is big leaps, the way to move a frog quickly.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>alert</code>, <code>sit</code>, <code>sleep</code>, <code>croak</code>, <code>rest</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>hop</code>, <code>run</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.6, <code>laugh</code> 1.2, <code>jump</code> 0.9, <code>croak</code> 1.2, <code>catch</code> 0.7</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>skin</code> <code>#6f9a3c</code>, <code>belly</code> <code>#e0dca8</code>, <code>spot</code> <code>#4f7a2a</code>, <code>sac</code> <code>#efe8c0</code>, <code>eye</code> <code>#d8b84a</code></li>
+</ul>
+<h3 id="hare"><a class="anchor" href="#hare" aria-hidden="true">#</a>hare</h3>
+<p>Height 103 units, length 72. Speeds (units/s at scale 1): walk 46, hop 190, run 640.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>sit</code>, <code>stretch</code>, <code>bunch</code>, <code>up</code>, <code>mock</code>, <code>laugh</code>, <code>wiggle</code>, <code>offer</code>, <code>look</code>, <code>yawn</code>, <code>sleep</code>, <code>alert</code>, <code>ready</code>, <code>skid</code>, <code>slump</code>, <code>rest</code>, <code>crouch</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>hop</code>, <code>run</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.8, <code>laugh</code> 1.5, <code>jump</code> 0.9, <code>wave</code> 1.6, <code>point</code> 1.4, <code>yawn</code> 2, <code>thump</code> 0.9, <code>shrug</code> 1</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>fur</code> <code>#b08559</code>, <code>belly</code> <code>#efe2c8</code>, <code>earIn</code> <code>#e8a9a0</code>, <code>earTip</code> <code>#4a3428</code>, <code>nose</code> <code>#d97a7a</code>, <code>eye</code> <code>#3a2412</code>, <code>tail</code> <code>#f6efe2</code></li>
+</ul>
+<h3 id="hedgehog"><a class="anchor" href="#hedgehog" aria-hidden="true">#</a>hedgehog</h3>
+<p>Height 24 units, length 40. Speeds (units/s at scale 1): walk 18, run 42.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>alert</code>, <code>sit</code>, <code>ball</code>, <code>sleep</code>, <code>rest</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>run</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.7, <code>laugh</code> 1.2, <code>jump</code> 0.7, <code>sniff</code> 1.4, <code>curl</code> 2.2, <code>bristle</code> 1</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>spine</code> <code>#6a5240</code>, <code>tip</code> <code>#e8dcc4</code>, <code>face</code> <code>#d8c09a</code>, <code>belly</code> <code>#c9b08a</code>, <code>skin</code> <code>#b89878</code></li>
+</ul>
+<h3 id="mouse"><a class="anchor" href="#mouse" aria-hidden="true">#</a>mouse</h3>
+<p>Height 17.5 units, length 17. Speeds (units/s at scale 1): walk 24, scurry 24, run 80.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>sit</code>, <code>alert</code>, <code>gasp</code>, <code>cheer</code>, <code>sleep</code>, <code>rest</code>, <code>idle</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>scurry</code>, <code>run</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.6, <code>laugh</code> 1.2, <code>jump</code> 0.6, <code>wave</code> 1.4, <code>point</code> 1.3, <code>cheer</code> 1.4, <code>gasp</code> 1.2</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>fur</code> <code>#9a8a7c</code>, <code>belly</code> <code>#e6dccb</code>, <code>earIn</code> <code>#e8b0b0</code>, <code>nose</code> <code>#d88a8a</code>, <code>paw</code> <code>#e3b6a8</code>, <code>tail</code> <code>#c49a92</code>, <code>eye</code> <code>#1a1210</code></li>
+</ul>
+<h3 id="owl"><a class="anchor" href="#owl" aria-hidden="true">#</a>owl</h3>
+<p>Height 62 units, length 36. Speeds (units/s at scale 1): walk 22, run 70, fly 220, glide 200. Perches; flies.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>alert</code>, <code>sit</code>, <code>sleep</code>, <code>spread</code>, <code>hoot</code>, <code>rest</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>run</code>, <code>fly</code>, <code>glide</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.8, <code>laugh</code> 1.4, <code>jump</code> 0.9, <code>hoot</code> 1.2, <code>flap</code> 1.2, <code>turn</code> 1.8, <code>wave</code> 1.4</li>
+<li><strong>expressions:</strong> the standard eleven plus <code>one-eye</code></li>
+<li><strong>params:</strong> <code>body</code> <code>#8a6a4a</code>, <code>belly</code> <code>#d9c4a0</code>, <code>disc</code> <code>#ecdcbc</code>, <code>wing</code> <code>#7a5a3e</code>, <code>beak</code> <code>#e0a840</code>, <code>eye</code> <code>#f2c94c</code>, <code>leg</code> <code>#cdb48c</code>, <code>toe</code> <code>#b8955a</code></li>
+</ul>
+<h3 id="songbird"><a class="anchor" href="#songbird" aria-hidden="true">#</a>songbird</h3>
+<p>Height 24 units, length 30. Speeds (units/s at scale 1): walk 26, hop 26, run 54, fly 190, glide 170. Perches; flies.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>alert</code>, <code>sit</code>, <code>sleep</code>, <code>sing</code>, <code>spread</code>, <code>rest</code>, <code>perch</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>hop</code>, <code>run</code>, <code>fly</code>, <code>glide</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.6, <code>laugh</code> 1.2, <code>jump</code> 0.6, <code>sing</code> 2, <code>flap</code> 1, <code>peck</code> 0.8, <code>wave</code> 1.2</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>body</code> <code>#6a4a3a</code>, <code>breast</code> <code>#d9b386</code>, <code>wing</code> <code>#553a2c</code>, <code>beak</code> <code>#e0ad5a</code>, <code>leg</code> <code>#8a6a50</code></li>
+</ul>
+<h3 id="squirrel"><a class="anchor" href="#squirrel" aria-hidden="true">#</a>squirrel</h3>
+<p>Height 52 units, length 24. Speeds (units/s at scale 1): walk 24, run 165. Perches.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>sit</code>, <code>hold</code>, <code>alert</code>, <code>shush</code>, <code>sleep</code>, <code>flop</code>, <code>sprawl</code>, <code>rest</code>, <code>perch</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>run</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 0.7, <code>laugh</code> 1.3, <code>jump</code> 0.8, <code>wave</code> 1.4, <code>point</code> 1.3, <code>shush</code> 1.5, <code>drop</code> 1.2, <code>nibble</code> 1.6</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>coat</code> <code>#b4542a</code>, <code>cream</code> <code>#f0dcc0</code>, <code>earIn</code> <code>#d98a78</code>, <code>nose</code> <code>#3a2020</code>, <code>eye</code> <code>#1a1210</code>, <code>tail</code> 1</li>
+</ul>
+<h3 id="tortoise"><a class="anchor" href="#tortoise" aria-hidden="true">#</a>tortoise</h3>
+<p>Height 50 units, length 96. Speeds (units/s at scale 1): walk 15, run 34. Has a riding point (<code>mount</code>); slow looker (1 s).</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>alert</code>, <code>stretch</code>, <code>sit</code>, <code>sleep</code>, <code>hide</code>, <code>droop</code>, <code>rest</code></li>
+<li><strong>gaits:</strong> <code>walk</code>, <code>run</code></li>
+<li><strong>gestures</strong> (seconds): <code>nod</code> 1, <code>laugh</code> 1.5, <code>jump</code> 0.9, <code>wave</code> 1.8, <code>hide</code> 2.4, <code>stretch</code> 1.6</li>
+<li><strong>expressions:</strong> the standard eleven</li>
+<li><strong>params:</strong> <code>skin</code> <code>#a7a36a</code>, <code>shell</code> <code>#6f8a46</code>, <code>rim</code> <code>#d8c58c</code>, <code>claw</code> <code>#e8e0c0</code>, <code>eye</code> <code>#2a1e16</code>, <code>iris</code> <code>null</code>, <code>seam</code> <code>null</code>, <code>moss</code> <code>null</code>, <code>star</code> 0, <code>starCol</code> <code>#ede6d0</code>, <code>lids</code> 0, <code>wet</code> 0</li>
+</ul>
+<h2 id="worlds-and-things"><a class="anchor" href="#worlds-and-things" aria-hidden="true">#</a>Worlds and things</h2>
+<h3 id="planet"><a class="anchor" href="#planet" aria-hidden="true">#</a>planet</h3>
+<p>A planet, moon or star as an actor: the camera frames it (<code>on</code>), pushes in on it and lints it like a character. One
+rig with a <code>body</code> preset per world: <code>saturn</code> (default), <code>jupiter</code>, <code>earth</code>, <code>mars</code>, <code>venus</code>, <code>mercury</code>, <code>uranus</code>,
+<code>neptune</code>, <code>moon</code> (Earth&#39;s), <code>titan</code>, <code>sun</code>. Every globe is drawn 100 units across (Saturn is 226 with its rings, 91.5
+tall), so sizes come from the cast <code>scale</code>: for true relative sizes, multiply by the ratio of their radii (<code>radiusOf</code>
+in <code>cinecode/paint/planets</code>, true equatorial radii in km: Earth / Saturn = 0.1058, so an Earth beside a Saturn at
+<code>scale</code> 2.5 is 0.26). Saturn&#39;s rings are at their true radii (the C, B and A rings, the Cassini Division and the Encke
+Gap); the colours are a storybook&#39;s.</p>
+<ul>
+<li><strong>poses:</strong> <code>stand</code>, <code>perch</code>; it holds at a <code>perch</code> anchor (the <a href="sets.html#space"><code>space</code></a> kit&#39;s) or stands on the ground</li>
+<li><strong>expressions:</strong> <code>neutral</code> only: no face. It stays upright on a slope and throws no shadow.</li>
+<li><strong>params:</strong> <code>body</code>; <code>tilt</code> (the rings&#39; opening, radians: 0 edge-on, Saturn&#39;s default 0.38), <code>roll</code> (the whole body
+turned in the picture), <code>axis</code> (how much of a ringless body&#39;s pole we see), <code>spin</code> (band and feature drift per
+second), <code>size</code></li>
+<li>Its <code>head</code> is the globe&#39;s centre, so a <code>close</code> shot frames the globe. A moon behind or in front of a planet is
+another planet actor with a <code>z</code> (<a href="storyboard.html#depth">depth</a>); the built-in space effects (<code>sizerow</code>, <code>moonlets</code>,
+<code>orbit</code>, <code>lightpulse</code>, <code>sunglow</code>: <a href="effects.html#built-in-effects">effects.md</a>) take a planet actor as <code>who</code>.</li>
+</ul>
+<h3 id="telescope"><a class="anchor" href="#telescope" aria-hidden="true">#</a>telescope</h3>
+<p>A refractor on a wooden tripod, seen side-on, the tube pointing up the way it faces, a prop with no face. Height 192.3
+units (the tube&#39;s tip), 74 long.</p>
+<ul>
+<li><strong>params:</strong> <code>angle</code> (the tube&#39;s elevation, radians, default 0.5), <code>eye</code> (the eyepiece&#39;s height, units, default 116: a
+standing child&#39;s eye with the human rig), <code>tube</code>, <code>trim</code>, <code>legs</code>, <code>dark</code> (colours)</li>
+<li>A child at the eyepiece faces the same way and stands 66 × s behind the telescope&#39;s contact point, a few px nearer
+the camera (s = the set&#39;s scale there × cast <code>scale</code>): facing left, the child&#39;s x = the telescope&#39;s x + 66 × s.</li>
+<li>Its <code>head</code> is the eyepiece, so a <code>close</code> on it frames the eyecup and a face at it.</li>
+</ul>
+<h3 id="rig-specific-params"><a class="anchor" href="#rig-specific-params" aria-hidden="true">#</a>Rig-specific params</h3>
+<div class="table"><table><thead><tr>
+<th>rig</th>
+<th>param</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td>deer</td>
+<td><code>antlers</code></td>
+<td>1 draws antlers (0: none)</td>
+</tr>
+<tr>
+<td>squirrel</td>
+<td><code>tail</code></td>
+<td>brush size, 0.4–1.8; above about 1.1 fluffier, below 0.7 flat and thin like a wet paintbrush</td>
+</tr>
+<tr>
+<td>tortoise</td>
+<td><code>star</code></td>
+<td>0..1 opacity of a pale five-point marking on a rear scute (0: none); <code>starCol</code> its colour</td>
+</tr>
+<tr>
+<td>tortoise</td>
+<td><code>moss</code></td>
+<td>a colour for moss patches on the shell, or <code>null</code></td>
+</tr>
+<tr>
+<td>tortoise</td>
+<td><code>seam</code></td>
+<td>scute seam colour (default: a darker shell)</td>
+</tr>
+<tr>
+<td>tortoise</td>
+<td><code>lids</code></td>
+<td>0..1 resting upper-lid closure (an old animal&#39;s heavy lids)</td>
+</tr>
+<tr>
+<td>tortoise</td>
+<td><code>wet</code></td>
+<td>0..1: darker, glossier shell and skin, with drips falling from the rim</td>
+</tr>
+<tr>
+<td>tortoise</td>
+<td><code>iris</code></td>
+<td>an iris colour (<code>eye</code> is then the pupil); <code>null</code> = one dark eye</td>
+</tr>
+</tbody></table></div>
+<p>The tortoise is a slow looker (a look or head tilt takes about 1 s), withdraws its head with the <code>hide</code> gesture and
+pose, and has a <code>droop</code> pose (head lowered, sad). The squirrel&#39;s <code>flop</code> pose lies over something rounded (a shell, a
+branch) with its legs and tail hanging. Change params mid-scene with a <code>set</code> beat:
+<code>{ &quot;do&quot;: &quot;set&quot;, &quot;who&quot;: &quot;pebble&quot;, &quot;params&quot;: { &quot;wet&quot;: 0 } }</code>.</p>
+<h2 id="adding-a-rig"><a class="anchor" href="#adding-a-rig" aria-hidden="true">#</a>Adding a rig</h2>
+<p>A film can bring its own rigs: one file per rig, <code>films/&lt;slug&gt;/rigs/&lt;kind&gt;.mjs</code>, that default-exports it (for every
+film of a project, <code>cinecode/rigs/&lt;kind&gt;.mjs</code> at the project root; <code>custom.mjs</code> may also export a list as <code>rigs</code>).
+Use its <code>kind</code> in the cast. The easy way to write one is <code>makeRig</code> from <code>cinecode/rig</code>, which turns a <code>paint()</code>
+function into the full rig contract: drawing at any position, scale and facing, the ground shadow, bounds for framing
+and lint, facial expressions, blinks, talking and head pitch. This example is a complete, working rig that passes the
+gate, <code>cinecode verify-rig films/&lt;slug&gt;/rigs/pebblet.mjs</code> (the <code>build-rig</code> skill walks through a new rig from its
+starter, a small biped with planted feet):</p>
+<pre><code class="language-js">// films/&lt;slug&gt;/rigs/pebblet.mjs
+import { makeRig, mixPose } from &#39;cinecode/rig&#39;;
+import { cel, eye, line } from &#39;cinecode/style&#39;;
+import { ell } from &#39;cinecode/lib&#39;;
+
+// Pose fields are plain numbers that paint() reads: here a body drop `by` and a lean `ln` (radians).
+const stand = { by: 0, ln: 0 };
+const bob = (amp, ph) =&gt; ({ ...stand, by: -amp * Math.abs(Math.sin(Math.PI * 2 * ph)) });
+
+const pebblet = makeRig({
+  kind: &#39;pebblet&#39;, label: &#39;Pebblet&#39;,
+  height: 40, headHeight: 24, width: 36,          // units at scale 1: for framing, routing and lint
+  params: { body: &#39;#8fb0c8&#39;, eye: &#39;#2a1a14&#39; },
+  speeds: { walk: 30, run: 90 }, stride: { walk: 18, run: 40 },
+  poses: { stand, sit: { ...stand, by: 5 }, sleep: { ...stand, by: 7 } },
+  gaits: { walk: ph =&gt; bob(2, ph), run: ph =&gt; bob(5, ph) },
+  gestures: { nod: { dur: 0.8, at: (u, base) =&gt; mixPose(base, { ...base, ln: 0.25 }, Math.sin(Math.PI * u)) } },
+  // local units: origin = the contact point, +x = forward, y up is negative, the ground is y = 0
+  paint(T, p, F, o) {
+    T.save(); T.translate(0, p.by - 18); T.rotate(p.ln); T.translate(0, 18);     // drop by `by`, lean about the middle
+    cel(T, ell(0, -18 - p.by / 2, 19, 18 - p.by / 2, 7, 0.5), o.P.body, 1.6, 1, 7);  // body, squashed onto the ground
+    eye(T, 8, -24, 3, 3.6, F.eye, o.P.eye, F.look * 0.3, F.lid, F.tilt);            // expression, blinks, looks
+    const m = 2 + 4 * F.open;                                                      // F.open: talk / expression
+    line(T, [[6, -13], [10, -13 + m * 0.5 - F.smile * 1.5], [14, -13]], 0.8, { seed: 9 });
+    o.out.head = T.map(6, -24); o.out.mouth = T.map(10, -13);                      // anchors for framing and lip sync
+    T.restore();
+  },
+});
+export default pebblet;
+</code></pre>
+<pre><code class="language-json">&quot;cast&quot;: { &quot;pebblet&quot;: { &quot;rig&quot;: &quot;pebblet&quot;, &quot;name&quot;: &quot;Pebblet&quot;, &quot;voice&quot;: &quot;pebblet&quot; } }
+</code></pre>
+<p>How it fits together:</p>
+<ul>
+<li><code>paint(T, pose, F, o)</code> draws in <strong>local units</strong>: the origin is the contact point (the feet), +x is forward (the rig
+is mirrored for <code>face: -1</code>), the ground is y = 0 and up is negative y. <code>T</code> is a 2D context wrapper that also
+records what is drawn, so bounds are exact.</li>
+<li><code>pose</code> is the current pose object: one of <code>poses</code>, a gait frame (<code>gaits.walk(phase)</code> for phase 0..1 over one
+stride), a gesture frame (<code>gestures.nod.at(u, base)</code> for u 0..1), or a blend of them. Pose fields are plain numbers
+that only your <code>paint</code> reads. A pose may set <code>lift</code> (units above the ground, e.g. a jump).</li>
+<li>A gesture&#39;s <code>at(u, base)</code> should start and end on the pose it is given (<code>base</code>). If it doesn&#39;t, the actor eases it
+in or out over 0.15–0.3 s (longer for a bigger move). A gesture may list <code>keys</code>, the u of its key drawings
+(<code>{ dur, at, keys: [0.1, 0.4, 0.7, 1] }</code>; the cast sheet draws them). One whose <code>keys</code> include 1 is one-way: it ends
+on purpose away from the pose (the squirrel&#39;s <code>drop</code> leaves the acorn on the ground) and is not eased out.</li>
+<li><code>F</code> is the face for this frame, from the expression, blink and lip sync: <code>F.eye</code> (<code>open</code>, <code>wide</code>, <code>happy</code>),
+<code>F.lid</code> (0..1), <code>F.open</code> (mouth, 0..1; it follows the voice while talking), <code>F.smile</code> (−1..1), <code>F.browY</code>,
+<code>F.browT</code>, <code>F.tilt</code>, <code>F.look</code> (−1..1 head turn), <code>F.pitch</code> (−1..1 head tilt). <code>eye()</code>, <code>brow()</code>, <code>cel()</code> and
+<code>line()</code> in <code>cinecode/style</code> draw them in the house style. The helpers, all in local units and taking <code>T</code>
+first: <code>cel(T, pts, colour, shade = 2.2, ink = 1.15, seed)</code> fills a closed outline, shades the side away from the
+light by <code>shade</code> units and inks it (<code>ink</code> 0: no outline); <code>line(T, pts, width, { seed, taper, color, closed })</code> an
+inked stroke; <code>fillP(T, pts, colour)</code> a flat fill; <code>dot(T, x, y, r, colour)</code>; <code>smoothPts(T, pts, { closed, px, corner })</code> rounds a polygon into a smooth outline; <code>eye(T, x, y, rx, ry, F.eye, iris, look, F.lid, F.tilt)</code> and
+<code>brow(T, x, y, w, F.browY, F.browT)</code>; <code>darken(hex, f)</code>, <code>lighten(hex, f)</code>, <code>rgba(hex, a)</code>. From
+<code>cinecode/lib</code>: <code>ell(cx, cy, rx, ry, seed, wobble = 1.5, rot)</code> a hand-drawn ellipse as points, <code>rpoly(pts, r, { seed })</code> a rounded polygon, <code>rng(seed)</code> a seeded generator.</li>
+<li>A prop is a rig too (a strawberry that splits and is eaten): no gaits or gestures to speak of (<code>gaits: { walk: () =&gt; stand }</code>, <code>speeds: { walk: 1 }</code>), a pose per state (<code>split</code>) and params for the rest (<code>left: 1</code> → 0 as a half is
+eaten), <code>shadowW</code> to size its ground shadow. See <a href="effects.html#props">effects.md</a> for what comes with it.</li>
+<li><code>o.P</code> holds the params (the rig&#39;s <code>params</code> merged with the cast&#39;s), <code>o.t</code> the scene time for secondary motion.
+Set <code>o.out.head</code> and <code>o.out.mouth</code> with <code>T.map(x, y)</code>: the camera composes close-ups on the head, captions avoid
+it, and the mouth is where talking happens.</li>
+<li><code>height</code>, <code>headHeight</code>, <code>width</code>, <code>speeds</code> and <code>stride</code> drive framing, routing and walk timing. <code>stride</code> is how far
+one gait cycle travels, so feet don&#39;t slide.</li>
+<li>Optional: <code>perch: true</code>, <code>flies: true</code> (with a <code>fly</code> gait), <code>mount(pose, params)</code> → <code>[x, y]</code> riding point,
+<code>lookTime</code> (seconds a look takes), <code>feet(pose)</code> → contact points (so gestures layered over a walk keep planted feet
+still), <code>steps: { walk: [0, 0.5] }</code> (gait phases where a foot lands, for footstep sounds), <code>expressions</code> (default:
+the eleven above), <code>shadowW</code>, <code>breathPeriod</code>, <code>hangPoses</code> (poses whose legs hang below the ground on purpose).
+<code>sizes(params)</code> → <code>{ height, headHeight, width, speeds, stride }</code> when the numbers depend on the params (the human&#39;s
+age, the planet&#39;s body; without it a <code>size</code> param scales them). <code>upright: true</code> keeps the drawing vertical on a slope
+(<code>false</code> makes it follow the slope; by default animals follow and the human and fliers stay upright). <code>noShadow: true</code> draws no contact shadow under it; <code>shadowA</code> is that shadow&#39;s opacity (default 0.26). <code>faceless: true</code> (or
+<code>false</code>) says whether the rig has a face, when its expressions alone would say otherwise.</li>
+</ul>
+<p>A rig written without <code>makeRig</code> must provide the contract in DESIGN.md §2 (<code>kind</code>, <code>draw(ctx, x, y, s, face, st)</code>
+returning <code>{ head, mouth, bounds }</code> and accepting <code>ctx = null</code>, <code>bbox</code>, <code>poses</code>, <code>gaits</code>, <code>gestures</code>, <code>expressions</code>).
+Check the result with <code>node bin/cinecode.mjs verify-rig &lt;file&gt;</code>: contract, size, bounds, ground, flip, determinism,
+face and motion, plus two images to look at (every pose, gait phase, gesture key and expression; a line-up beside the
+hare, the child and the mouse), written to <code>out/verify/</code> beside the folder that holds the rig
+(<code>films/&lt;slug&gt;/out/verify/</code> for a film&#39;s, <code>cinecode/out/verify/</code> for a project&#39;s; the gate prints the paths). A rig
+whose <code>kind</code> is a built-in one&#39;s replaces it for the film (<code>check</code> says so), so give it a kind of its own. Then <code>node bin/cinecode.mjs cast-sheet films/&lt;slug&gt; &lt;kind&gt;</code>. A rig used by more than
+one film of a project goes in its <code>cinecode/rigs/</code>; one that becomes part of the engine in <code>engine/cast/&lt;kind&gt;.mjs</code>
+(every file there is registered automatically) with a test in <code>test/rigs.test.mjs</code>.</p>
+
+<p class="edit"><a href="https://github.com/zakariaf/cinecode/blob/main/docs/cast.md">This page on GitHub</a></p></article></main><footer><div class="wrap"><p>cinecode is open source under the MIT licence · © 2026 Zakaria Fatahi · <a href="https://github.com/zakariaf/cinecode">github.com/zakariaf/cinecode</a></p>
+<p>Every picture, movement, note and sound in these films is made by code. Only the voices come from a model (Gemini TTS).</p></div></footer></body></html>

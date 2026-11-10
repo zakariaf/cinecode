@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rendering · cinecode</title><meta name="description" content="cinecode docs: Rendering">
+<meta property="og:title" content="Rendering · cinecode"><meta property="og:description" content="cinecode docs: Rendering">
+<meta property="og:image" content="https://zakariaf.github.io/cinecode/films/seventy-six-summers.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../style.css"></head>
+<body><header class="top"><div class="wrap">
+  <a class="mark" href="../index.html">cine<span>code</span></a>
+  <nav><a href="../index.html#films">Films</a><a href="../index.html#install">Install</a><a href="../docs/storyboard.html" aria-current="page">Docs</a><a href="https://github.com/zakariaf/cinecode">GitHub</a></nav>
+</div></header><main class="docs wrap"><aside class="side"><p class="label">Docs</p><ul><li><a href="storyboard.html">Storyboard</a></li><li><a href="cast.html">Cast and rigs</a></li><li><a href="sets.html">Sets</a></li><li><a href="effects.html">Effects</a></li><li><a href="sound.html">Voices, music and sound</a></li><li><a href="lint.html">Lint</a></li><li><a href="rendering.html" aria-current="page">Rendering</a></li></ul>
+<p class="label">On this page</p><ul class="toc"><li><a href="#commands">Commands</a></li><li><a href="#environment">Environment</a></li><li><a href="#performance">Performance</a></li></ul></aside><article class="prose"><h1 id="rendering-the-command-line"><a class="anchor" href="#rendering-the-command-line" aria-hidden="true">#</a>Rendering: the command line</h1>
+<pre><code class="language-sh">node bin/cinecode.mjs &lt;command&gt; films/&lt;slug&gt; [options]
+</code></pre>
+<p>Run it from the repository root. The film argument is a folder holding a <code>film.json</code> (<code>films/my-film</code>, or any path),
+a path to a <code>film.json</code>, or a bare slug (<code>my-film</code> → <code>films/my-film</code>). Options take <code>--name=value</code> or <code>--name value</code>;
+<code>cinecode &lt;command&gt; --help</code> (or <code>cinecode help &lt;command&gt;</code>) prints a command&#39;s options, <code>cinecode --help</code> the list, and
+<code>cinecode --version</code> the version.</p>
+<p>Exit status: 0 done, 1 failed (including <code>lint</code> finding errors), 2 a usage error, 130 interrupted (Ctrl-C stops the
+workers and encoders and cleans up; a second Ctrl-C exits at once).</p>
+<h2 id="commands"><a class="anchor" href="#commands" aria-hidden="true">#</a>Commands</h2>
+<div class="table"><table><thead><tr>
+<th>command</th>
+<th>does</th>
+<th>writes</th>
+</tr>
+</thead><tbody><tr>
+<td><code>new &lt;slug&gt;</code></td>
+<td>scaffold a film from <code>templates/</code></td>
+<td><code>films/&lt;slug&gt;/film.json</code>, <code>screenplay.md</code>, <code>custom.mjs</code></td>
+</tr>
+<tr>
+<td><code>check &lt;film&gt;</code></td>
+<td>validate <code>film.json</code> and load <code>custom.mjs</code></td>
+<td>nothing</td>
+</tr>
+<tr>
+<td><code>plan &lt;film&gt;</code></td>
+<td>compile and print the shot list</td>
+<td>nothing</td>
+</tr>
+<tr>
+<td><code>voice &lt;film&gt;</code></td>
+<td>voice new or changed lines, with QA</td>
+<td><code>voices/&lt;id&gt;.wav</code> + <code>.json</code></td>
+</tr>
+<tr>
+<td><code>sheet &lt;film&gt;</code></td>
+<td>contact sheet: the middle frame of every shot</td>
+<td><code>out/sheet.jpg</code></td>
+</tr>
+<tr>
+<td><code>lint &lt;film&gt;</code></td>
+<td>staging and editing checks</td>
+<td><code>out/lint.json</code>, <code>out/lint.jpg</code></td>
+</tr>
+<tr>
+<td><code>music &lt;film&gt;</code></td>
+<td>compose the score</td>
+<td><code>out/music.wav</code></td>
+</tr>
+<tr>
+<td><code>mix &lt;film&gt;</code></td>
+<td>score + dialogue + effects + ambience, mastered</td>
+<td><code>out/music.wav</code>, <code>out/mix.wav</code></td>
+</tr>
+<tr>
+<td><code>animatic &lt;film&gt;</code></td>
+<td>quick preview with sound</td>
+<td><code>out/animatic.mp4</code> (+ the mix)</td>
+</tr>
+<tr>
+<td><code>render &lt;film&gt;</code></td>
+<td>the final film</td>
+<td><code>out/&lt;slug&gt;.mp4</code>, <code>out/&lt;slug&gt;.srt</code> (+ the mix)</td>
+</tr>
+<tr>
+<td><code>cast-sheet [film] [kinds…]</code></td>
+<td>every rig in its poses and expressions</td>
+<td><code>out/cast-sheet.jpg</code></td>
+</tr>
+<tr>
+<td><code>set-sheet [film] [kits…]</code></td>
+<td>every kit with anchors, footprints and walk regions</td>
+<td><code>out/set-sheet.jpg</code></td>
+</tr>
+<tr>
+<td><code>verify-rig &lt;file|kind&gt;</code></td>
+<td>a new rig&#39;s gate: checks and review images</td>
+<td><code>out/verify/&lt;kind&gt;.jpg</code>, <code>&lt;kind&gt;-lineup.jpg</code></td>
+</tr>
+<tr>
+<td><code>verify-kit &lt;file|name&gt;</code></td>
+<td>a new kit&#39;s gate: checks and review images</td>
+<td><code>out/verify/&lt;name&gt;.jpg</code>, <code>&lt;name&gt;-times.jpg</code></td>
+</tr>
+<tr>
+<td><code>verify-effect &lt;film&gt; [names…]</code></td>
+<td>a film&#39;s effects&#39; gate: checks and a review strip</td>
+<td><code>out/verify/effects[-&lt;names&gt;].jpg</code></td>
+</tr>
+</tbody></table></div>
+<p><code>out/</code> is the film&#39;s own <code>films/&lt;slug&gt;/out/</code>, except for <code>cast-sheet</code> and <code>set-sheet</code> without a film, which write to
+<code>out/</code> in the current folder, and <code>verify-rig</code> and <code>verify-kit</code> given a file, which write to <code>out/</code> beside the folder
+that holds it: <code>films/&lt;slug&gt;/out/verify/</code> for a film&#39;s <code>rigs/</code> or <code>kits/</code>, <code>cinecode/out/verify/</code> for a project&#39;s
+(<code>--out=DIR</code> puts them elsewhere; given a registered name, <code>out/verify/</code> in the current folder).</p>
+<h3 id="new"><a class="anchor" href="#new" aria-hidden="true">#</a>new</h3>
+<pre><code class="language-sh">node bin/cinecode.mjs new my-film --title=&quot;The Lantern Moth&quot;
+</code></pre>
+<p>Creates <code>films/my-film/</code> (or the path given, when it contains a <code>/</code>) from the files in <code>templates/</code>: a starter
+<code>film.json</code> (one scene of six shots, about 39 s with its title cards: a girl, a hare and an owl in the meadow), <code>screenplay.md</code> with the
+sections to fill in, and <code>custom.mjs</code> with a commented custom beat, overlay and sound. Every <code>{{title}}</code> in them
+becomes the title (default: from the slug, <code>my-film</code> → &quot;My Film&quot;). It refuses to overwrite an existing <code>film.json</code>
+and skips existing files unless <code>--force</code> is given.</p>
+<h3 id="check-and-plan"><a class="anchor" href="#check-and-plan" aria-hidden="true">#</a>check and plan</h3>
+<pre><code class="language-sh">node bin/cinecode.mjs check films/my-film
+node bin/cinecode.mjs plan films/my-film
+</code></pre>
+<p><code>check</code> lists every problem with its path in <code>film.json</code> (<a href="storyboard.html#checking-a-storyboard">storyboard.md</a>).
+When the film is valid it names the extension files it loaded (<code>rigs/kite.mjs</code>, <code>cinecode/kits/harbour.mjs</code>), marking
+one that replaces a built-in rig, kit or effect of the same name: <code>cinecode/effects/rows.mjs (replaces the built-in custom beat &quot;sizerow&quot;)</code>.
+<code>plan</code> compiles the film and prints its length and the shot list: id, set, size, start, length and the first line of
+each shot. Unvoiced lines use an estimate, marked <code>~</code>. Neither prints warnings; the Claude Code skill&#39;s
+<code>node .claude/skills/cinecode/scripts/warnings.mjs films/my-film</code> does. Nor does <code>plan</code> print when each beat starts
+and ends: <code>node .claude/skills/cinecode/scripts/timeline.mjs films/my-film [shot ids]</code> prints every beat&#39;s start and
+end (in the shot and in the film), a move that runs on past its cut and into which shot, every mark&#39;s film time (for
+<code>sheet --t=</code>), and a pose or gesture that starts while its actor is still moving (where it is lost).</p>
+<pre><code>compile  0:38.8, 6 shots, 0/5 lines voiced                        0.4 s
+         (5 lines not voiced yet: timing uses estimates; run `cinecode voice`)
+
+My Film — 0:38.8 · 6 shots · 1 scene · 1920×1080 @ 24 fps
+
+shot      set       size             start    dur   lines
+1.1       meadow    establishing    0:04.0   7.8s   ~narrator: &quot;At the edge of the old forest, a girl named…
+1.2       meadow    full            0:11.8   5.8s   ~pip: &quot;Hello? Is anybody out here?&quot;
+1.3       meadow    medium          0:17.6   3.8s   ~hare: &quot;Only me. I was having a nap.&quot;
+1.4       meadow    full            0:21.4   4.3s   ~pip: &quot;Then wake up! Race you to the pond!&quot;
+1.5       meadow    wide            0:25.7   2.3s
+1.6       meadow    full            0:28.0   6.8s   ~narrator: &quot;And that is how the summer began.&quot;
+
+5 lines (5 estimated, marked ~) · 17 sfx · 1 music cues · 5 captions
+</code></pre>
+<p>The first shot starts at 0:04 because the opening title card comes first; the total (0:38.8) includes both title
+cards, 4 s each here, so for a short film they are a big share of its length. Don&#39;t cut them below 3 s: a shorter card
+never reaches full strength (<a href="storyboard.html#format-and-titles">titles</a>).</p>
+<h3 id="voice"><a class="anchor" href="#voice" aria-hidden="true">#</a>voice</h3>
+<p>Needs <code>GEMINI_API_KEY</code>. Sends only lines missing from the cache, checks every take, and prints each line&#39;s length
+and word error rate (<a href="sound.html#voices">sound.md</a>).</p>
+<h3 id="sheet"><a class="anchor" href="#sheet" aria-hidden="true">#</a>sheet</h3>
+<pre><code class="language-sh">node bin/cinecode.mjs sheet films/my-film                     # middle frame of every shot
+node bin/cinecode.mjs sheet films/my-film --t=12,0:40.5 --cols=2 --tile=960 -o films/my-film/out/two.jpg
+</code></pre>
+<div class="table"><table><thead><tr>
+<th>option</th>
+<th>meaning</th>
+<th>default</th>
+</tr>
+</thead><tbody><tr>
+<td><code>--t=T,T,…</code></td>
+<td>draw these times (seconds or m:ss) instead of one frame per shot</td>
+<td></td>
+</tr>
+<tr>
+<td><code>--cols=N</code></td>
+<td>columns</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>--tile=PX</code></td>
+<td>tile width in pixels</td>
+<td>480</td>
+</tr>
+<tr>
+<td><code>-o</code>, <code>--out=PATH</code></td>
+<td>output file</td>
+<td><code>out/sheet.jpg</code></td>
+</tr>
+</tbody></table></div>
+<p>Each tile is labelled with its shot id, time and the caption or line at that moment.</p>
+<p>For closer work there is a second tool with shot ids, points inside a shot, a debug overlay and full-size stills:</p>
+<pre><code class="language-sh">node engine/film/sheet.mjs films/&lt;slug&gt; films/&lt;slug&gt;/out/s01.jpg --shots=1.2,1.3 --cols=2 --tile=640
+node engine/film/sheet.mjs films/&lt;slug&gt; films/&lt;slug&gt;/out/strip.jpg --shots=1.5@0.1,1.5@0.5,1.5@0.9 --cols=3
+node engine/film/sheet.mjs films/&lt;slug&gt; films/&lt;slug&gt;/out/debug.jpg --shots=1.4 --debug
+node engine/film/sheet.mjs films/&lt;slug&gt; films/&lt;slug&gt;/out/still.jpg --shots=1.6 --frame
+</code></pre>
+<p><code>--shots=</code> takes shot ids, each at its middle or at <code>@u</code> (0..1 through the shot; <code>--u=</code> changes the default);
+<code>--t=</code> takes seconds. <code>--debug</code> draws actor boxes (yellow while speaking), head boxes, contact points, solid
+footprints and the caption box. <code>--frame</code> writes full-size stills instead of a sheet (one file per time).</p>
+<h3 id="lint"><a class="anchor" href="#lint" aria-hidden="true">#</a>lint</h3>
+<p><code>--step=S</code> sets the sampling step in seconds (default 1/6). See <a href="lint.html">lint.md</a>.</p>
+<h3 id="music-and-mix"><a class="anchor" href="#music-and-mix" aria-hidden="true">#</a>music and mix</h3>
+<p><code>music</code> composes the score to <code>out/music.wav</code>. <code>mix</code> composes it and mixes it with the cached dialogue, the
+effects and the ambience, mastering to −16 LUFS in <code>out/mix.wav</code> (<a href="sound.html#the-mix">sound.md</a>). Unvoiced lines are
+left out with a warning. To check the score without listening, the skill&#39;s
+<code>node .claude/skills/cinecode/scripts/levels.mjs films/my-film [music|mix]</code> prints its level per shot in 0.5 s
+windows and flags a second or more of near-silence under a cue (a whole-shot average hides it); it reads the WAV
+itself, no ffmpeg needed.</p>
+<h3 id="animatic"><a class="anchor" href="#animatic" aria-hidden="true">#</a>animatic</h3>
+<pre><code class="language-sh">node bin/cinecode.mjs animatic films/my-film
+node bin/cinecode.mjs animatic films/my-film --from=0:20 --to=0:40
+</code></pre>
+<p>Half resolution, 12 fps, x264 crf 23 <code>veryfast</code>, with sound. It mixes first when <code>out/mix.wav</code> is missing or older
+than any file of the film (<code>film.json</code>, <code>custom.mjs</code>, <code>voices/</code>, …), otherwise reuses it.</p>
+<div class="table"><table><thead><tr>
+<th>option</th>
+<th>meaning</th>
+<th>default</th>
+</tr>
+</thead><tbody><tr>
+<td><code>-j</code>, <code>--jobs=N</code></td>
+<td>worker processes</td>
+<td>CPUs − 1</td>
+</tr>
+<tr>
+<td><code>--from=T</code>, <code>--to=T</code></td>
+<td>a part of the film (seconds or m:ss)</td>
+<td>the whole film</td>
+</tr>
+<tr>
+<td><code>-o</code>, <code>--out=PATH</code></td>
+<td>output file</td>
+<td><code>out/animatic.mp4</code></td>
+</tr>
+</tbody></table></div>
+<h3 id="render"><a class="anchor" href="#render" aria-hidden="true">#</a>render</h3>
+<pre><code class="language-sh">node bin/cinecode.mjs render films/my-film
+node bin/cinecode.mjs render films/my-film --from=1:20 --to=1:40     # → out/my-film-80s.mp4
+</code></pre>
+<p>The steps, each printed as it finishes:</p>
+<ol>
+<li><strong>voices</strong>: from the cache. Missing lines are voiced first when <code>GEMINI_API_KEY</code> is set; without it the render
+stops and lists them.</li>
+<li><strong>music</strong> and <strong>mix</strong>: the score, the mix, and the master to −16 LUFS / −1.5 dBTP (<code>out/mix.wav</code>).</li>
+<li><strong>srt</strong>: every caption (dialogue, narration and sounds) to <code>out/&lt;slug&gt;.srt</code>.</li>
+<li><strong>render</strong>: the frames are split into contiguous ranges, one per worker process; each worker loads the film
+itself and pipes its frames into its own x264 encoder (<code>yuv420p</code>, BT.709, a keyframe every 2 s). The segments
+are joined without re-encoding, then the master audio (AAC 192 kbit/s, 48 kHz stereo) and the captions as soft
+subtitles (<code>mov_text</code>, off by default) are added.</li>
+<li><strong>verify</strong>: ffprobe checks the result (frame count, size, frame rate, duration, audio and subtitle streams)
+before it replaces the output file.</li>
+</ol>
+<div class="table"><table><thead><tr>
+<th>option</th>
+<th>meaning</th>
+<th>default</th>
+</tr>
+</thead><tbody><tr>
+<td><code>-j</code>, <code>--jobs=N</code></td>
+<td>worker processes</td>
+<td>CPUs − 1</td>
+</tr>
+<tr>
+<td><code>--from=T</code>, <code>--to=T</code></td>
+<td>render only this part, at full quality</td>
+<td>the whole film</td>
+</tr>
+<tr>
+<td><code>-o</code>, <code>--out=PATH</code></td>
+<td>output file</td>
+<td><code>out/&lt;slug&gt;.mp4</code>, or <code>out/&lt;slug&gt;-&lt;from&gt;s.mp4</code> for a part</td>
+</tr>
+<tr>
+<td><code>--crf=N</code></td>
+<td>x264 quality (lower is better and bigger)</td>
+<td>17</td>
+</tr>
+<tr>
+<td><code>--preset=NAME</code></td>
+<td>x264 preset</td>
+<td><code>slow</code></td>
+</tr>
+<tr>
+<td><code>--keep</code></td>
+<td>keep the per-worker segment files</td>
+<td>off</td>
+</tr>
+</tbody></table></div>
+<p>Work in progress lives in a hidden <code>.&lt;name&gt;.mp4.parts/</code> folder next to the output and is removed at the end (kept with
+<code>--keep</code>). The burned-in captions follow <code>format.captions</code> (<code>dialogue</code> by default); the <code>.srt</code> and the subtitle track
+always hold all of them.</p>
+<h3 id="cast-sheet-and-set-sheet"><a class="anchor" href="#cast-sheet-and-set-sheet" aria-hidden="true">#</a>cast-sheet and set-sheet</h3>
+<pre><code class="language-sh">node bin/cinecode.mjs cast-sheet hare,tortoise -o out/two.jpg
+node bin/cinecode.mjs set-sheet films/my-film meadow
+</code></pre>
+<p>With a film first, its own rigs and kits from <code>custom.mjs</code> are included and the sheet goes to the film&#39;s <code>out/</code>.
+Names may be comma-separated; without names every rig or kit is drawn. See <a href="cast.html">cast.md</a> and
+<a href="sets.html">sets.md</a>.</p>
+<h2 id="environment"><a class="anchor" href="#environment" aria-hidden="true">#</a>Environment</h2>
+<div class="table"><table><thead><tr>
+<th>variable</th>
+<th>used for</th>
+</tr>
+</thead><tbody><tr>
+<td><code>GEMINI_API_KEY</code></td>
+<td>voicing lines (<code>voice</code>, and <code>render</code> when lines are missing). Nothing else uses the network.</td>
+</tr>
+<tr>
+<td><code>CINECODE_FFMPEG</code>, <code>CINECODE_FFPROBE</code></td>
+<td>the ffmpeg and ffprobe binaries for video (default: from <code>PATH</code>). Mastering the mix always runs <code>ffmpeg</code> from <code>PATH</code>.</td>
+</tr>
+<tr>
+<td><code>CINECODE_DEBUG</code></td>
+<td>print stack traces on errors (and a worker&#39;s stack when a worker fails)</td>
+</tr>
+</tbody></table></div>
+<h2 id="performance"><a class="anchor" href="#performance" aria-hidden="true">#</a>Performance</h2>
+<p>Measured on a 10-core Mac (Node 22, ffmpeg 7.1):</p>
+<div class="table"><table><thead><tr>
+<th></th>
+<th></th>
+</tr>
+</thead><tbody><tr>
+<td>Seventy-Six Summers, load and compile</td>
+<td>2–3 s</td>
+</tr>
+<tr>
+<td>Seventy-Six Summers, one 1920×1080 frame in one process</td>
+<td>about 0.7–0.85 s on average</td>
+</tr>
+<tr>
+<td>the starter film, one 1920×1080 frame</td>
+<td>about 0.12–0.13 s</td>
+</tr>
+<tr>
+<td>the starter&#39;s animatic (466 frames, 9 workers)</td>
+<td>31 s in all, including the mix</td>
+</tr>
+</tbody></table></div>
+<p>A frame&#39;s cost depends on what is in it: painted sets are cached after the first frame a worker draws, while depth of
+field, night grades, many actors and fields of particles cost more. The render scales with cores (<code>-j</code>). For quick
+looks, use contact sheets and strips (seconds) and the animatic (a quarter of the pixels at half the frame rate)
+before a full render, and <code>--from</code>/<code>--to</code> to check one sequence at full quality.</p>
+
+<p class="edit"><a href="https://github.com/zakariaf/cinecode/blob/main/docs/rendering.md">This page on GitHub</a></p></article></main><footer><div class="wrap"><p>cinecode is open source under the MIT licence · © 2026 Zakaria Fatahi · <a href="https://github.com/zakariaf/cinecode">github.com/zakariaf/cinecode</a></p>
+<p>Every picture, movement, note and sound in these films is made by code. Only the voices come from a model (Gemini TTS).</p></div></footer></body></html>

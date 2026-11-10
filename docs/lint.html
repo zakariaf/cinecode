@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lint · cinecode</title><meta name="description" content="cinecode docs: Lint">
+<meta property="og:title" content="Lint · cinecode"><meta property="og:description" content="cinecode docs: Lint">
+<meta property="og:image" content="https://zakariaf.github.io/cinecode/films/seventy-six-summers.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../style.css"></head>
+<body><header class="top"><div class="wrap">
+  <a class="mark" href="../index.html">cine<span>code</span></a>
+  <nav><a href="../index.html#films">Films</a><a href="../index.html#install">Install</a><a href="../docs/storyboard.html" aria-current="page">Docs</a><a href="https://github.com/zakariaf/cinecode">GitHub</a></nav>
+</div></header><main class="docs wrap"><aside class="side"><p class="label">Docs</p><ul><li><a href="storyboard.html">Storyboard</a></li><li><a href="cast.html">Cast and rigs</a></li><li><a href="sets.html">Sets</a></li><li><a href="effects.html">Effects</a></li><li><a href="sound.html">Voices, music and sound</a></li><li><a href="lint.html" aria-current="page">Lint</a></li><li><a href="rendering.html">Rendering</a></li></ul>
+<p class="label">On this page</p><ul class="toc"><li><a href="#the-report">The report</a></li><li><a href="#kept-warnings">Kept warnings</a></li><li><a href="#rules">Rules</a></li><li><a href="#when-to-run-it">When to run it</a></li></ul></aside><article class="prose"><h1 id="lint-staging-and-editing-checks"><a class="anchor" href="#lint-staging-and-editing-checks" aria-hidden="true">#</a>Lint: staging and editing checks</h1>
+<p><code>lint</code> finds the things that make a film look wrong even when every frame renders: a character standing on air or
+inside a tree, a speaker out of frame, a head cut by the frame edge, the moon sitting on a head like a halo, a
+caption over a face, two near-identical shots cut together, a character who changes pose or place across a cut.</p>
+<pre><code class="language-sh">node bin/cinecode.mjs lint films/my-film              # → films/my-film/out/lint.json + lint.jpg
+node bin/cinecode.mjs lint films/my-film --step=0.5   # sample less often: faster
+</code></pre>
+<p>It compiles the film (unvoiced lines use estimated lengths) and samples it on real frame times: every <code>--step</code>
+seconds (default 1/6), every beat and line boundary, and the first and last frame of each shot. Teleports are checked
+on every frame. Hits of the same rule, actor and shot less than a second apart merge into one issue spanning their
+time range, reported at its worst moment. A framing fault (<code>edge-cut</code>, <code>tangent</code>, <code>halo</code>) counts only when it is held
+for 0.5 s in one stretch, so a move sweeping past an edge or a figure turning is not an issue. The command prints every
+issue and exits with status 1 when there is at least one error (warnings alone exit 0):</p>
+<pre><code>lint     2 errors, 4 warnings → films/lintdemo/out/lint.json, lint.jpg    3.5 s
+  error  offscreen-speaker 1.3        0:17.9  hare speaks &quot;Only me. I was having a nap.&quot; from outside the frame (mark the line &quot;vo&quot;: true or frame the speaker) (17.9–20.9 s)
+  error  offscreen-speaker 1.4        0:21.9  pip speaks &quot;Then wake up! Race you to the pond!&quot; but only 37% of their face is visible: 63% is outside the frame
+  warn   cut-jump          1.4        0:21.4  the cut 1.3 → 1.4 joins two nearly identical framings (zoom ×1.00, shift 0% of the frame): change the size, the subject or the angle
+  warn   subject-size      1.4        0:21.9  extreme-close shot on pip, but pip&#39;s face region is not in frame
+  warn   caption-face      1.4        0:22.4  the caption &quot;Then wake up! Race you to the pond!&quot; sits over pip&#39;s face while they speak (86% overlap)
+  warn   timing            1.4b       0:26.1  shot 1.4b lasts 0.79 s (shorter than 1.2 s)
+cinecode lint: lint found 2 errors
+</code></pre>
+<p>That is the starter film broken on purpose: two extreme close-ups of Pip in a row while the hare speaks, and a
+0.8 s shot (<code>1.4b</code>). Sampling every 0.5 s, it took 3.5 s for 40 s of film; at the default step a few-minute film takes
+minutes.</p>
+<p><strong>Framing faults come with a fix that was tried.</strong> For an <code>edge-cut</code>, <code>tangent</code> or <code>halo</code>, lint recompiles the film
+with a camera change (an <code>offset</code>, <code>size</code>, <code>zoom</code> or <code>angle</code>) or with the actor staged a little elsewhere, lints the
+shot again, and prints the change only when the fault is gone and no other framing fault came with it. When nothing
+simple works, the message says so:</p>
+<pre><code>  warn   tangent           2.5        0:44.8  hollis&#39;s outline ends 2 px above the bottom edge of the frame (a tangent): &quot;offset&quot;: [0, 0.042] lets the edge cut it clearly (44.6–49.8 s)
+  warn   edge-cut          2.3        0:36.9  pebble&#39;s head is cut by the top edge of the frame, 56 px from its eyes: stage pebble about 25 px nearer (y + 25) for this shot to bring it into frame (36.8–41.1 s)
+  warn   halo              9.9        3:06.2  the moon sits on nell&#39;s head like a halo (30 px into it): &quot;offset&quot;: [0, 0.108] moves nell down, away from it (184.2–190.2 s)
+  warn   edge-cut          10.3       3:34.7  pebble&#39;s head is cut by the right edge of the frame, 13 px from its eyes: no &quot;offset&quot; or simple move of pebble clears it here: re-block the shot so pebble&#39;s head stays clear of the right edge (210.5–214.7 s)
+</code></pre>
+<p>A camera change goes into the shot&#39;s <code>camera</code> block. A staging (&quot;stage pebble about 25 px nearer (y + 25)&quot;) moves
+where the actor stands as the shot starts and every place it goes to in the shot.</p>
+<h2 id="the-report"><a class="anchor" href="#the-report" aria-hidden="true">#</a>The report</h2>
+<p><img src="images/lint.jpg" alt="lint.jpg for the broken starter"></p>
+<p><code>lint.jpg</code> has a timeline of the film with the shots and where each issue happens, then one tile per issue (up to
+48): the frame at its worst moment with the offending boxes, footprints and contact points drawn on it (an arrow at
+the edge for anything off frame), its rule, shot, time span and message. Issues about a cut (<code>cut-jump</code>, <code>axis</code>,
+<code>continuity</code>) show the frame after the cut with the frame before it as an inset. Under the tiles a table lists every
+rule: its severity, how many issues it found, what it catches and how to fix it. <strong>Look at it</strong>: a message tells you
+what was measured, the tile tells you whether it matters.</p>
+<p><code>lint.json</code> holds the same issues for scripts: the film&#39;s format and duration, counts, the limits used, each rule&#39;s
+severity (<code>rules</code>) and fix (<code>fixes</code>), and <code>errors</code>, <code>warnings</code> and <code>kept</code> as lists of
+<code>{ rule, severity, t, t0, t1, frame, shot, scene, actor, other, message, note, box, marks, frames, samples }</code> (<code>box</code>
+in frame pixels, <code>frames</code> the two times of a cut issue, <code>note</code> a kept warning&#39;s reason).</p>
+<h2 id="kept-warnings"><a class="anchor" href="#kept-warnings" aria-hidden="true">#</a>Kept warnings</h2>
+<p>Some warnings are deliberate: a wide shot of a tiny mouse, a tangent you like, a crop into a planet that lint judges as
+if the whole planet should be in frame. Mark them on the shot, with the rules and the reason:</p>
+<pre><code class="language-json">{ &quot;id&quot;: &quot;2.3&quot;, &quot;camera&quot;: { &quot;size&quot;: &quot;full&quot;, &quot;on&quot;: [&quot;saturn&quot;], &quot;focus&quot;: [0.95, 0.5], &quot;zoom&quot;: 2 },
+  &quot;lint&quot;: { &quot;allow&quot;: [&quot;subject-size&quot;], &quot;note&quot;: &quot;a crop into the edge of the rings&quot; }, &quot;beats&quot;: [ … ] }
+</code></pre>
+<p>That shot&#39;s warnings of those rules are then <strong>kept</strong>: listed apart (<code>kept</code> in <code>lint.json</code>, drawn last on <code>lint.jpg</code>
+in green with the note, no fix tried) and no longer counted as warnings. <code>allow</code> is a non-empty list of rules that
+warn (<code>collision</code> too, the one error that is a warning while a beat brings two actors together); <code>note</code> is required.
+Errors are never kept. A malformed block stops <code>lint</code> with the problem&#39;s path, as <code>check</code> does.</p>
+<h2 id="rules"><a class="anchor" href="#rules" aria-hidden="true">#</a>Rules</h2>
+<div class="table"><table><thead><tr>
+<th>rule</th>
+<th>severity</th>
+<th>catches</th>
+</tr>
+</thead><tbody><tr>
+<td><code>floating</code></td>
+<td>error</td>
+<td>someone standing on nothing</td>
+</tr>
+<tr>
+<td><code>inside-solid</code></td>
+<td>error</td>
+<td>someone standing inside a solid prop</td>
+</tr>
+<tr>
+<td><code>in-water</code></td>
+<td>error</td>
+<td>someone standing in water who can&#39;t swim</td>
+</tr>
+<tr>
+<td><code>collision</code></td>
+<td>error (warning when a beat brings them together)</td>
+<td>two characters drawn into each other</td>
+</tr>
+<tr>
+<td><code>offscreen-speaker</code></td>
+<td>error</td>
+<td>a speaker who can&#39;t be seen</td>
+</tr>
+<tr>
+<td><code>subject-size</code></td>
+<td>warning</td>
+<td>a shot&#39;s subject too small, too big or missing for the shot size</td>
+</tr>
+<tr>
+<td><code>edge-cut</code></td>
+<td>warning</td>
+<td>a head cut by the frame edge near the eyes (not for a rig with no face), or a sliver of someone left in frame</td>
+</tr>
+<tr>
+<td><code>tangent</code></td>
+<td>warning</td>
+<td>an outline just touching a frame edge</td>
+</tr>
+<tr>
+<td><code>halo</code></td>
+<td>warning</td>
+<td>the sun or moon touching or behind a head (of a rig with a face)</td>
+</tr>
+<tr>
+<td><code>caption-face</code></td>
+<td>warning</td>
+<td>a caption over a speaker&#39;s face (a rig with a face)</td>
+</tr>
+<tr>
+<td><code>cut-jump</code></td>
+<td>warning</td>
+<td>two near-identical framings cut together</td>
+</tr>
+<tr>
+<td><code>continuity</code></td>
+<td>warning</td>
+<td>someone changing pose or place across a cut without it being seen</td>
+</tr>
+<tr>
+<td><code>axis</code></td>
+<td>warning</td>
+<td>two talking characters swapping sides across a cut</td>
+</tr>
+<tr>
+<td><code>teleport</code></td>
+<td>error</td>
+<td>someone jumping between two frames</td>
+</tr>
+<tr>
+<td><code>scale</code></td>
+<td>warning</td>
+<td>someone drawn at the wrong size for where they stand</td>
+</tr>
+<tr>
+<td><code>timing</code></td>
+<td>warning</td>
+<td>very short shots (or ones a dissolve leaves too little of), overlapping lines, captions too fast to read</td>
+</tr>
+</tbody></table></div>
+<p><strong>Rigs with no face</strong> (only the <code>neutral</code> expression, like the <code>planet</code> and <code>telescope</code> rigs and prop rigs, or a rig
+that sets <code>faceless: true</code>): their head point is only where close shots frame them. The rules about heads and faces
+skip them (<code>edge-cut</code>&#39;s head cut near the eyes, <code>halo</code>, <code>caption-face</code>); the others judge them by their body (a sliver,
+a tangent) or by what the camera frames (<code>subject-size</code> and <code>offscreen-speaker</code> name it &quot;body&quot;, &quot;upper part&quot; or
+&quot;head-point region&quot;).</p>
+<h3 id="floating"><a class="anchor" href="#floating" aria-hidden="true">#</a>floating</h3>
+<p>An actor that isn&#39;t jumping or flying must stand on something: on the ground, inside the set&#39;s walkable region (or on
+a stepping stone, or in water on a wade route); on the surface, perch or hollow anchor it was sent to (within
+max(4, 3 × its scale) px); or on its carrier when riding. It is also floating when its drawing is lifted above its
+contact point (by more than 8% of the rig&#39;s height) while it is not moving or gesturing, which is a pose or <code>lift</code> that
+leaves the ground. Fix: use an anchor or a point you have seen inside the walk region on the set sheet; don&#39;t hold
+lifted poses.</p>
+<h3 id="inside-solid"><a class="anchor" href="#inside-solid" aria-hidden="true">#</a>inside-solid</h3>
+<p>An actor on the ground whose contact point is inside a solid prop&#39;s footprint (a trunk, a stump, a rock: the red
+ellipses on the set sheet). Fix: move the target away from the footprint.</p>
+<h3 id="in-water"><a class="anchor" href="#in-water" aria-hidden="true">#</a>in-water</h3>
+<p>An actor on the ground or a surface in a water polygon, not on a stone and not on a <code>&quot;wade&quot;: true</code> route, whose rig
+can&#39;t swim (only the frog can). Fix: a stone, the bank, or a wading walk (<a href="storyboard.html#wading">storyboard.md</a>).</p>
+<h3 id="collision"><a class="anchor" href="#collision" aria-hidden="true">#</a>collision</h3>
+<p>Two actors&#39; footprints overlap at about the same depth (riders and their carriers excepted). It is a warning instead
+of an error while a beat brings the two together: a move, place, gesture, pose or custom beat that names both of
+them (<code>&quot;who&quot;: &quot;fox&quot;, &quot;to&quot;: &quot;near:pip&quot;</code>), from 0.25 s before it to 0.5 s after. Fix: move one along x or to another
+depth; <code>near:&lt;actor&gt;</code> stops beside someone.</p>
+<h3 id="offscreen-speaker"><a class="anchor" href="#offscreen-speaker" aria-hidden="true">#</a>offscreen-speaker</h3>
+<p>During a line (not the narrator&#39;s and not <code>vo</code>), the speaker must be in the scene, on stage, above the water and at
+least <strong>60%</strong> visible: of the body in wide and full shots, the waist-up region in a medium shot, head and shoulders in
+a close-up, the face in an extreme close-up. The frame edges count, and so do props, other actors and front layers in
+front of them, and the opening of a hollow they sit in. Fix: frame the speaker (<code>on</code>, a looser size), move them out from behind the tree, or mark the line
+<code>&quot;vo&quot;: true</code>.</p>
+<h3 id="subject-size"><a class="anchor" href="#subject-size" aria-hidden="true">#</a>subject-size</h3>
+<p>For every size but <code>establishing</code>, the tallest subject&#39;s framed region should fill between 0.5 f and min(1.35 f,
+1.15) of the frame height, where f is the size&#39;s target (× the camera&#39;s <code>zoom</code>):</p>
+<div class="table"><table><thead><tr>
+<th>size</th>
+<th>target f</th>
+<th>accepted</th>
+</tr>
+</thead><tbody><tr>
+<td><code>wide</code></td>
+<td>0.18 (body)</td>
+<td>9%–24%</td>
+</tr>
+<tr>
+<td><code>full</code></td>
+<td>0.6 (body)</td>
+<td>30%–81%</td>
+</tr>
+<tr>
+<td><code>medium</code></td>
+<td>0.75 (waist up)</td>
+<td>38%–101%</td>
+</tr>
+<tr>
+<td><code>close</code></td>
+<td>0.7 (head and shoulders)</td>
+<td>35%–95%</td>
+</tr>
+<tr>
+<td><code>extreme-close</code></td>
+<td>0.85 (face)</td>
+<td>43%–115%</td>
+</tr>
+</tbody></table></div>
+<p>It also reports a shot whose subjects&#39; framed region is not in frame at all. It makes allowances where the camera
+frames looser on purpose: a two-shot fitted to the width or height of the pair, a pan (judged only at its holds), a
+track with fast runners, a subject still entering or leaving, a static shot whose subject crosses the frame, a
+push-in or pull-out to another size (judged at its starting size), and a small cast member the closest zoom can&#39;t
+enlarge. Fix: change the size, stage the subjects closer together, or cut between singles.</p>
+<p>It does not know a shot that frames part of a subject on purpose (<a href="storyboard.html#framing-part-of-a-subject">storyboard.md</a>:
+a <code>focus</code>, a <code>zoom</code> above 1 on subjects with no face, a point in <code>on</code>) or one that moves the camera through depth
+(<code>z</code>, <code>zTo</code>: a subject off the stage grows by its own depth&#39;s scale, not the stage zoom&#39;s), so it can warn there
+that the subject is missing or too big. Look at the frame, and keep the warning on the shot when the frame is right
+(<a href="#kept-warnings">kept warnings</a>).</p>
+<p>A <code>zoom</code> rarely clears it: the accepted range scales with <code>zoom</code> too (<code>&quot;zoom&quot;: 1.12</code> on a full shot accepts 34%–91%),
+so a zoom only helps when the camera can&#39;t reach the size&#39;s framing (its closest zoom, or the edge of the set). A
+subject that is too small usually shares the frame with something: a partner, an anchor in <code>on</code>, a walk across a
+static shot, or a later moment of its own. A subject that is too big in a static shot usually changes height in it: a
+static shot is sized for the pose a subject holds for most of the shot, so one who sits or lies down early (or stands
+up late) overfills the frame while it is taller. Keep the taller pose for most of the shot or cut on the change; a
+<code>&quot;zoom&quot;: 0.8</code> restores its headroom but may leave the warning (the range scales with the zoom), so report it. A frame
+is composed for everything its subjects do in the shot, so a mouse
+that sits up halfway through a pull-out (or gets a rider on its head) is framed for that taller figure from the first
+frame and looks small until it happens. Start the shot in the final pose (<code>{ &quot;do&quot;: &quot;set&quot;, &quot;who&quot;: &quot;tilly&quot;, &quot;pose&quot;: &quot;alert&quot; }</code> as its first beat, or the pose change at the end of the shot before), or keep the warning and say why.</p>
+<h3 id="edge-cut"><a class="anchor" href="#edge-cut" aria-hidden="true">#</a>edge-cut</h3>
+<p>The frame edge cuts a head near its eyes (the eyes closer than 0.3 head heights to an edge, or past it with some of
+the head still in), or only a sliver of an actor is in frame (under 25% of its drawing, its head out; a carrier under
+its riders is their ground, not a sliver). Actors walking in or out are judged at the top and bottom only. Held for
+0.5 s. Fix: apply the change in the message: a camera <code>offset</code> or <code>size</code> that frames the head in or takes the whole
+figure out, or a staging. When the message says no simple change clears it, re-block the shot.</p>
+<h3 id="tangent"><a class="anchor" href="#tangent" aria-hidden="true">#</a>tangent</h3>
+<p>An actor&#39;s outline ends within 3% of the frame height of an edge, just inside or just outside it: an ear or a tail
+tip against the top, feet just above the bottom. It is measured on the part of the drawing that faces that edge (a
+tail leaving by the side is not at the bottom), for a figure at least half in frame (one walking in or out: at the
+top and bottom only), held for 0.5 s. Fix: the change in the message, an <code>offset</code> or <code>zoom</code> that clears the edge or
+lets it cut the figure clearly, or a staging.</p>
+<h3 id="halo"><a class="anchor" href="#halo" aria-hidden="true">#</a>halo</h3>
+<p>The sun or moon disc of the sky touches or stands behind a head (within half a disc radius of the head, or over its
+crown within 0.3 head heights), for 0.5 s, unless the set hides most of the disc. Only the built-in skies have known
+discs; a kit&#39;s own sky painter has none. Fix: the change in the message (an <code>offset</code>, <code>angle</code>, <code>size</code> or <code>zoom</code>, or a
+staging) moves the head off the disc; else re-block the scene under a clear part of the sky.</p>
+<h3 id="caption-face"><a class="anchor" href="#caption-face" aria-hidden="true">#</a>caption-face</h3>
+<p>A burned-in caption overlaps a speaking actor&#39;s face (the middle of the head) by more than 20% of the smaller of the
+two. Fix: stage the speaker higher in frame, a tighter size, or <code>offset</code>. Lint checks speakers only; look at other
+faces under captions on the contact sheet.</p>
+<h3 id="cut-jump"><a class="anchor" href="#cut-jump" aria-hidden="true">#</a>cut-jump</h3>
+<p>Two consecutive shots in the same set (and the same run of scenes joined by cuts) whose framings differ by a zoom
+ratio under 1.2 and a centre shift under 15% of the frame, unless neither shows anyone. Fix: change the size, the
+subject or the angle.</p>
+<h3 id="continuity"><a class="anchor" href="#continuity" aria-hidden="true">#</a>continuity</h3>
+<p>An actor seen on both sides of a cut changes its pose class (lying, low: sitting or crouching, standing, raised:
+sitting or rearing up; its drawn height changed by 1.3× or more) or moves more than half its size, and the change is
+never seen. It checks consecutive shots in one set joined by a cut (inside a scene, or into a scene of the same set and
+time of day that cuts in), and a dissolve into a shot that plays less than 1.2 s on its own (too short to pass time).
+Riders go with their carrier. One issue per cut, at the frame after it. Fix: let the change happen on screen (a walk,
+a pose with a <code>dur</code>) before or after the cut, start the shot where the last one left them, or cut away first.</p>
+<h3 id="axis"><a class="anchor" href="#axis" aria-hidden="true">#</a>axis</h3>
+<p>Two actors who both speak in the scene appear on opposite sides of each other after a cut than before it, because
+their positions changed across the cut. A swap the audience sees happen (a walk inside a shot) is fine. Fix: keep A
+left and B right for the whole conversation.</p>
+<h3 id="teleport"><a class="anchor" href="#teleport" aria-hidden="true">#</a>teleport</h3>
+<p>On every frame: an actor on screen moving more than 40 rig units between two frames (at 24 fps; scaled for other
+frame rates) without that speed being steady. Usually a <code>place</code> inside a shot, or a beat that restarts a move from
+somewhere else. Fix: walk there, or <code>place</code> between shots.</p>
+<h3 id="scale"><a class="anchor" href="#scale" aria-hidden="true">#</a>scale</h3>
+<p>An actor drawn more than 15% off the set&#39;s perspective scale at the spot it stands on (cast <code>scale</code> divided out;
+perched actors use their anchor&#39;s depth, riders their carrier&#39;s). Usually an engine bug or a custom kit&#39;s anchor with
+a wrong <code>s</code>.</p>
+<h3 id="timing"><a class="anchor" href="#timing" aria-hidden="true">#</a>timing</h3>
+<p>Shots shorter than 1.2 s; shots long enough on paper that a dissolve or a fade (into or out of the scene, the film&#39;s
+opening and closing fades, the shot&#39;s own <code>fadeIn</code> / <code>fadeOut</code>) leaves less than 1.2 s of on their own (the message
+gives the <code>dur</code> that fixes it); two lines overlapping by more than 0.05 s; and captions that need more than 20
+characters a second. Fix: hold the shot longer (<code>hold</code>, <code>dur</code>), space the lines (<code>after</code>), shorten the line.</p>
+<h2 id="when-to-run-it"><a class="anchor" href="#when-to-run-it" aria-hidden="true">#</a>When to run it</h2>
+<p>Lint after the contact sheets look right and again after voicing (real line lengths move the staging). It is not a
+replacement for looking: it measures boxes and points, so it can&#39;t see a character hidden in shadow, a confusing
+eyeline or a dull shot. Some warnings are deliberate (a wide shot of a tiny mouse, a tangent you like); keep those on
+their shot (<code>&quot;lint&quot;: { &quot;allow&quot;: [rules], &quot;note&quot;: &quot;why&quot; }</code>, <a href="#kept-warnings">kept warnings</a>) and say so. Trying the fixes recompiles the film, so a film with many framing faults lints more slowly.</p>
+<p>From code, <code>lintPlan(plan, { step, occlusion, rules })</code> in <code>engine/lint/lint.mjs</code> runs the same checks on a compiled
+plan (→ <code>{ errors, warnings, kept, stats }</code>) (<code>occlusion: false</code> ignores what hides a speaker; <code>rules</code> limits the run to the named rules), and
+<code>writeLintReport(plan, result, outDir)</code> writes the report.</p>
+
+<p class="edit"><a href="https://github.com/zakariaf/cinecode/blob/main/docs/lint.md">This page on GitHub</a></p></article></main><footer><div class="wrap"><p>cinecode is open source under the MIT licence · © 2026 Zakaria Fatahi · <a href="https://github.com/zakariaf/cinecode">github.com/zakariaf/cinecode</a></p>
+<p>Every picture, movement, note and sound in these films is made by code. Only the voices come from a model (Gemini TTS).</p></div></footer></body></html>

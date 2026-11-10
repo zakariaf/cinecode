@@ -1,0 +1,1160 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Storyboard · cinecode</title><meta name="description" content="cinecode docs: Storyboard">
+<meta property="og:title" content="Storyboard · cinecode"><meta property="og:description" content="cinecode docs: Storyboard">
+<meta property="og:image" content="https://zakariaf.github.io/cinecode/films/seventy-six-summers.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../style.css"></head>
+<body><header class="top"><div class="wrap">
+  <a class="mark" href="../index.html">cine<span>code</span></a>
+  <nav><a href="../index.html#films">Films</a><a href="../index.html#install">Install</a><a href="../docs/storyboard.html" aria-current="page">Docs</a><a href="https://github.com/zakariaf/cinecode">GitHub</a></nav>
+</div></header><main class="docs wrap"><aside class="side"><p class="label">Docs</p><ul><li><a href="storyboard.html" aria-current="page">Storyboard</a></li><li><a href="cast.html">Cast and rigs</a></li><li><a href="sets.html">Sets</a></li><li><a href="effects.html">Effects</a></li><li><a href="sound.html">Voices, music and sound</a></li><li><a href="lint.html">Lint</a></li><li><a href="rendering.html">Rendering</a></li></ul>
+<p class="label">On this page</p><ul class="toc"><li><a href="#top-level">Top level</a></li><li><a href="#format-and-titles">Format and titles</a></li><li><a href="#voices-and-cast">Voices and cast</a></li><li><a href="#sets">Sets</a></li><li><a href="#score">Score</a></li><li><a href="#scenes">Scenes</a></li><li><a href="#places">Places</a></li><li><a href="#shots">Shots</a></li><li><a href="#camera">Camera</a></li><li><a href="#beats">Beats</a></li><li><a href="#timing-rules">Timing rules</a></li><li><a href="#say">say</a></li><li><a href="#do-actions">do: actions</a></li><li><a href="#sfx">sfx</a></li><li><a href="#fx">fx</a></li><li><a href="#music">music</a></li><li><a href="#title">title</a></li><li><a href="#mark">mark</a></li><li><a href="#wait">wait</a></li><li><a href="#captions">Captions</a></li><li><a href="#extensions-at-a-glance">Extensions at a glance</a></li><li><a href="#checking-a-storyboard">Checking a storyboard</a></li></ul></aside><article class="prose"><h1 id="the-storyboard-filmjson"><a class="anchor" href="#the-storyboard-filmjson" aria-hidden="true">#</a>The storyboard: film.json</h1>
+<p>A film is a folder <code>films/&lt;slug&gt;/</code> with one storyboard file, <code>film.json</code>. It says who is in the film, where it takes
+place, and what happens shot by shot. The engine works out everything else: where the actors walk, how the camera
+frames them, how long each shot lasts, the captions, the sound effects and the music cues.</p>
+<p>This page lists every field the engine reads. <code>cinecode check</code> validates the file against the same rules (the
+validator is <code>engine/film/validate.mjs</code>; the compiler that turns it into a timed plan is <code>engine/film/compile.mjs</code>).</p>
+<p>Contents: <a href="#top-level">top level</a> · <a href="#format-and-titles">format and titles</a> · <a href="#voices-and-cast">voices and cast</a> ·
+<a href="#sets">sets</a> · <a href="#score">score</a> · <a href="#scenes">scenes</a> · <a href="#places">places</a> · <a href="#shots">shots</a> · <a href="#camera">camera</a> ·
+<a href="#framing-part-of-a-subject">framing part of a subject</a> · <a href="#beats">beats</a> · <a href="#timing-rules">timing rules</a> ·
+<a href="#say">say</a> · <a href="#do-actions">do</a> · <a href="#depth">depth</a> · <a href="#sfx">sfx</a> · <a href="#fx">fx</a> · <a href="#music">music</a> · <a href="#title">title</a> ·
+<a href="#mark">mark</a> · <a href="#wait">wait</a> · <a href="#captions">captions</a> · <a href="#extensions-at-a-glance">extensions</a> ·
+<a href="#checking-a-storyboard">checking</a></p>
+<p>A complete small example is <code>templates/film.json</code> (what <code>cinecode new</code> gives you). A large one is
+<code>films/seventy-six-summers/film.json</code>.</p>
+<h2 id="top-level"><a class="anchor" href="#top-level" aria-hidden="true">#</a>Top level</h2>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>required</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>title</code></td>
+<td>no (warning if missing)</td>
+<td>the film&#39;s title: opening card, contact sheets, the video&#39;s metadata</td>
+</tr>
+<tr>
+<td><code>logline</code></td>
+<td>no</td>
+<td>one sentence for people reading the file; the engine does not use it</td>
+</tr>
+<tr>
+<td><code>format</code></td>
+<td>no</td>
+<td><code>{ width, height, fps, captions }</code>, see below</td>
+</tr>
+<tr>
+<td><code>titles</code></td>
+<td>no</td>
+<td>opening and end cards, see below</td>
+</tr>
+<tr>
+<td><code>score</code></td>
+<td>no</td>
+<td>the film&#39;s key and melodic motif, see <a href="#score">score</a></td>
+</tr>
+<tr>
+<td><code>voices</code></td>
+<td>for any line</td>
+<td>voice id → <code>{ voice, tone }</code></td>
+</tr>
+<tr>
+<td><code>cast</code></td>
+<td>for any actor</td>
+<td>cast id → <code>{ rig, name, voice, params, scale }</code></td>
+</tr>
+<tr>
+<td><code>sets</code></td>
+<td>yes (at least one)</td>
+<td>set id → <code>{ kit, params }</code></td>
+</tr>
+<tr>
+<td><code>scenes</code></td>
+<td>yes (at least one)</td>
+<td>the film, in order</td>
+</tr>
+<tr>
+<td><code>seed</code></td>
+<td>no</td>
+<td>seed for the score (<code>cinecode music</code>, <code>mix</code>, <code>animatic</code>, <code>render</code>); default 1</td>
+</tr>
+</tbody></table></div>
+<p>Fields the engine doesn&#39;t know at the top level, scene or shot level are ignored; unknown fields on a beat are
+reported as warnings (see <a href="#checking-a-storyboard">checking</a>).</p>
+<h2 id="format-and-titles"><a class="anchor" href="#format-and-titles" aria-hidden="true">#</a>Format and titles</h2>
+<pre><code class="language-json">&quot;format&quot;: { &quot;width&quot;: 1920, &quot;height&quot;: 1080, &quot;fps&quot;: 24, &quot;captions&quot;: &quot;dialogue&quot; },
+&quot;titles&quot;: {
+  &quot;open&quot;: { &quot;title&quot;: &quot;The Lantern Moth&quot;, &quot;subtitle&quot;: &quot;a cinecode film&quot;, &quot;dur&quot;: 4 },
+  &quot;end&quot;:  { &quot;lines&quot;: [&quot;The End&quot;], &quot;dur&quot;: 4 }
+}
+</code></pre>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>default</th>
+<th>rules</th>
+</tr>
+</thead><tbody><tr>
+<td><code>format.width</code>, <code>format.height</code></td>
+<td>1920, 1080</td>
+<td>even integers, 16–8192</td>
+</tr>
+<tr>
+<td><code>format.fps</code></td>
+<td>24</td>
+<td>integer, 1–120</td>
+</tr>
+<tr>
+<td><code>format.captions</code></td>
+<td><code>&quot;dialogue&quot;</code></td>
+<td>which captions are burned into the picture: <code>dialogue</code> (cast lines only), <code>all</code> (also narration and sound captions), <code>none</code>. The <code>.srt</code> file and the soft subtitles in the MP4 always carry every caption.</td>
+</tr>
+<tr>
+<td><code>titles.open</code></td>
+<td>none</td>
+<td>a parchment title card before the first scene: <code>title</code> (default: the film&#39;s <code>title</code>), <code>subtitle</code>, <code>dur</code> (seconds, default 5). It dissolves into the first shot over its last second.</td>
+</tr>
+<tr>
+<td><code>titles.end</code></td>
+<td>none</td>
+<td>an end card after the last scene: <code>lines</code> (default <code>[&quot;The End&quot;]</code>), <code>dur</code> (default 5). It dissolves in from the last shot and fades to black over its last 1.2 s.</td>
+</tr>
+</tbody></table></div>
+<p>Without an opening card the first scene fades in from black (0.8 s); without an end card the last scene fades out
+(1.2 s). The first music cue starts under the opening card and the last one runs on under the end card (its final
+chord dies about 3 s before the end unless the cue has <code>&quot;hold&quot;: true</code>: see <a href="#music">music</a>). The cards count in the
+film&#39;s length (<code>plan</code>&#39;s total includes them, and the first shot starts after the opening card).</p>
+<p>How long a card is readable: the opening card fades in from black over 0.8 s, its title inks in from 0.5 s to 1.4 s
+(the rule under it by 2.2 s, a subtitle by 2.7 s) and it dissolves into the first shot over its last 1 s, so the title
+is at full strength for <code>dur − 2.4</code> s. The end card dissolves in over 1 s, its first line inks in from 0.4 s to 1.3 s
+(a second line by 1.8 s) and it fades to black over its last 1.2 s: full strength for <code>dur − 2.5</code> s. A 2 s card never
+reaches full strength; 3 s is the shortest that reads (a short film), 4 s is comfortable.</p>
+<h2 id="voices-and-cast"><a class="anchor" href="#voices-and-cast" aria-hidden="true">#</a>Voices and cast</h2>
+<pre><code class="language-json">&quot;voices&quot;: {
+  &quot;narrator&quot;: { &quot;voice&quot;: &quot;Sulafat&quot;, &quot;tone&quot;: &quot;warm, gentle, unhurried&quot; },
+  &quot;pip&quot;:      { &quot;voice&quot;: &quot;Leda&quot;,    &quot;tone&quot;: &quot;bright, eager&quot; }
+},
+&quot;cast&quot;: {
+  &quot;pip&quot;: { &quot;rig&quot;: &quot;human&quot;, &quot;name&quot;: &quot;Pip&quot;, &quot;voice&quot;: &quot;pip&quot;,
+           &quot;params&quot;: { &quot;age&quot;: &quot;child&quot;, &quot;hairStyle&quot;: &quot;braids&quot;, &quot;hair&quot;: &quot;#3b2a20&quot; } },
+  &quot;fox&quot;: { &quot;rig&quot;: &quot;fox&quot;, &quot;name&quot;: &quot;Old Fox&quot;, &quot;voice&quot;: &quot;fox&quot;, &quot;scale&quot;: 1.2 }
+}
+</code></pre>
+<p><code>voices.&lt;id&gt;</code>: <code>voice</code> is one of the 30 prebuilt Gemini voices (required), <code>tone</code> is the voice&#39;s standing direction,
+joined with each line&#39;s own <code>tone</code>. See <a href="sound.html#voices">sound.md</a> for the list and for how to write tones.
+The id <code>narrator</code> is the narrator; every other voice id is referred to by a cast member&#39;s <code>voice</code>.</p>
+<p><code>cast.&lt;id&gt;</code> (the id <code>narrator</code> is reserved):</p>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>rig</code></td>
+<td>required: a rig kind (<code>hare</code>, <code>human</code>, …; see <a href="cast.html">cast.md</a>) or a rig from <code>custom.mjs</code></td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>display name (default: the id)</td>
+</tr>
+<tr>
+<td><code>voice</code></td>
+<td>a key of <code>voices</code>. A speaker may also use a voice with the same id as itself (<code>voices.fox</code> for <code>cast.fox</code>).</td>
+</tr>
+<tr>
+<td><code>params</code></td>
+<td>the rig&#39;s look: colours, sizes, the human&#39;s age, hair, clothes… (<a href="cast.html">cast.md</a>)</td>
+</tr>
+<tr>
+<td><code>scale</code></td>
+<td>size multiplier, 0.1–10 (default 1): a big old tortoise is <code>1.35</code>, a baby one <code>0.4</code></td>
+</tr>
+</tbody></table></div>
+<h2 id="sets"><a class="anchor" href="#sets" aria-hidden="true">#</a>Sets</h2>
+<pre><code class="language-json">&quot;sets&quot;: { &quot;meadow&quot;: { &quot;kit&quot;: &quot;meadow&quot; }, &quot;home&quot;: { &quot;kit&quot;: &quot;village&quot;, &quot;params&quot;: { &quot;seed&quot;: 2 } } }
+</code></pre>
+<p>A set is an instance of a kit (a painted location; see <a href="sets.html">sets.md</a>). <code>kit</code> is required; <code>params</code> is passed to
+the kit (the built-in kits read <code>seed</code>, which changes the random details of the painting; <code>space</code> also reads
+<code>milky</code>, <code>nebula</code> and <code>tint</code>). Two sets may use the same kit.</p>
+<h2 id="score"><a class="anchor" href="#score" aria-hidden="true">#</a>Score</h2>
+<pre><code class="language-json">&quot;score&quot;: { &quot;key&quot;: &quot;G&quot;, &quot;motif&quot;: &quot;D5:1 B4:0.5 D5:0.5 E5:2 G5:3&quot; }
+</code></pre>
+<p><code>key</code> is a key name (<code>&quot;C&quot;</code>, <code>&quot;Eb&quot;</code>, <code>&quot;F#m&quot;</code>, <code>&quot;A minor&quot;</code>); <code>motif</code> is the film&#39;s tune as <code>note:beats</code> tokens
+(<code>G4:1</code>, <code>Bb3:0.5</code>; beats &gt; 0). With a score every cue is in that key and its melodies grow out of the motif; a
+music cue with <code>&quot;motif&quot;: n</code> states the motif&#39;s first n notes. See <a href="sound.html#the-motif">sound.md</a>.</p>
+<h2 id="scenes"><a class="anchor" href="#scenes" aria-hidden="true">#</a>Scenes</h2>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;s01&quot;, &quot;set&quot;: &quot;meadow&quot;, &quot;time&quot;: &quot;dawn&quot;,
+  &quot;music&quot;: { &quot;mood&quot;: &quot;wonder&quot;, &quot;intensity&quot;: 0.4 }, &quot;ambience&quot;: &quot;auto&quot;,
+  &quot;actors&quot;: {
+    &quot;pip&quot;: { &quot;at&quot;: &quot;pond_edge&quot;, &quot;face&quot;: &quot;right&quot;, &quot;pose&quot;: &quot;sit&quot; },
+    &quot;fox&quot;: { &quot;offstage&quot;: &quot;right&quot; }
+  },
+  &quot;shots&quot;: [ … ]
+}
+</code></pre>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>id</code></td>
+<td>required, unique in the film</td>
+</tr>
+<tr>
+<td><code>set</code></td>
+<td>required: a key of <code>sets</code></td>
+</tr>
+<tr>
+<td><code>time</code></td>
+<td>time of day: <code>dawn</code>, <code>morning</code>, <code>noon</code>, <code>afternoon</code>, <code>golden</code>, <code>sunset</code>, <code>twilight</code>, <code>night</code>, or a change across the scene <code>{ &quot;from&quot;: &quot;golden&quot;, &quot;to&quot;: &quot;twilight&quot; }</code> (the change happens over the middle 80% of the scene). A kit that is not under Earth&#39;s sky has times of its own instead (the <code>space</code> kit: <code>space</code>): only those are valid on it. A name the kit doesn&#39;t have is a check error (it is never lit like morning). Default: the kit&#39;s default time.</td>
+</tr>
+<tr>
+<td><code>grade</code></td>
+<td>a story grade on top of the time of day: <code>memory</code> (sepia storybook plate with a torn page edge), <code>dream</code> (soft, bloomed), <code>none</code></td>
+</tr>
+<tr>
+<td><code>transition</code></td>
+<td>how the scene begins: <code>cut</code>, <code>fade</code> (0.35 s through black on each side), <code>dissolve</code> (0.8 s, but never more than 40% of the shot it opens or of the shot it leaves: a 1.2 s shot dissolves in over 0.48 s; there is no field to change it). Default: <code>dissolve</code> when the set or the time changes from the previous scene, else <code>cut</code>. In a dissolve the last scene shows through the new one&#39;s first shot, through anything drawn over it too: a scene that opens on a full-frame effect (the <code>eyepiece</code> beat&#39;s black field) wants <code>&quot;transition&quot;: &quot;cut&quot;</code>.</td>
+</tr>
+<tr>
+<td><code>music</code></td>
+<td>the scene&#39;s music cue: a mood name, <code>&quot;none&quot;</code> (silence; the score fades out over 0.3 s), or <code>{ &quot;mood&quot;, &quot;intensity&quot;, &quot;motif&quot;, &quot;motifVoice&quot;, &quot;hold&quot;, &quot;downbeat&quot;, &quot;tempo&quot; }</code>. Leave it out to continue the previous scene&#39;s mood and intensity. See <a href="#music">music</a>.</td>
+</tr>
+<tr>
+<td><code>ambience</code></td>
+<td><code>&quot;auto&quot;</code> (default: the set&#39;s day or night bed by the time of day), <code>&quot;none&quot;</code>, or an ambience name (<code>meadow-day</code>, <code>meadow-night</code>, <code>forest-day</code>, <code>forest-night</code>, <code>stream</code>, <code>village-day</code>, <code>village-night</code>, <code>wind-hill</code>)</td>
+</tr>
+<tr>
+<td><code>fx</code></td>
+<td>built-in effects for the whole scene: <code>[&quot;fireflies&quot;, &quot;mist&quot;]</code> (<code>leaves</code>, <code>rain</code>, <code>fireflies</code>, <code>motes</code>, <code>mist</code>)</td>
+</tr>
+<tr>
+<td><code>overlays</code></td>
+<td>drawings for the whole scene: built-in effect names as above, built-in overlays (<code>skydot</code>, <code>sunglow</code>: <a href="effects.html#built-in-effects">effects.md</a>), or overlays from <code>custom.mjs</code>: <code>[&quot;comet&quot;, { &quot;name&quot;: &quot;far-hill&quot;, &quot;params&quot;: { &quot;frac&quot;: 0.04 } }]</code>. <code>{ &quot;name&quot;, &quot;params&quot;, &quot;shots&quot;: [&quot;2.1&quot;, &quot;2.4&quot;] }</code> draws only in those shots of the scene (a non-empty list of its shot ids; a built-in field covers each run of consecutive listed shots, and a <code>rain</code> fades only at the scene&#39;s start and end). See <a href="effects.html">effects.md</a>.</td>
+</tr>
+<tr>
+<td><code>rim</code></td>
+<td>a rim light on every visible actor, drawn after the grade: <code>{ &quot;dir&quot;, &quot;color&quot;, &quot;strength&quot;, &quot;start&quot;, &quot;rise&quot;, &quot;width&quot; }</code>, see below</td>
+</tr>
+<tr>
+<td><code>actors</code></td>
+<td>who is in the scene at its start, see below</td>
+</tr>
+<tr>
+<td><code>shots</code></td>
+<td>required, at least one</td>
+</tr>
+</tbody></table></div>
+<p><code>rim</code>: <code>dir</code> is the side the light comes from (<code>left</code>, <code>right</code>, <code>top</code>, <code>upper-left</code> (default), <code>upper-right</code>),
+<code>color</code> a CSS colour (default <code>#fff1d6</code>), <code>strength</code> 0..1 (default 0.8), <code>width</code> in screen pixels (default 3, at
+least 2 is drawn), <code>start</code> a <a href="#mark">mark</a> name or seconds from the scene start (default 0), <code>rise</code> seconds to ease in
+(default 0).</p>
+<p><strong>Scene actors.</strong> Each entry is one of:</p>
+<ul>
+<li><code>{ &quot;at&quot;: &lt;place&gt;, &quot;face&quot;: &quot;left&quot; | &quot;right&quot;, &quot;pose&quot;: &lt;pose&gt;, &quot;expr&quot;: &lt;expression&gt;, &quot;height&quot;: &lt;units&gt;, &quot;z&quot;: &lt;px&gt; }</code>:
+on stage from the start. <code>at</code> is required. Without <code>face</code>, an actor faces the set&#39;s centre (or the way the anchor
+says). Without <code>pose</code> it stands (or perches, on a perch). <code>height</code> starts a flier <a href="#hovering">hovering</a> that many
+units above <code>at</code> (no <code>pose</code> with it). <code>z</code> puts it off the stage (<a href="#depth">depth</a>); without it, the anchor&#39;s <code>z</code>, if
+it has one.</li>
+<li><code>{ &quot;on&quot;: &lt;actor&gt;, &quot;pose&quot;: &lt;pose&gt; }</code>: riding another actor of the scene from the start (default pose <code>sit</code>). The
+carrier must start on stage and not be a rider itself.</li>
+<li><code>{ &quot;offstage&quot;: &quot;left&quot; | &quot;right&quot; }</code>: not visible; brought in later with an <a href="#do-actions"><code>enter</code></a> beat.</li>
+</ul>
+<p>There is no way to start an actor invisible: a stand-in faded out by a <a href="#do-actions"><code>fade</code></a> beat at the start of a
+shot is still drawn in that shot&#39;s first frame, and the opening card dissolves into the first shot&#39;s first frame.</p>
+<p>Anyone not listed can still come in with <code>enter</code>. <strong>Actor state carries from shot to shot within a scene</strong>
+(positions, facing, poses, expressions), so continuity is automatic; each scene starts again from its own <code>actors</code>.</p>
+<h2 id="places"><a class="anchor" href="#places" aria-hidden="true">#</a>Places</h2>
+<p>Everywhere a beat or an actor needs a place (<code>at</code>, <code>to</code>, <code>from</code>, camera <code>on</code>), it takes one of:</p>
+<div class="table"><table><thead><tr>
+<th>place</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>&quot;stump_front&quot;</code></td>
+<td>an anchor of the scene&#39;s set (<a href="sets.html">sets.md</a> lists them; <code>cinecode set-sheet</code> draws them)</td>
+</tr>
+<tr>
+<td><code>&quot;x:1500&quot;</code></td>
+<td>that x on the set&#39;s main lane (or on the slope of a ridge set); give a <code>y</code> for anywhere else</td>
+</tr>
+<tr>
+<td><code>&quot;x:1500,y:1060&quot;</code></td>
+<td>an exact ground point in set coordinates (y grows downward; bigger y = nearer the camera). In a camera&#39;s <code>on</code>, <code>toOn</code> or <code>focus</code> it is the point itself, in the air too</td>
+</tr>
+<tr>
+<td><code>&quot;near:fox&quot;</code></td>
+<td>beside that actor, on the side the mover comes from, facing it. The gap allows for the mover&#39;s front (a flier arriving to hover: its beating wings), the other actor&#39;s longer end (head or tail, as it may turn to face the mover) and about a fifth of their two heights (two mice: about 10 world px between them)</td>
+</tr>
+<tr>
+<td><code>&quot;left-of:fox&quot;</code>, <code>&quot;right-of:fox&quot;</code></td>
+<td>beside that actor on that side, with the same gap</td>
+</tr>
+<tr>
+<td><code>&quot;behind:fox&quot;</code>, <code>&quot;front-of:fox&quot;</code></td>
+<td>a little further from / nearer to the camera than that actor</td>
+</tr>
+<tr>
+<td><code>&quot;on:pebble&quot;</code></td>
+<td>riding that actor (only for <code>hop</code> and <code>place</code>; see <a href="#riding">riding</a>)</td>
+</tr>
+<tr>
+<td><code>&quot;left&quot;</code>, <code>&quot;right&quot;</code></td>
+<td>off that side of the frame (only <code>enter</code> <code>from</code> and <code>exit</code> <code>to</code>)</td>
+</tr>
+</tbody></table></div>
+<p>Ground places are moved to the nearest walkable spot that doesn&#39;t overlap a solid prop or another standing actor.
+Moves follow the set&#39;s walkable ground around solid props and water (stepping stones become hops). The one exception
+is a place a flier <a href="#hovering">hovers</a> over: it is taken exactly as written (over water, a stepping stone, anywhere
+nobody could stand), only kept inside the set&#39;s area.</p>
+<h2 id="shots"><a class="anchor" href="#shots" aria-hidden="true">#</a>Shots</h2>
+<pre><code class="language-json">{ &quot;id&quot;: &quot;1.2&quot;, &quot;camera&quot;: { &quot;size&quot;: &quot;full&quot;, &quot;on&quot;: [&quot;pip&quot;], &quot;move&quot;: &quot;track&quot; },
+  &quot;beats&quot;: [ … ], &quot;hold&quot;: 0.6 }
+</code></pre>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>id</code></td>
+<td>required, unique in the film (<code>cinecode sheet</code> and <code>lint</code> refer to shots by id). Any string works; the screenplay&#39;s <code>&lt;scene&gt;.&lt;shot&gt;</code> (<code>2.3</code>) keeps the two in step.</td>
+</tr>
+<tr>
+<td><code>camera</code></td>
+<td>see <a href="#camera">camera</a></td>
+</tr>
+<tr>
+<td><code>beats</code></td>
+<td>what happens, see <a href="#beats">beats</a>. A shot with no beats and no <code>dur</code> lasts only its hold (a warning).</td>
+</tr>
+<tr>
+<td><code>hold</code></td>
+<td>seconds added after the last beat ends (default 0.5)</td>
+</tr>
+<tr>
+<td><code>dur</code></td>
+<td>the shot&#39;s exact length in seconds; overrides beats + hold. Beats that run past it carry on into the next shot of the scene.</td>
+</tr>
+<tr>
+<td><code>time</code></td>
+<td>this shot&#39;s own time of day (a name or <code>{ &quot;from&quot;, &quot;to&quot; }</code>, blended across the shot), e.g. a time-lapse</td>
+</tr>
+<tr>
+<td><code>grade</code>, <code>gradeTo</code></td>
+<td>this shot&#39;s story grade, and a grade to blend to across the shot (<code>&quot;none&quot;</code> = no story grade): <code>&quot;grade&quot;: &quot;memory&quot;, &quot;gradeTo&quot;: &quot;none&quot;</code></td>
+</tr>
+<tr>
+<td><code>music</code></td>
+<td>a music cue starting at the shot&#39;s first frame (same forms as the scene&#39;s <code>music</code>)</td>
+</tr>
+<tr>
+<td><code>fadeIn</code>, <code>fadeOut</code></td>
+<td>seconds of fade from / to black at the shot&#39;s start / end</td>
+</tr>
+<tr>
+<td><code>lint</code></td>
+<td><code>{ &quot;allow&quot;: [&quot;subject-size&quot;], &quot;note&quot;: &quot;why&quot; }</code>: the shot&#39;s <a href="lint.html#kept-warnings">lint</a> warnings of those rules are intended. Lint lists them as kept, with the note and no fix tried. Errors can&#39;t be kept.</td>
+</tr>
+<tr>
+<td><code>note</code></td>
+<td>free text for people; ignored</td>
+</tr>
+</tbody></table></div>
+<p>Shot boundaries land on frames. A shot is at least one frame long.</p>
+<h2 id="camera"><a class="anchor" href="#camera" aria-hidden="true">#</a>Camera</h2>
+<pre><code class="language-json">&quot;camera&quot;: { &quot;size&quot;: &quot;medium&quot;, &quot;on&quot;: [&quot;pip&quot;, &quot;fox&quot;], &quot;move&quot;: &quot;push-in&quot;, &quot;angle&quot;: &quot;low&quot; }
+</code></pre>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>values</th>
+<th>default</th>
+</tr>
+</thead><tbody><tr>
+<td><code>size</code></td>
+<td><code>establishing</code> (the whole view), <code>wide</code> (subject ≈ 18% of the frame height), <code>full</code> (whole body ≈ 60%), <code>medium</code> (waist up ≈ 75%), <code>close</code> (head and shoulders ≈ 70%), <code>extreme-close</code> (the face)</td>
+<td><code>wide</code> with subjects, else <code>establishing</code></td>
+</tr>
+<tr>
+<td><code>on</code></td>
+<td>actor ids, anchor names and/or points of the set (<code>x:…</code> or <code>x:…,y:…</code>): the union of their regions is framed. <code>&quot;x:1500&quot;</code> is framed like a figure standing on the lane there (an anchor&#39;s box), <code>&quot;x:1500,y:700&quot;</code> as the point itself, in the air too, at the size things have on the lane below it. Points must lie inside the set</td>
+<td>the actors the shot&#39;s beats name, else everyone on stage</td>
+</tr>
+<tr>
+<td><code>move</code></td>
+<td><code>static</code>, <code>push-in</code>, <code>pull-out</code>, <code>pan</code>, <code>track</code>, <code>tilt-up</code>, <code>tilt-down</code>, <code>handheld</code></td>
+<td><code>static</code></td>
+</tr>
+<tr>
+<td><code>angle</code></td>
+<td><code>eye</code>, <code>low</code> (subjects sit lower, under more sky), <code>high</code> (higher, over more ground)</td>
+<td><code>eye</code></td>
+</tr>
+<tr>
+<td><code>zoom</code></td>
+<td>multiplier on the size&#39;s zoom: <code>0.8</code> a little wider, <code>1.3</code> tighter. With a subject that has a face the frame still keeps every such head in it and above the captions (it cuts the body, never the head). When no subject has a face (a planet, a prop) a zoom above 1 crops into the size&#39;s framing: <a href="#framing-part-of-a-subject">framing part of a subject</a></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>focus</code></td>
+<td><code>[fx, fy]</code> (a point of the subjects&#39; box: <code>[0, 0]</code> its top left, <code>[1, 1]</code> its bottom right), <code>&quot;head&quot;</code> (their heads&#39; mean) or a world point <code>&quot;x:…,y:…&quot;</code>: that point at the centre of the frame, at the size&#39;s zoom × <code>zoom</code>: <a href="#framing-part-of-a-subject">framing part of a subject</a></td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>offset</code></td>
+<td><code>[x, y]</code>: frame fractions when both are ≤ 2 in size (<code>[0.16, 0]</code> moves the subject right of centre), else world pixels</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>z</code>, <code>zTo</code></td>
+<td>the camera&#39;s depth at the shot&#39;s start and at its move&#39;s end, world px (positive: toward the stage, a dolly in; negative: pulled back), each under 3/4 of the set&#39;s lens (1728 on the built-in kits): <a href="#depth">depth</a></td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>dof</code></td>
+<td>depth of field: <code>true</code>, <code>false</code> or a blur radius. Everything behind the subjects is blurred; every subject in <code>on</code> and in <code>toOn</code> (anchors too) stays sharp for the whole shot.</td>
+<td>on for <code>close</code> and <code>extreme-close</code>; elsewhere automatic as the set is enlarged</td>
+</tr>
+</tbody></table></div>
+<p>Moves:</p>
+<ul>
+<li><code>static</code> composes one framing for everything the subjects do in the shot: someone walking across stays whole in it.
+Its size comes from the pose a subject holds for most of the shot, so a pose change near one end of the shot is
+framed for the other pose: a subject that sits or lies down early (or stands up late) is too big while it is taller
+(a standing elder filled 86% of a <code>full</code> frame before sitting). Keep the taller pose for most of the shot (sit
+down late, stand up early), cut on the change, or loosen the shot (<code>&quot;zoom&quot;: 0.8</code>).</li>
+<li><code>push-in</code> eases from 1/1.3 of the size&#39;s zoom to the size; <code>pull-out</code> the reverse. On an establishing shot a push-in
+goes from the widest view to 1.3× it.</li>
+<li><code>pan</code> needs two subjects, <code>&quot;on&quot;: [from, to]</code>: it holds on the first for the first 12% of the shot, moves, and holds
+on the last for the last 12%.</li>
+<li><code>track</code> follows the subjects at a constant zoom, smoothed, keeping them inside the frame; with fast runners it
+frames looser so the background never sweeps faster than about a frame width a second. A track on a crop or with a
+<code>focus</code> keeps its composition and offset (it doesn&#39;t pull the subjects back to the middle).</li>
+<li><code>tilt-up</code> / <code>tilt-down</code> start 0.32 of a frame height below / above the framing and end on it.</li>
+<li><code>handheld</code> adds a small seeded drift to the framing.</li>
+</ul>
+<p>Moves are eased over the whole shot unless confined (below). Framing keeps lead room in the direction a single subject
+faces, keeps headroom, keeps the heads of subjects with a face above the caption band, and is clamped to the set&#39;s view
+so the frame never shows unpainted edges.</p>
+<p>What gets framed is each subject&#39;s poses over the shot, not the peaks of its gestures and jumps. A <code>static</code> or
+<code>handheld</code> <code>close</code> shot follows a gesture that holds the head in one place for 0.5 s or more and would take it out
+of the frame (the mouse&#39;s <code>gasp</code> sits her up, a deer grazes): the frame eases out just before, holds the head with
+its ears, and eases back after; the rest of the shot keeps its composition. A jump&#39;s apex, a quick nod, an
+<code>extreme-close</code> shot and the other moves are not followed, so there a gesture that lifts the head can still leave the
+frame: use the pose of the same name (<code>{ &quot;do&quot;: &quot;pose&quot;, &quot;who&quot;: &quot;tilly&quot;, &quot;pose&quot;: &quot;gasp&quot;, &quot;dur&quot;: 0.3 }</code>), which is
+framed, or a looser size. An anchor in <code>on</code> is framed as a box about the size of a standing hare (120 × 110 world px ×
+the scale there), so a small actor framed with an anchor comes out small: staging warns when an actor in <code>on</code> gets
+far under its own size because an anchor or a much bigger actor sets the framing (<a href="#checking-a-storyboard">checking</a>).</p>
+<p><a href="#9-extensions-at-a-glance">§9</a> additions for <code>push-in</code> / <code>pull-out</code> and windowed moves:</p>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>to</code></td>
+<td>the move ends at this size&#39;s framing: <code>&quot;size&quot;: &quot;full&quot;, &quot;move&quot;: &quot;push-in&quot;, &quot;to&quot;: &quot;close&quot;</code></td>
+</tr>
+<tr>
+<td><code>toOn</code></td>
+<td>…of these subjects (default: <code>on</code>): a push-in from a two-shot to a close-up of one of them</td>
+</tr>
+<tr>
+<td><code>zoomTo</code></td>
+<td>the move ends at k × the starting zoom, about the subjects (ignored when <code>to</code> is given)</td>
+</tr>
+<tr>
+<td><code>moveAt</code>, <code>moveDur</code></td>
+<td>the move happens only between these seconds of the shot (eased); the camera holds before and after. Works with any move.</td>
+</tr>
+</tbody></table></div>
+<h3 id="framing-part-of-a-subject"><a class="anchor" href="#framing-part-of-a-subject" aria-hidden="true">#</a>Framing part of a subject</h3>
+<p>A shot size frames a region of each subject (the body, waist up, head and shoulders, the face) whole. To frame a part
+of something (the edge of Saturn&#39;s rings, its cloud bands, a tree&#39;s crown) there are three ways, and none needs a
+hidden stand-in:</p>
+<ul>
+<li><strong>A zoom on subjects with no face.</strong> A rig with no face (only the <code>neutral</code> expression, like the <code>planet</code> and
+<code>telescope</code> rigs and prop rigs, or one that says <code>faceless: true</code>) has no head to keep above the captions. When every
+subject in the shot is one, a <code>zoom</code> above 1 crops into the size&#39;s framing about where it composes them, and the
+<code>offset</code> then moves the frame as given: <code>{ &quot;size&quot;: &quot;full&quot;, &quot;on&quot;: [&quot;saturn&quot;], &quot;zoom&quot;: 1.6, &quot;offset&quot;: [-0.3, 0.1] }</code>
+frames the left part of Saturn with the rings. (With a subject that has a face, the zoom tightens but the frame
+keeps that head in and above the captions.)</li>
+<li><strong>A focus</strong>, on any subject, faces included: <code>&quot;focus&quot;: [0.95, 0.5]</code> puts the point 95% across and halfway down the
+subjects&#39; box at the centre of the frame (moved by <code>offset</code> and a low or high <code>angle</code>), at the size&#39;s zoom of the
+whole subjects × <code>zoom</code>. <code>&quot;head&quot;</code> focuses their heads; <code>&quot;x:1840,y:886&quot;</code> a world point. Nothing else places a focused
+frame: no lead room, headroom or caption band, no following a held gesture, no clearing actors in front. A push-in
+zooms about the focus, a track holds it, and an establishing view centres on it.</li>
+<li><strong>A point as the subject</strong>: <code>&quot;on&quot;: [&quot;x:1840,y:886&quot;]</code> frames that point of the set at the shot size (a box the size of
+a standing hare at the lane&#39;s scale below it).</li>
+</ul>
+<p>Lint judges these shots by the whole subject, so <code>subject-size</code> can warn there (and <code>edge-cut</code>, when the crop leaves
+a sliver of a figure): keep them with the shot&#39;s <code>&quot;lint&quot;: { &quot;allow&quot;: [&quot;subject-size&quot;], &quot;note&quot;: &quot;a crop into the rings&quot; }</code>. A hidden stand-in is still the way to
+give the camera a subject that moves through the air (<a href="effects.html#props">effects.md</a>).</p>
+<h2 id="beats"><a class="anchor" href="#beats" aria-hidden="true">#</a>Beats</h2>
+<p>A beat is one object with exactly one of these keys:</p>
+<div class="table"><table><thead><tr>
+<th>key</th>
+<th>what it is</th>
+<th>takes time</th>
+</tr>
+</thead><tbody><tr>
+<td><code>say</code></td>
+<td>a spoken line</td>
+<td>the voice&#39;s length</td>
+</tr>
+<tr>
+<td><code>do</code></td>
+<td>an action (walk, gesture, look, …)</td>
+<td>depends on the action</td>
+</tr>
+<tr>
+<td><code>sfx</code></td>
+<td>a sound effect</td>
+<td>0 (or its <code>dur</code>)</td>
+</tr>
+<tr>
+<td><code>fx</code></td>
+<td>a visual effect (dust, splash, sparkle, rain, …)</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>music</code></td>
+<td>a music cue or a sting</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>an in-picture title</td>
+<td>its <code>dur</code> (default 3)</td>
+</tr>
+<tr>
+<td><code>mark</code></td>
+<td>a named instant</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>wait</code></td>
+<td>a pause</td>
+<td>its value</td>
+</tr>
+</tbody></table></div>
+<p>Modifiers any beat may carry:</p>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>with</code></td>
+<td><code>&quot;prev&quot;</code>: start together with the previous beat group (see below); or the <code>id</code> of an earlier beat of this shot: start with that beat</td>
+</tr>
+<tr>
+<td><code>after</code></td>
+<td>seconds of delay added to the start</td>
+</tr>
+<tr>
+<td><code>at</code></td>
+<td>pin the start to this many seconds from the shot&#39;s start (for <code>look</code>, <code>place</code>, <code>fx</code> and <code>sfx</code>, <code>at</code> may instead be a place)</td>
+</tr>
+<tr>
+<td><code>id</code></td>
+<td>a name for <code>with</code> to refer to</td>
+</tr>
+<tr>
+<td><code>touch</code>, <code>contact</code></td>
+<td>an actor id or list: this beat brings these actors into contact on purpose (lint then reports an overlap as a warning, not an error)</td>
+</tr>
+<tr>
+<td><code>note</code>, <code>comment</code></td>
+<td>free text; ignored</td>
+</tr>
+</tbody></table></div>
+<h2 id="timing-rules"><a class="anchor" href="#timing-rules" aria-hidden="true">#</a>Timing rules</h2>
+<p>Beats run <strong>in sequence</strong>: each starts when the previous one ends. Precisely:</p>
+<ol>
+<li>A beat with neither <code>with</code> nor <code>at</code> starts when the previous <strong>group</strong> ends. A group is a beat plus every beat
+started <code>&quot;with&quot;: &quot;prev&quot;</code> after it; it ends when the last of them ends.</li>
+<li><code>&quot;with&quot;: &quot;prev&quot;</code> starts at the start of the current group (its first beat), and makes the group last until the
+longer of the two ends. <code>&quot;with&quot;: &quot;&lt;id&gt;&quot;</code> starts with that beat.</li>
+<li><code>&quot;at&quot;: 2.0</code> starts the beat 2.0 s after the shot starts, wherever it is in the list. A pinned beat starts a new
+group: the beat after it follows <strong>it</strong>, not the beats before it.</li>
+<li><code>&quot;after&quot;: 0.4</code> delays any of the above by 0.4 s.</li>
+<li>The shot lasts until the latest beat ends plus <code>hold</code> (default 0.5 s), rounded to a frame, or exactly <code>dur</code> when
+given.</li>
+<li>A custom or sfx beat with <code>&quot;hold&quot;: false</code> plays or draws its whole <code>dur</code> but ends, for the timeline, where it
+starts: the next beat, its <code>with</code> group and the shot&#39;s length don&#39;t wait for it (the rule <code>fx</code>, <code>mark</code> and <code>music</code>
+beats always follow). A long custom beat laid <code>&quot;with&quot;: &quot;prev&quot;</code> over a line otherwise holds the next line back
+until it ends.</li>
+</ol>
+<p>An example, with the times the compiler gives (the fox&#39;s <code>wave</code> lasts 1.6 s, the human&#39;s <code>nod</code> 0.9 s):</p>
+<div class="table"><table><thead><tr>
+<th>beat</th>
+<th>starts</th>
+<th>ends</th>
+</tr>
+</thead><tbody><tr>
+<td><code>{ &quot;do&quot;: &quot;gesture&quot;, &quot;who&quot;: &quot;fox&quot;, &quot;name&quot;: &quot;wave&quot; }</code></td>
+<td>0.0</td>
+<td>1.6</td>
+</tr>
+<tr>
+<td><code>{ &quot;do&quot;: &quot;look&quot;, &quot;who&quot;: &quot;pip&quot;, &quot;to&quot;: &quot;fox&quot;, &quot;with&quot;: &quot;prev&quot;, &quot;after&quot;: 0.5 }</code></td>
+<td>0.5</td>
+<td>0.8</td>
+</tr>
+<tr>
+<td><code>{ &quot;do&quot;: &quot;gesture&quot;, &quot;who&quot;: &quot;pip&quot;, &quot;name&quot;: &quot;nod&quot; }</code></td>
+<td>1.6</td>
+<td>2.5</td>
+</tr>
+<tr>
+<td><code>{ &quot;wait&quot;: 1, &quot;with&quot;: &quot;prev&quot; }</code></td>
+<td>1.6</td>
+<td>2.6</td>
+</tr>
+<tr>
+<td><code>{ &quot;sfx&quot;: &quot;owl-hoot&quot;, &quot;at&quot;: 0.2 }</code></td>
+<td>0.2</td>
+<td>0.2</td>
+</tr>
+<tr>
+<td><code>{ &quot;do&quot;: &quot;turn&quot;, &quot;who&quot;: &quot;fox&quot;, &quot;face&quot;: &quot;around&quot; }</code></td>
+<td>0.2</td>
+<td>0.45</td>
+</tr>
+</tbody></table></div>
+<p>The shot ends at 2.6 + 0.5 = 3.1 s (frame 74 at 24 fps). Note the last beat: it follows the pinned <code>sfx</code>, not the
+wait.</p>
+<p>Before the voices exist a line lasts an estimate of <code>words / 2.6 + 0.3</code> seconds; once they are generated, <code>plan</code>,
+<code>sheet</code>, <code>lint</code> and the renders use the real lengths, so shots can change length after <code>cinecode voice</code>.
+<code>cinecode plan</code> marks estimated lines with <code>~</code>.</p>
+<h2 id="say"><a class="anchor" href="#say" aria-hidden="true">#</a>say</h2>
+<pre><code class="language-json">{ &quot;say&quot;: &quot;pip&quot;, &quot;text&quot;: &quot;Then wake up! Race you to the pond!&quot;, &quot;tone&quot;: &quot;excited&quot;, &quot;expr&quot;: &quot;happy&quot; }
+</code></pre>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>say</code></td>
+<td><code>&quot;narrator&quot;</code> or a cast id with a voice</td>
+</tr>
+<tr>
+<td><code>text</code></td>
+<td>required: the caption, and what is spoken unless <code>tts</code> is given</td>
+</tr>
+<tr>
+<td><code>tone</code></td>
+<td>the line&#39;s delivery, joined after the voice&#39;s <code>tone</code>: one to three adjectives (<a href="sound.html#tone">sound.md</a>)</td>
+</tr>
+<tr>
+<td><code>expr</code></td>
+<td>the speaker&#39;s expression from the line&#39;s start: a mood (<code>happy</code>, <code>sad</code>, <code>smug</code>, <code>worried</code>, …) is held until a beat changes it (listening doesn&#39;t reset it); a reaction (<code>surprised</code>, <code>laugh</code>, <code>laughing</code>, <code>scared</code>) lasts the line plus 0.4 s, or until the cut if that comes first, then gives way to the expression the actor had before</td>
+</tr>
+<tr>
+<td><code>vo</code></td>
+<td><code>true</code>: a voice-over; the speaker may be off screen or not in the scene</td>
+</tr>
+<tr>
+<td><code>tts</code></td>
+<td>§9: what the voice actually says when it differs from the caption: <code>{ &quot;text&quot;: &quot;[laughs]&quot;, &quot;tts&quot;: &quot;Hahaha!&quot; }</code></td>
+</tr>
+<tr>
+<td><code>trimEnd</code></td>
+<td>§9: seconds cut off the end of the spoken audio (a line interrupted mid-word); timing and lip sync follow the cut</td>
+</tr>
+</tbody></table></div>
+<p>A line whose <code>text</code> starts with <code>[</code> is <strong>non-verbal</strong> (<code>[laughs]</code>, <code>[gasps]</code>): captioned in italics, and voice QA
+does not hold it to the words. The speaker&#39;s mouth follows the voice (lip sync from the audio&#39;s envelope); the
+other actors on stage glance at the speaker; a speaker who hasn&#39;t been told where to look talks to the nearest actor
+in front of them. A speaker in the scene who is not <code>vo</code> should be at least 60% on screen (lint
+<code>offscreen-speaker</code>). Each line is voiced once and cached; changing its words, its tone or its voice makes it a new
+line (<a href="sound.html#the-voice-cache">sound.md</a>).</p>
+<h2 id="do-actions"><a class="anchor" href="#do-actions" aria-hidden="true">#</a>do: actions</h2>
+<p>Every action except <code>custom</code> needs <code>who</code>, an actor present in the scene (in its <code>actors</code>, or brought in by an
+earlier <code>enter</code>).</p>
+<div class="table"><table><thead><tr>
+<th>action</th>
+<th>fields</th>
+<th>takes</th>
+</tr>
+</thead><tbody><tr>
+<td><code>walk</code>, <code>run</code></td>
+<td><code>to</code> (a place), <code>speed</code>, <code>gait</code>, <code>pose</code>, <code>face</code>, <code>wade</code>, <code>depth</code>, <code>z</code></td>
+<td>the route&#39;s length at the rig&#39;s pace</td>
+</tr>
+<tr>
+<td><code>hop</code></td>
+<td><code>to</code> (a place or <code>on:&lt;actor&gt;</code>), <code>speed</code>, <code>pose</code>, <code>face</code>, <code>z</code></td>
+<td>as walk, hopping (rigs without a hop gait repeat their jump, or walk)</td>
+</tr>
+<tr>
+<td><code>fly</code></td>
+<td><code>to</code>, <code>speed</code>, <code>pose</code>, <code>face</code>, <code>height</code> (<a href="#hovering">hovering</a>), <code>z</code>; only rigs that fly</td>
+<td>flight time</td>
+</tr>
+<tr>
+<td><code>enter</code></td>
+<td><code>from</code> (<code>left</code> / <code>right</code> or a place), <code>to</code> (a place; default about a quarter of the way into the frame), <code>run</code>, <code>speed</code>, <code>gait</code>, <code>pose</code>, <code>fly</code> (<code>true</code>: a flier flies in from above), <code>height</code>, <code>z</code></td>
+<td>as walk</td>
+</tr>
+<tr>
+<td><code>exit</code></td>
+<td><code>to</code> (<code>left</code> / <code>right</code>, or a place), <code>run</code>, <code>speed</code>, <code>gait</code>, <code>z</code></td>
+<td>as walk</td>
+</tr>
+<tr>
+<td><code>place</code></td>
+<td><code>to</code> (a place or <code>on:&lt;actor&gt;</code>), <code>face</code>, <code>pose</code>, <code>height</code>, <code>z</code></td>
+<td>0: the actor is simply there, visible</td>
+</tr>
+<tr>
+<td><code>pose</code></td>
+<td><code>pose</code>, <code>dur</code>, <code>expr</code></td>
+<td><code>dur</code> (default 1)</td>
+</tr>
+<tr>
+<td><code>gesture</code></td>
+<td><code>name</code> (a gesture of the rig)</td>
+<td>the gesture&#39;s length</td>
+</tr>
+<tr>
+<td><code>look</code></td>
+<td><code>to</code>: an actor, an anchor, a place, <code>left</code>, <code>right</code>, <code>up</code>, <code>sky</code>, <code>down</code>, <code>camera</code> or <code>none</code>; <code>tilt</code> (−1..1, the head&#39;s pitch)</td>
+<td>0.3</td>
+</tr>
+<tr>
+<td><code>turn</code></td>
+<td><code>face</code>: <code>left</code>, <code>right</code> or <code>around</code></td>
+<td>0.25</td>
+</tr>
+<tr>
+<td><code>emote</code></td>
+<td><code>expr</code></td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>sit</code>, <code>stand</code>, <code>lie</code>, <code>sleep</code></td>
+<td></td>
+<td>0.6</td>
+</tr>
+<tr>
+<td><code>wake</code></td>
+<td><code>pose</code> (default: the pose before sleeping, or <code>stand</code>)</td>
+<td>0.75</td>
+</tr>
+<tr>
+<td><code>fade</code></td>
+<td><code>to</code> (opacity 0..1), <code>dur</code> (default 1)</td>
+<td><code>dur</code></td>
+</tr>
+<tr>
+<td><code>set</code></td>
+<td><code>params</code> (rig param changes from now on), <code>pose</code> (instant), <code>expr</code>; <code>z</code> with <code>dur</code>: a change of depth over that time</td>
+<td>0 (with a <code>z</code>: its <code>dur</code>)</td>
+</tr>
+<tr>
+<td><code>blink</code></td>
+<td></td>
+<td>0.2</td>
+</tr>
+<tr>
+<td><code>custom</code></td>
+<td><code>name</code> (a built-in effect or one in <code>custom.mjs</code> <code>custom</code>), <code>dur</code> (default 1), <code>scope</code>, <code>hold</code>, any other fields</td>
+<td><code>dur</code> (<code>&quot;hold&quot;: false</code>: 0)</td>
+</tr>
+</tbody></table></div>
+<p>Details:</p>
+<ul>
+<li><strong>Moves.</strong> <code>speed</code> multiplies the rig&#39;s natural pace (0–8, default 1). <code>gait</code> picks one of the rig&#39;s gaits (<code>trot</code>
+for the fox, <code>scurry</code> for the mouse, <code>glide</code> for birds). <code>run</code> falls back to <code>trot</code>, then <code>walk</code>, for rigs without
+a run. <code>pose</code> (or <code>face</code>) sets the pose (or facing) the actor ends in; without <code>pose</code> a move ends in <code>stand</code>
+(perched on a perch, sitting on a carrier), so a held pose such as <code>hold-hand-out</code> is dropped by any move. Moves
+start and stop with a short ease; footsteps, hops, landings and splashes are added as sound effects automatically,
+matched to the ground surface. A move that doesn&#39;t fit in its shot simply continues into the next shot; a <code>pose</code>,
+<code>sit</code>, <code>lie</code> or <code>sleep</code> that starts while the actor is still moving is replaced by the move&#39;s end pose, so start it
+after the move ends (the skill&#39;s <code>timeline.mjs</code> prints when each move ends and marks the clash). A route across
+stepping stones jumps from stone to stone, 0.7–1.5 s a stone (the small rigs the longest) whatever the <code>speed</code>.</li>
+<li><strong>Getting up and down.</strong> A walk to an elevated anchor (a stump top, a rock top, a branch, a hollow) walks to the foot
+of it and jumps up; a move away from one jumps down first. A <code>hop</code>, <code>run</code> or <code>fly</code> by a rig that flies flies there
+instead.</li>
+<li><strong>Fliers.</strong> Without <code>height</code> a flight ends where the flier stands: a ground point (<code>fly</code> to <code>x:…,y:…</code> or <code>near:</code>
+lands on the ground there), a surface, a perch, or a rider&#39;s place (<code>&quot;to&quot;: &quot;on:&lt;actor&gt;&quot;</code>). With <code>height</code> it ends in
+the air (<a href="#hovering">hovering</a>). <code>enter</code> flies in from above when <code>to</code> is a perch, a surface, a hollow or
+<code>on:&lt;actor&gt;</code>, or with <code>&quot;fly&quot;: true</code>; to a ground place without it, the flier comes along the ground route in its
+<code>gait</code> (<code>&quot;gait&quot;: &quot;fly&quot;</code> flaps in at wing height).</li>
+<li><strong>enter / exit.</strong> <code>enter</code> from a side starts just outside every view the shot may show and walks in, straight to
+<code>to</code>: it never runs past it and comes back (a <code>to</code> nearer the entry side than the frame edge is reached directly).
+In an establishing shot, or a push-in from one, that view is most of the set, so the actor arrives only at the end
+of a long walk: start it as a scene actor just inside the frame and <code>run</code> instead. <code>enter</code> from a place appears
+there (out of a hollow) and walks on to <code>to</code>. <code>exit</code> to a side walks out of the frame and the actor is then off
+stage (it may <code>enter</code> again later). An exit to a place just walks there.</li>
+<li><strong>pose.</strong> With <code>dur</code> the change takes that long (an old woman rising over 2 s); without, it blends over 0.35 s and
+the beat still takes 1 s. Pose names come from the rig (<a href="cast.html">cast.md</a>); <code>sit</code>, <code>lie</code>, <code>sleep</code>, <code>rest</code>,
+<code>crouch</code>, <code>perch</code>, <code>stand</code> also accept the rig&#39;s nearest equivalent (<code>sit</code> → <code>sit-ground</code> for the human).</li>
+<li><strong>gesture.</strong> Gestures layer in the order they start: one that starts while another is still running takes over
+from the pose at that moment, and the first one ending underneath changes nothing. Gestures that don&#39;t start or end
+on the actor&#39;s pose are eased in and out over 0.15–0.3 s. A gesture beat passes only its <code>name</code> (a <code>to</code> is ignored:
+the human&#39;s <code>point</code> follows her look, <code>point-up</code> and <code>point-down</code> aim outright). Over a walk or run the gait keeps
+everything that moves the feet, so head gestures (<code>nod</code>) and the human&#39;s arm gestures (<code>wave</code>) show, but one made
+with the legs barely shows until the move ends: a <code>jump</code> stays on the ground, and a <code>stamp</code> or the fox&#39;s raised-paw
+<code>wave</code> and <code>point</code> hardly move. Put those after the move.</li>
+<li><strong>Expressions</strong> (<code>expr</code> on a line, <code>pose</code> or <code>set</code>, and <code>emote</code>). An expression holds until a beat changes it,
+except a line&#39;s reaction (see <a href="#say">say</a>). It changes behind a quick blink (about 4 frames) while the mouth eases
+between the two faces; one set within 0.1 s of a shot&#39;s start changes on the cut frame itself. A gesture that
+switches the face (the human&#39;s <code>laugh</code>, <code>gasp</code>, <code>wave</code>, <code>beckon</code>, <code>clap</code> and <code>jump-for-joy</code>; an animal&#39;s <code>laugh</code>,
+which shuts its eyes) does it behind the same blink, and changes whose blinks would overlap share one.</li>
+<li><strong>look.</strong> The head turns toward the target (and the body turns round if the target is behind) and holds there until
+another beat changes it, easing from wherever the head is (slow lookers like the tortoise take about 1 s). The head
+also pitches (§9): <code>up</code> is a full look up, <code>down</code> a full look down, <code>sky</code> a moderate look up (about 16°, where a comet
+or stars low over the land are); a look at an actor, an anchor or a point pitches along the line from the head to it
+(at most 0.9 of the full tilt). <code>&quot;tilt&quot;</code> (−1..1, any target; + up, − down) sets the pitch outright: <code>{ &quot;do&quot;: &quot;look&quot;, &quot;who&quot;: &quot;nell&quot;, &quot;to&quot;: &quot;sky&quot;, &quot;tilt&quot;: 0.6 }</code>. The deer&#39;s long neck stays up: its head barely drops even at −1. The
+beetle, butterfly and songbird don&#39;t tilt; on a small rig in a wide or full shot the tilt is a few pixels, so a pose
+reads better there (the mouse&#39;s <code>alert</code>, the human&#39;s <code>look-up</code>). Use <code>to</code> for the target so <code>at</code> stays a time.</li>
+<li><strong>Listening.</strong> When someone speaks, the others on stage glance at the speaker (turning round, body and all, if the
+speaker is behind them). An actor with a look of its own goes back to it after the line; one never told where to
+look keeps looking at the speaker. So a look that must be seen (at a prize, at the sky) goes before or after someone
+else&#39;s line, not under it.</li>
+<li><strong>sleep / wake.</strong> A sleeping actor shows &quot;z z z&quot; and doesn&#39;t glance at speakers; <code>wake</code> blinks and returns to the
+previous pose.</li>
+<li><strong>set.</strong> Changes rig params from that moment, e.g. a tortoise coming out of the water: <code>{ &quot;do&quot;: &quot;set&quot;, &quot;who&quot;: &quot;pebble&quot;, &quot;params&quot;: { &quot;wet&quot;: 0.6 } }</code>.</li>
+<li><strong>custom.</strong> Draws a custom beat: a built-in effect (<a href="effects.html#built-in-effects">effects.md</a>) or one from the
+film&#39;s <code>custom.mjs</code> or effect files. If there is no such name the beat only takes time (a warning). The beat lasts
+its whole <code>dur</code>: on into the later shots of its scene and, from the scene&#39;s last shot, into the fading picture of a
+dissolve to the next scene. <code>&quot;scope&quot;: &quot;shot&quot;</code> ends it at its shot&#39;s cut: it is drawn only in its own shot, until
+its end (not in a dissolve&#39;s fading picture either), and its sounds from the cut on are dropped (<code>u</code> still runs over
+the full <code>dur</code>, so it just stops partway). <code>&quot;scope&quot;: &quot;scene&quot;</code> keeps the default and says so. Without a scope, a
+beat still drawn on the first frame of a later shot, or one that ends partway through the dissolve out of its scene
+(it vanishes from the fading picture), is a warning naming the shots and the frames. <code>&quot;hold&quot;: false</code> lets the beat
+play its whole <code>dur</code> without holding the next beat (<a href="#timing-rules">timing rules</a>).</li>
+</ul>
+<h3 id="riding"><a class="anchor" href="#riding" aria-hidden="true">#</a>Riding</h3>
+<p>§9: an actor can ride another (a squirrel on a tortoise&#39;s shell). Start mounted with a scene actor <code>{ &quot;on&quot;: &quot;pebble&quot; }</code>, or get on with <code>{ &quot;do&quot;: &quot;hop&quot;, &quot;who&quot;: &quot;fidget&quot;, &quot;to&quot;: &quot;on:pebble&quot; }</code> (or <code>place</code> there). A rider moves
+with its carrier, is drawn just in front of it, casts no shadow, and keeps its own facing, pose, gestures and lines. A
+rider can&#39;t walk, run or exit; it gets off with an ordinary <code>hop</code> to a place. A carrier that exits takes its riders
+with it. Riders can&#39;t carry riders.</p>
+<h3 id="wading"><a class="anchor" href="#wading" aria-hidden="true">#</a>Wading</h3>
+<p>§9: <code>{ &quot;do&quot;: &quot;walk&quot;, &quot;who&quot;: &quot;pebble&quot;, &quot;to&quot;: &quot;x:1700&quot;, &quot;wade&quot;: true }</code> lets a walk or run cross water in a straight
+line. In the water the actor sinks as it goes deeper (0.6 px per px travelled into the water) down to <code>depth</code> rig
+units (default 1.1 × the rig&#39;s height: fully under), and rises again on the far side. Riders sink with their carrier.
+If a solid prop is in the way, the dry route is taken instead.</p>
+<p>The body is not cut flat at the waterline: wherever it breaks the surface (the trunk, each leg, a tail) it curves
+down into the water along its own near arc, with a dark meniscus lip, a shivering highlight, a darker band just under
+the surface and flecks of foam, and rings spread round the whole body. Below the surface it shows faintly through the
+water. A body fully under shows only faint rings, with nothing dry below the surface.</p>
+<h3 id="hovering"><a class="anchor" href="#hovering" aria-hidden="true">#</a>Hovering</h3>
+<p>A flier (a rig with a fly gait: <code>butterfly</code>, <code>songbird</code>, <code>owl</code>; not the <code>beetle</code>) can stay in the air. Give a <code>fly</code>,
+<code>enter</code> or <code>place</code> beat <code>&quot;height&quot;: N</code> and the flight ends N units above its place, at the set&#39;s scale (the units of
+rig heights: a songbird is 24 tall, an owl 62); above the anchor point for a perch or surface anchor. The flier holds
+there, keeps flapping with a gentle bob (about 4% of its height), and can talk and gesture:</p>
+<pre><code class="language-json">{ &quot;do&quot;: &quot;enter&quot;, &quot;who&quot;: &quot;wren&quot;, &quot;from&quot;: &quot;right&quot;, &quot;to&quot;: &quot;x:1250,y:1080&quot;, &quot;height&quot;: 60 }
+{ &quot;do&quot;: &quot;fly&quot;, &quot;who&quot;: &quot;wren&quot;, &quot;to&quot;: &quot;near:tilly&quot;, &quot;height&quot;: 40 }
+</code></pre>
+<ul>
+<li>The place is taken exactly as written (over water, a stepping stone, anywhere nobody could stand), only kept inside
+the set&#39;s area. <code>near:</code> leaves room for the beating wings.</li>
+<li>An <code>enter</code> that ends in a hover comes in level at that height (from above with <code>&quot;fly&quot;: true</code>).</li>
+<li>A scene can open on a hovering flier: a scene actor&#39;s <code>&quot;height&quot;</code> next to its <code>&quot;at&quot;</code>.</li>
+<li>A hovering flier&#39;s next move is always a flight: a <code>walk</code> or <code>fly</code> without <code>height</code> flies down and lands, a <code>hop</code> to
+<code>on:&lt;actor&gt;</code> takes off from the hover height.</li>
+<li>The camera frames it where it is drawn, allowing for the full reach of its beating wings and its bob: full shots
+keep the wings in frame, close shots hold its head.</li>
+</ul>
+<p><code>check</code> reports as errors: <code>height</code> on a rig that can&#39;t fly, on a beat other than <code>fly</code>, <code>enter</code> or <code>place</code>, 0 or
+less, with an <code>on:</code> target, or on a scene actor without <code>at</code>; a <code>pose</code> given with <code>height</code>; and <code>sit</code>, <code>lie</code>, <code>sleep</code>,
+<code>pose</code> (or a <code>set</code> with a <code>pose</code>) while the actor hovers. Land it first: a <code>fly</code> or <code>walk</code> to a place without
+<code>height</code>.</p>
+<h3 id="depth"><a class="anchor" href="#depth" aria-hidden="true">#</a>Depth</h3>
+<p>Things can be in front of and behind each other, not only up and down the ground: a moon behind a planet, debris the
+camera flies through. <code>z</code> is world px off the <strong>stage</strong>, the plane the set stages on (its ground, props and anchors):
+positive is farther from the lens, negative nearer. A thing at depth z is drawn at p = (lens − c) / (lens + z − c) of
+its size about the frame centre, c being the camera&#39;s depth; the lens is the kit&#39;s (2304 world px on the built-in
+kits), so a camera at depth 0 sees z 2400 at about half size and z −900 at about 1.6×.</p>
+<ul>
+<li><strong>Actors.</strong> A scene actor&#39;s <code>&quot;z&quot;</code> (or its starting anchor&#39;s <code>z</code>). A beat that takes an actor somewhere (<code>place</code>,
+<code>walk</code>, <code>run</code>, <code>hop</code>, <code>fly</code>, <code>enter</code>, <code>exit</code>) takes it to its own <code>&quot;z&quot;</code>, else to the depth of where it goes: a named
+anchor&#39;s <code>z</code> (0 when the anchor has none), the carrier&#39;s for <code>on:&lt;actor&gt;</code>, the other actor&#39;s for <code>near:</code>,
+<code>left-of:</code>, <code>right-of:</code>, <code>behind:</code>, <code>front-of:</code> or an actor&#39;s name. A point (<code>x:…</code>), a side, or a beat with no place
+keeps the depth. The change is eased over the beat; a <code>set</code> with a <code>z</code> takes its <code>dur</code>. An <code>enter</code> takes its depth at
+once (from a side it was off screen; from a place it appears at that place&#39;s depth, then eases to its
+destination&#39;s), and an exit or entrance at a side starts or ends fully off screen at the actor&#39;s depth. A rider has
+its carrier&#39;s depth (hopping on eases to it by the landing). A <code>&quot;z&quot;</code> on another action is ignored with a warning,
+and one on a riding scene actor too.</li>
+<li><strong>Draw order.</strong> Depth first, then ground y: whatever is off the stage is drawn behind (z &gt; 0) or in front of (z &lt; 0)
+everything on it, whatever its ground y. A painted layer with parallax k sits at z = lens × (1/k − 1) and hides what
+is beyond it (a front layer what is behind it); the stage&#39;s own ground layer reaches back to the nearest backdrop, so
+things between them still show over the ground.</li>
+<li><strong>Stand on the stage.</strong> Off the stage a figure is drawn away from the painted spot under it (it slides over the
+ground as the camera moves) and throws no ground shadow, so figures that stand stay at z 0 on a set that paints its
+stage: compile warns about one standing on the ground, a perch or a hollow at another depth (the skill&#39;s
+<code>warnings.mjs</code> prints it). Depth is for fliers, effect pieces and sets with no painted ground (<code>space</code>).</li>
+<li><strong>The camera.</strong> <code>&quot;z&quot;</code> (its depth at the shot&#39;s start) and <code>&quot;zTo&quot;</code> (at the move&#39;s end) move it through depth, eased
+over the move&#39;s window (<code>moveAt</code> / <code>moveDur</code>, else the whole shot), with any move: the near things grow faster than
+the far, and the sky stays put. A <code>push-in</code> or <code>pull-out</code> <code>to</code> a size composes its end as seen from <code>zTo</code>: the
+subjects frame as asked and only what lies at other depths changes (a dolly-zoom when the depth goes against the
+zoom). Every other move travels along the camera&#39;s axis. Both must stay under 3/4 of the set&#39;s lens. Whatever comes
+nearer the lens than 0.1 × it (or passes it) is not drawn, and it fades out from 0.25 × it.</li>
+<li><strong>Framing</strong> a subject off the stage is exact when the subjects share one depth (several depths are iterated).</li>
+<li><strong>Effects</strong> draw at depth on the overlay layer <code>depth</code> (<a href="effects.html#depth">effects.md</a>).</li>
+</ul>
+<h2 id="sfx"><a class="anchor" href="#sfx" aria-hidden="true">#</a>sfx</h2>
+<pre><code class="language-json">{ &quot;sfx&quot;: &quot;owl-hoot&quot;, &quot;gain&quot;: 0.8, &quot;with&quot;: &quot;prev&quot;, &quot;after&quot;: 0.3 }
+{ &quot;sfx&quot;: &quot;hum&quot;, &quot;caption&quot;: &quot;[hums]&quot;, &quot;params&quot;: { &quot;notes&quot;: &quot;G4:1 E4:0.5 G4:0.5 A4:2&quot;, &quot;tempo&quot;: 100, &quot;voice&quot;: &quot;child&quot; } }
+</code></pre>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>sfx</code></td>
+<td>a built-in effect name or alias, or a sound from <code>custom.mjs</code> <code>sounds</code> (<a href="sound.html#sound-effects">sound.md</a>)</td>
+</tr>
+<tr>
+<td><code>gain</code></td>
+<td>level multiplier (≥ 0, default 1)</td>
+</tr>
+<tr>
+<td><code>pan</code></td>
+<td>−1..1; default: from where <code>on</code> / <code>who</code> / <code>at</code> is on screen</td>
+</tr>
+<tr>
+<td><code>on</code>, <code>who</code></td>
+<td>an actor or anchor the sound comes from (pans it; quieter when far off screen)</td>
+</tr>
+<tr>
+<td><code>params</code></td>
+<td>the generator&#39;s parameters (<code>size</code>, <code>weight</code>, <code>notes</code>, …)</td>
+</tr>
+<tr>
+<td><code>dur</code></td>
+<td>length for continuous effects; the beat then takes <code>dur</code> seconds. Put the length in <code>params</code> instead (<code>&quot;params&quot;: { &quot;dur&quot;: 30 }</code>) and the beat takes no time while the sound plays on, across cuts: a bed of rain or wind under a whole scene</td>
+</tr>
+<tr>
+<td><code>seed</code></td>
+<td>a fixed seed (default: from the name, time and shot)</td>
+</tr>
+<tr>
+<td><code>hold</code></td>
+<td><code>false</code>: a beat <code>dur</code> plays but takes no time (the next beat and the shot don&#39;t wait); default <code>true</code></td>
+</tr>
+<tr>
+<td><code>caption</code></td>
+<td>a sound caption such as <code>&quot;[croak]&quot;</code>, shown for max(1.2 s, <code>dur</code>) but counted as heard only for <code>dur</code> (give a long sound a <code>dur</code> if its caption should cross a cut; see <a href="#captions">captions</a>); burned in only with <code>captions: &quot;all&quot;</code></td>
+</tr>
+</tbody></table></div>
+<h2 id="fx"><a class="anchor" href="#fx" aria-hidden="true">#</a>fx</h2>
+<pre><code class="language-json">{ &quot;fx&quot;: &quot;splash&quot;, &quot;at&quot;: &quot;pond_edge&quot; }
+{ &quot;fx&quot;: &quot;sparkle&quot;, &quot;on&quot;: &quot;pip&quot;, &quot;size&quot;: 1.5, &quot;color&quot;: &quot;255,236,170&quot; }
+{ &quot;fx&quot;: &quot;rain&quot;, &quot;dur&quot;: 6 }
+</code></pre>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>fx</code></td>
+<td><code>dust</code>, <code>splash</code>, <code>sparkle</code> (one-shots: 1.3, 1.2 and 1.6 s), or <code>leaves</code>, <code>rain</code>, <code>fireflies</code>, <code>motes</code>, <code>mist</code> (fields). <code>dust</code> takes its colour from the set&#39;s painted ground where it rises, in the scene&#39;s light (below).</td>
+</tr>
+<tr>
+<td><code>on</code>, <code>who</code>, <code>at</code></td>
+<td>where: an actor or an anchor (or <code>x:…</code>)</td>
+</tr>
+<tr>
+<td><code>dur</code></td>
+<td>how long a field lasts (default: to the end of the scene); fields fade in and out over 1.2 s</td>
+</tr>
+<tr>
+<td><code>size</code></td>
+<td>size multiplier (one-shots): it scales a sparkle&#39;s spread and stars, but a sparkle is always 14 stars, so for a single glint on a small prop write a custom beat</td>
+</tr>
+<tr>
+<td><code>n</code></td>
+<td>density multiplier for fields</td>
+</tr>
+<tr>
+<td><code>dir</code></td>
+<td>direction of travel for <code>dust</code> (1 or −1)</td>
+</tr>
+<tr>
+<td><code>color</code></td>
+<td><code>sparkle</code> colour as <code>&quot;r,g,b&quot;</code></td>
+</tr>
+</tbody></table></div>
+<p>An <code>fx</code> beat takes no time. For a whole scene, use the scene&#39;s <code>fx</code> or <code>overlays</code>.</p>
+<p>Dust (an <code>fx</code> beat, and the dust a run or a landing on dirt kicks up by itself) takes its colour once, as it is kicked
+up, from the set&#39;s painted ground on the contact&#39;s own surface (the path, not the grass or water beside it) in the
+scene&#39;s light, and keeps it for its 1.3 s. Actors, shadows and props over the spot never tint it. By day it is a
+little lighter and greyer than the ground, on grass a pale green-grey, by night a dim haze in the night&#39;s light.</p>
+<p>Fields (<code>fireflies</code>, <code>leaves</code>, <code>motes</code>, <code>mist</code>, <code>rain</code>) fill the whole frame: <code>at</code>, <code>on</code> and <code>size</code> don&#39;t place or
+scale them (only <code>mist</code> takes its height from <code>at</code>). Their density is per world area, so how many you see depends on
+the shot: <code>fireflies</code> puts 3–6 × <code>n</code> in every 420 × 420 world px (from 220 px above the horizon down), each lit about
+half the time. An establishing shot shows dozens; a shot of a mouse, a few hundred world px across, shows a few or none
+even at <code>n: 6</code>. For a swarm around small characters, raise <code>n</code> a lot or draw your own overlay
+(<a href="effects.html">effects.md</a>).</p>
+<h2 id="music"><a class="anchor" href="#music" aria-hidden="true">#</a>music</h2>
+<pre><code class="language-json">{ &quot;music&quot;: &quot;tension&quot;, &quot;intensity&quot;: 0.6 }
+{ &quot;music&quot;: { &quot;mood&quot;: &quot;triumph&quot;, &quot;intensity&quot;: 0.8, &quot;motif&quot;: 5, &quot;motifVoice&quot;: &quot;tutti&quot;, &quot;downbeat&quot;: true } }
+{ &quot;music&quot;: &quot;sting&quot;, &quot;name&quot;: &quot;surprise&quot; }
+{ &quot;music&quot;: &quot;none&quot; }
+</code></pre>
+<p>A music beat starts a new cue at that moment (until the next cue or the end of the scene), plays a sting, or
+silences the score. Forms:</p>
+<ul>
+<li>a mood name (<code>wonder</code>, <code>pastoral</code>, <code>tender</code>, <code>playful</code>, <code>tension</code>, <code>chase</code>, <code>sad</code>, <code>triumph</code>, <code>night</code>, <code>mystery</code>),
+with <code>intensity</code> (0..1, default 0.5) and the extras below as sibling fields;</li>
+<li>an object <code>{ &quot;mood&quot;, &quot;intensity&quot;, … }</code>;</li>
+<li><code>&quot;sting&quot;</code> with <code>name</code> (or <code>sting</code>), or a sting name directly: <code>surprise</code>, <code>sad</code>, <code>triumph</code>, <code>magic</code>, <code>plunk</code>,
+<code>stab</code>, <code>swell</code>; or <code>{ &quot;sting&quot;: &quot;stab&quot; }</code>;</li>
+<li><code>&quot;none&quot;</code>: the score fades out over 0.3 s and stays silent.</li>
+</ul>
+<p>§9 extras on a cue: <code>motif</code> (state the first n notes of the score&#39;s motif), <code>motifVoice</code> (<code>bassoon</code>, <code>flute</code>,
+<code>cello</code>, <code>horn</code>, <code>celesta</code>, <code>violin</code>, <code>strings</code>, <code>music-box</code>, <code>tutti</code>), <code>hold</code> (<code>true</code>: the last stated note
+sustains to the cue&#39;s end), <code>downbeat</code> (<code>true</code>: bar 1 lands exactly on the beat, cutting the previous cue), <code>tempo</code>
+(20–300 bpm). See <a href="sound.html#music">sound.md</a>. Two habits: give a mood change that starts on a cut <code>&quot;downbeat&quot;: true</code>
+(without it the new cue can open with a second or more of near-silence), and give the film&#39;s last cue <code>&quot;hold&quot;: true</code>
+if the end card is short (its final chord lands about 3 s before the end and dies).</p>
+<h2 id="title"><a class="anchor" href="#title" aria-hidden="true">#</a>title</h2>
+<pre><code class="language-json">{ &quot;title&quot;: &quot;SEVENTY-SIX SUMMERS&quot;, &quot;sub&quot;: &quot;a film in code&quot;, &quot;dur&quot;: 2.7, &quot;place&quot;: &quot;upper&quot; }
+</code></pre>
+<p>Big italic lettering in the picture for <code>dur</code> seconds (default 3). <code>sub</code> (or <code>subtitle</code>) adds a smaller line; a <code>\n</code>
+in it starts another line under it (a credit, say).
+<code>place</code>: <code>&quot;auto&quot;</code> (default: the calmest band of the picture, centred over the subjects), <code>top</code>, <code>upper</code>, <code>center</code>
+(or <code>middle</code>), <code>lower</code>, <code>bottom</code>, or a fraction 0..1 of the frame height for the title line.</p>
+<h2 id="mark"><a class="anchor" href="#mark" aria-hidden="true">#</a>mark</h2>
+<pre><code class="language-json">{ &quot;mark&quot;: &quot;bloom&quot;, &quot;with&quot;: &quot;prev&quot; }
+</code></pre>
+<p>§9: a named instant (takes no time). Mark names are unique in the film. A scene&#39;s <code>rim.start</code> may name a mark, and
+custom drawing code reads them as <code>api.marks.bloom</code> (film time in seconds), so drawing can be keyed to a moment in the
+dialogue whose time is only known once the voices exist.</p>
+<h2 id="wait"><a class="anchor" href="#wait" aria-hidden="true">#</a>wait</h2>
+<pre><code class="language-json">{ &quot;wait&quot;: 1.5 }
+</code></pre>
+<p>A pause of that many seconds.</p>
+<h2 id="captions"><a class="anchor" href="#captions" aria-hidden="true">#</a>Captions</h2>
+<p>Every spoken line gets a caption from its <code>text</code>, shown from the line&#39;s start until 0.25 s after it ends (at least
+1 s, and never overlapping the next line). Long lines are split into chunks of at most two lines, timed by length.
+Narration is set in italics in a soft band. What is burned in depends on <code>format.captions</code>; the <code>.srt</code> and the MP4&#39;s
+soft subtitles carry every caption.</p>
+<p>Burned-in captions are always centred; only their band changes, the bottom or the top of the frame:</p>
+<ul>
+<li><strong>One band per chunk.</strong> A chunk keeps its band for its whole time on screen, so it never jumps mid-line. It goes at
+the bottom unless the top covers less of the heads in the picture over the whole chunk; the caption&#39;s own speaker
+counts three times anyone else (for a sound caption every head counts the same).</li>
+<li><strong>One caption per band.</strong> A newer caption replaces the one up there (which fades out in 0.08 s); captions are never
+stacked.</li>
+<li><strong>Lines come first.</strong> A line&#39;s caption is placed by the picture alone. A sound caption never takes a line&#39;s caption
+off the screen while the line is being spoken or before it has been up 0.6 s: it goes to the other band when its own
+is taken while it would be up (by a line being spoken, or by a caption up less than 0.6 s), or when a line would take
+its band before it has been up 0.6 s; when both bands are taken it waits for one. So a sound during a line shows at
+the same time as the line, in the other band.</li>
+<li><strong>Cuts and fades.</strong> A caption carries over a cut only while its line is still being spoken (a sound caption: for its
+sfx beat&#39;s <code>dur</code>), or until it has been up 0.6 s; otherwise it ends exactly at the cut. At a scene dissolve or fade,
+or at a shot&#39;s <code>fadeIn</code> or <code>fadeOut</code>, a caption that ends there fades out over 0.15 s by the boundary instead.</li>
+</ul>
+<h2 id="extensions-at-a-glance"><a class="anchor" href="#extensions-at-a-glance" aria-hidden="true">#</a>Extensions at a glance</h2>
+<p>These were added in DESIGN.md §9 (round 2) and §10–11 (round 6) and are documented in place above:</p>
+<div class="table"><table><thead><tr>
+<th>where</th>
+<th>field</th>
+</tr>
+</thead><tbody><tr>
+<td>say</td>
+<td><a href="#say"><code>tts</code>, <code>trimEnd</code></a>; non-verbal lines <code>[laughs]</code></td>
+</tr>
+<tr>
+<td>beat</td>
+<td><a href="#mark"><code>{ &quot;mark&quot;: name }</code></a></td>
+</tr>
+<tr>
+<td>hop / place, scene actors</td>
+<td><a href="#riding">riding</a>: <code>&quot;to&quot;: &quot;on:&lt;actor&gt;&quot;</code>, <code>{ &quot;on&quot;: &quot;&lt;actor&gt;&quot; }</code></td>
+</tr>
+<tr>
+<td>walk / run</td>
+<td><a href="#wading">wading</a>: <code>&quot;wade&quot;: true</code>, <code>&quot;depth&quot;</code></td>
+</tr>
+<tr>
+<td>fly / enter / place, scene actors</td>
+<td><a href="#hovering">hovering</a>: <code>&quot;height&quot;</code>; enter <code>&quot;fly&quot;: true</code></td>
+</tr>
+<tr>
+<td>look</td>
+<td><a href="#do-actions"><code>&quot;to&quot;: &quot;up&quot; / &quot;sky&quot; / &quot;down&quot;</code>, <code>&quot;tilt&quot;</code></a></td>
+</tr>
+<tr>
+<td>camera</td>
+<td><a href="#camera"><code>to</code>, <code>toOn</code>, <code>zoomTo</code>, <code>moveAt</code>, <code>moveDur</code></a></td>
+</tr>
+<tr>
+<td>shot</td>
+<td><a href="#shots"><code>time</code>, <code>grade</code>, <code>gradeTo</code></a></td>
+</tr>
+<tr>
+<td>scene</td>
+<td><a href="#scenes"><code>overlays</code>, <code>rim</code></a></td>
+</tr>
+<tr>
+<td>sfx</td>
+<td>names checked against the built-in list and <code>custom.mjs</code> <code>sounds</code></td>
+</tr>
+<tr>
+<td>music</td>
+<td><a href="#music">stings <code>plunk</code>, <code>stab</code>, <code>swell</code>; <code>motif</code>, <code>motifVoice</code>, <code>hold</code>, <code>downbeat</code>, <code>tempo</code></a></td>
+</tr>
+<tr>
+<td>top level</td>
+<td><a href="#score"><code>score</code></a></td>
+</tr>
+<tr>
+<td>camera</td>
+<td><a href="#framing-part-of-a-subject"><code>focus</code>; <code>zoom</code> cropping subjects with no face; points in <code>on</code> / <code>toOn</code></a>; <a href="#depth"><code>z</code>, <code>zTo</code></a></td>
+</tr>
+<tr>
+<td>scene actors, moves, place, set</td>
+<td><a href="#depth"><code>z</code></a></td>
+</tr>
+<tr>
+<td>custom beat</td>
+<td><a href="#do-actions"><code>scope</code>, <code>hold</code></a></td>
+</tr>
+<tr>
+<td>sfx</td>
+<td><a href="#sfx"><code>hold</code></a></td>
+</tr>
+<tr>
+<td>scene</td>
+<td><a href="#scenes"><code>overlays</code> <code>shots</code></a>; <code>time</code> names a kit declares (<code>space</code>)</td>
+</tr>
+<tr>
+<td>shot</td>
+<td><a href="#shots"><code>lint</code></a></td>
+</tr>
+</tbody></table></div>
+<h2 id="checking-a-storyboard"><a class="anchor" href="#checking-a-storyboard" aria-hidden="true">#</a>Checking a storyboard</h2>
+<pre><code class="language-sh">node bin/cinecode.mjs check films/my-film
+</code></pre>
+<p><code>check</code> loads <code>custom.mjs</code>, builds every set and validates the whole file, listing <strong>every</strong> problem with its path:</p>
+<pre><code>cinecode check: film.json has 2 problems:
+  - scenes[0].shots[0].beats[1].who: &quot;pip&quot; is not in this scene yet (add it to the scene&#39;s actors, or bring it in with an &quot;enter&quot; beat first)
+  - scenes[0].shots[1].camera.size: must be one of establishing, wide, full, medium, close, extreme-close (got &quot;mid&quot;)
+check failed after 0.2 s
+</code></pre>
+<p>Invalid JSON is reported with its line and column (<code>film.json: invalid JSON at line 4, column 2: Expected &#39;,&#39; or &#39;}&#39; after property value</code>). Some things are only warnings and don&#39;t stop a render: an unknown field on a beat, an
+expression a rig doesn&#39;t have on a <code>say</code>, a speaker not in the scene without <code>vo</code>, a missing custom beat, a <code>z</code> on an
+action that can&#39;t change depth, and a film&#39;s rig, kit or effect named like a built-in one (it replaces it; <code>check</code>
+also marks the file in its list: &quot;replaces the built-in …&quot;). Neither <code>check</code> nor <code>plan</code> prints warnings, and staging
+adds its own: a blocked route, a perch for a rig that can&#39;t perch, a two-shot staged too far apart, an actor in <code>on</code>
+shown far under the size it would get alone because something else in <code>on</code> sets the framing (under 45% of it when an
+anchor does, under a sixth when a much bigger actor does; not in <code>wide</code> shots), a custom beat without a <code>scope</code>
+drawn on into a later shot or ending partway through a dissolve, and an actor standing off the stage on a painted set.
+The Claude Code skill&#39;s script prints both kinds:</p>
+<pre><code class="language-sh">node .claude/skills/cinecode/scripts/warnings.mjs films/my-film
+</code></pre>
+<pre><code>check  scenes[0].shots[2].beats[0].speeed: unknown field &quot;speeed&quot; for a &quot;look&quot; beat; ignored
+check  scenes[0].shots[5].beats[2].name: custom.mjs has no &quot;glints&quot; (have: no custom.mjs); the beat only takes time
+plan   3.3: the medium shot of pebble, frog shows frog at 11% of the size it would get alone; pebble sets the framing (give frog a shot without pebble, or leave frog out of &quot;on&quot; if the shot is about pebble)
+</code></pre>
+<p>&quot;no warnings&quot; says little about framing. Problems that only show once the film is staged (an actor standing in a
+tree, a speaker out of frame, a subject too small, a head cut by the frame edge, the moon behind a head, a caption over
+a face) are found by <a href="lint.html"><code>cinecode lint</code></a>, and the rest only by looking at the contact sheets.</p>
+
+<p class="edit"><a href="https://github.com/zakariaf/cinecode/blob/main/docs/storyboard.md">This page on GitHub</a></p></article></main><footer><div class="wrap"><p>cinecode is open source under the MIT licence · © 2026 Zakaria Fatahi · <a href="https://github.com/zakariaf/cinecode">github.com/zakariaf/cinecode</a></p>
+<p>Every picture, movement, note and sound in these films is made by code. Only the voices come from a model (Gemini TTS).</p></div></footer></body></html>

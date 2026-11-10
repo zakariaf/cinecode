@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voices, music and sound · cinecode</title><meta name="description" content="cinecode docs: Voices, music and sound">
+<meta property="og:title" content="Voices, music and sound · cinecode"><meta property="og:description" content="cinecode docs: Voices, music and sound">
+<meta property="og:image" content="https://zakariaf.github.io/cinecode/films/seventy-six-summers.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../style.css"></head>
+<body><header class="top"><div class="wrap">
+  <a class="mark" href="../index.html">cine<span>code</span></a>
+  <nav><a href="../index.html#films">Films</a><a href="../index.html#install">Install</a><a href="../docs/storyboard.html" aria-current="page">Docs</a><a href="https://github.com/zakariaf/cinecode">GitHub</a></nav>
+</div></header><main class="docs wrap"><aside class="side"><p class="label">Docs</p><ul><li><a href="storyboard.html">Storyboard</a></li><li><a href="cast.html">Cast and rigs</a></li><li><a href="sets.html">Sets</a></li><li><a href="effects.html">Effects</a></li><li><a href="sound.html" aria-current="page">Voices, music and sound</a></li><li><a href="lint.html">Lint</a></li><li><a href="rendering.html">Rendering</a></li></ul>
+<p class="label">On this page</p><ul class="toc"><li><a href="#voices">Voices</a></li><li><a href="#music">Music</a></li><li><a href="#sound-effects">Sound effects</a></li><li><a href="#ambience">Ambience</a></li><li><a href="#the-mix">The mix</a></li></ul></aside><article class="prose"><h1 id="sound-voices-music-effects-and-the-mix"><a class="anchor" href="#sound-voices-music-effects-and-the-mix" aria-hidden="true">#</a>Sound: voices, music, effects and the mix</h1>
+<p>Everything you hear in a cinecode film is made by code except the voices, which come from Gemini TTS and are cached
+on disk. The score is composed and played by a synthesizer, the effects and ambience beds are synthesized, and the mix
+is done in JavaScript before ffmpeg&#39;s loudness normalization.</p>
+<pre><code class="language-sh">node bin/cinecode.mjs voice films/my-film   # generate missing lines (needs GEMINI_API_KEY)
+node bin/cinecode.mjs music films/my-film   # the score alone → out/music.wav
+node bin/cinecode.mjs mix films/my-film     # everything → out/mix.wav, mastered to −16 LUFS
+</code></pre>
+<h2 id="voices"><a class="anchor" href="#voices" aria-hidden="true">#</a>Voices</h2>
+<p>Every <code>say</code> line is spoken by one of the 30 prebuilt Gemini voices (model <code>gemini-3.8-flash-lite-tts</code>). A film maps
+its speakers to voices in <code>voices</code> (<a href="storyboard.html#voices-and-cast">storyboard.md</a>):</p>
+<pre><code class="language-json">&quot;voices&quot;: {
+  &quot;narrator&quot;: { &quot;voice&quot;: &quot;Sulafat&quot;, &quot;tone&quot;: &quot;warm, gentle, unhurried&quot; },
+  &quot;pip&quot;:      { &quot;voice&quot;: &quot;Leda&quot;,    &quot;tone&quot;: &quot;bright, eager&quot; }
+}
+</code></pre>
+<p>The voices, with the casting note the engine keeps for each (<code>VOICES</code> in <code>engine/audio/voice.mjs</code>):</p>
+<div class="table"><table><thead><tr>
+<th>voice</th>
+<th></th>
+<th>character</th>
+</tr>
+</thead><tbody><tr>
+<td><code>Zephyr</code></td>
+<td>female</td>
+<td>bright, airy, light-hearted young woman</td>
+</tr>
+<tr>
+<td><code>Puck</code></td>
+<td>male</td>
+<td>upbeat, playful, boyish energy</td>
+</tr>
+<tr>
+<td><code>Charon</code></td>
+<td>male</td>
+<td>informative, deep, calm documentary voice</td>
+</tr>
+<tr>
+<td><code>Kore</code></td>
+<td>female</td>
+<td>firm, confident, clear-spoken woman</td>
+</tr>
+<tr>
+<td><code>Fenrir</code></td>
+<td>male</td>
+<td>excitable, quick, eager</td>
+</tr>
+<tr>
+<td><code>Leda</code></td>
+<td>female</td>
+<td>youthful, light, girlish</td>
+</tr>
+<tr>
+<td><code>Orus</code></td>
+<td>male</td>
+<td>firm, steady, grounded adult</td>
+</tr>
+<tr>
+<td><code>Aoede</code></td>
+<td>female</td>
+<td>breezy, relaxed, natural</td>
+</tr>
+<tr>
+<td><code>Callirrhoe</code></td>
+<td>female</td>
+<td>easy-going, friendly, unhurried</td>
+</tr>
+<tr>
+<td><code>Autonoe</code></td>
+<td>female</td>
+<td>bright, articulate, cheerful</td>
+</tr>
+<tr>
+<td><code>Enceladus</code></td>
+<td>male</td>
+<td>breathy, soft-spoken, intimate</td>
+</tr>
+<tr>
+<td><code>Iapetus</code></td>
+<td>male</td>
+<td>clear, plain, trustworthy</td>
+</tr>
+<tr>
+<td><code>Umbriel</code></td>
+<td>male</td>
+<td>easy-going, mellow, warm</td>
+</tr>
+<tr>
+<td><code>Algieba</code></td>
+<td>male</td>
+<td>smooth, polished, gentle</td>
+</tr>
+<tr>
+<td><code>Despina</code></td>
+<td>female</td>
+<td>smooth, warm, poised</td>
+</tr>
+<tr>
+<td><code>Erinome</code></td>
+<td>female</td>
+<td>clear, precise, composed</td>
+</tr>
+<tr>
+<td><code>Algenib</code></td>
+<td>male</td>
+<td>gravelly, rough, gruff old character</td>
+</tr>
+<tr>
+<td><code>Rasalgethi</code></td>
+<td>male</td>
+<td>informative, measured, professorial</td>
+</tr>
+<tr>
+<td><code>Laomedeia</code></td>
+<td>female</td>
+<td>upbeat, lively, curious</td>
+</tr>
+<tr>
+<td><code>Achernar</code></td>
+<td>female</td>
+<td>soft, tender, quiet</td>
+</tr>
+<tr>
+<td><code>Alnilam</code></td>
+<td>male</td>
+<td>firm, strong, authoritative</td>
+</tr>
+<tr>
+<td><code>Schedar</code></td>
+<td>male</td>
+<td>even, level, dependable</td>
+</tr>
+<tr>
+<td><code>Gacrux</code></td>
+<td>female</td>
+<td>mature, grandmotherly, rich</td>
+</tr>
+<tr>
+<td><code>Pulcherrima</code></td>
+<td>female</td>
+<td>forward, bold, expressive</td>
+</tr>
+<tr>
+<td><code>Achird</code></td>
+<td>male</td>
+<td>friendly, kind, approachable</td>
+</tr>
+<tr>
+<td><code>Zubenelgenubi</code></td>
+<td>male</td>
+<td>casual, laid-back, conversational</td>
+</tr>
+<tr>
+<td><code>Vindemiatrix</code></td>
+<td>female</td>
+<td>gentle, calm, soothing</td>
+</tr>
+<tr>
+<td><code>Sadachbia</code></td>
+<td>male</td>
+<td>lively, animated, spirited</td>
+</tr>
+<tr>
+<td><code>Sadaltager</code></td>
+<td>male</td>
+<td>knowledgeable, wise, thoughtful</td>
+</tr>
+<tr>
+<td><code>Sulafat</code></td>
+<td>female</td>
+<td>warm, rich, a natural storyteller</td>
+</tr>
+</tbody></table></div>
+<p>Names are matched without regard to case. None of the voices is a child&#39;s: for young girls the starter uses <code>Leda</code>
+with &quot;bright, eager&quot; and the demo film <code>Leda</code> with &quot;small, high, earnest&quot;.</p>
+<h3 id="tone"><a class="anchor" href="#tone" aria-hidden="true">#</a>Tone</h3>
+<p>A line is sent as <code>[tone] text</code>: the bracket is a direction the model should follow, not read. The tone is the
+voice&#39;s <code>tone</code> joined with the line&#39;s own <code>tone</code> (duplicates dropped), and the first try keeps only the <strong>last three</strong>
+descriptors, so the line&#39;s own delivery, which comes last, always survives.</p>
+<p><strong>Use delivery adjectives only — nouns get read aloud.</strong> Good: <code>&quot;dry&quot;</code>, <code>&quot;soft, tender&quot;</code>, <code>&quot;squeaky, disbelieving&quot;</code>.
+Bad: <code>&quot;grumpy old badger&quot;</code>, <code>&quot;voice catching&quot;</code>, a list of six adjectives, a stage direction. Those come back spoken
+before or instead of the line. Pauses are beats (<code>&quot;after&quot;: 0.6</code>), not &quot;…&quot; in the text.</p>
+<p>When a take reads the direction aloud, the next try sends only the last descriptor, and the one after that no
+direction at all (the voice alone carries the line). Such a take can pass with the line&#39;s words right and its
+delivery gone; <code>takes.mjs</code> (below) flags it <code>TONE-CUT</code>.</p>
+<p>No word is safe every time. Read aloud in the demo film or a test film: &quot;wondering&quot;, &quot;hopeful&quot;, &quot;certain&quot;, &quot;less
+sure&quot; (each even as the whole direction), &quot;steady&quot;, &quot;simple&quot;, &quot;deadpan&quot;, &quot;whispering&quot;, &quot;gently offended&quot;, and
+<code>[warm, gentle, soft]</code> as a whole (it took with &quot;tender&quot; for &quot;soft&quot;). Never read aloud there: &quot;teasing&quot;, &quot;tender&quot;,
+&quot;scared&quot;, &quot;grateful&quot;, &quot;delighted&quot;, &quot;excited&quot;, &quot;quiet&quot;, &quot;solemn&quot;, &quot;earnest&quot;, &quot;breathless&quot;. When a tone is read aloud,
+change the word rather than retrying it.</p>
+<p>Made-up names are often misheard by the transcriber (&quot;Glim&quot; came back as &quot;Clem&quot;, then &quot;Glem&quot;), which fails a good
+take and uses up tries: read what was heard before you redo a take, and prefer names that are real words or names.</p>
+<p>Non-verbal lines: a <code>text</code> starting with <code>[</code> (<code>&quot;[laughs]&quot;</code>) is a non-verbal caption. Give the voice something to
+say with <code>tts</code> (<code>{ &quot;text&quot;: &quot;[laughs]&quot;, &quot;tts&quot;: &quot;Hahaha!&quot; }</code>): the caption stays, the voice says the <code>tts</code> text.</p>
+<h3 id="qa"><a class="anchor" href="#qa" aria-hidden="true">#</a>QA</h3>
+<p>Every new take is transcribed by <code>gemini-3.8-flash</code> and compared with the line:</p>
+<ul>
+<li>words are compared lowercased, without punctuation or accents (<code>don&#39;t</code> = <code>dont</code>, <code>7</code> = <code>seven</code> up to twenty);</li>
+<li>a take <strong>passes</strong> when its word error rate is at most 0.2 <strong>and</strong> no words were inserted before the line (a take
+that starts &quot;Huh, …&quot; or &quot;Um, …&quot; fails);</li>
+<li>a take that speaks the direction (inserted before the line, or instead of it) is marked and the direction is
+simplified for the next try;</li>
+<li>a non-verbal line has no words to check: it passes unless a word of the direction is heard (a laugh that comes out
+as &quot;Giggling. Hahaha!&quot; fails).</li>
+</ul>
+<p>A line gets up to three takes; the best one is kept (lowest error, with a penalty for inserted words). If the
+transcription service fails, the take is kept unchecked. The <code>voice</code> command then prints every line (the start of its
+id, the speaker, the take&#39;s length, its error rate and the text), marks those still above 0.2 with <code>!</code> and counts
+them.</p>
+<p><code>node .claude/skills/cinecode/scripts/takes.mjs films/&lt;slug&gt;</code> lists flagged and non-verbal takes with what was asked
+and what was heard, every try of a flagged line, and <code>TONE-CUT</code> for a kept take that was sent with less direction
+than asked (or none) because earlier tries read it aloud. With <code>--all</code> it lists every take, each with its length
+against the estimate and any pause of 0.35 s or more inside it: read them all, since a take can pass and still be
+wrong. Two traps seen: a one-word line or a homophone (<code>&quot;Ours.&quot;</code> was heard as &quot;hours&quot; and &quot;Walrus&quot; on every try;
+<code>&quot;Ours, then.&quot;</code> passed), and a slow voice (<code>Algenib</code>, &quot;gruff, low&quot;) taking twice the estimate with a pause between two
+sentences. To fix a take, simplify its tone (that makes a new line), or
+delete its two cache files and run <code>voice</code> again.</p>
+<p>The kept take is trimmed of silence below −45 dBFS (10 ms windows, 60 ms kept around the speech), resampled to 48 kHz
+and given short edge fades. Its loudness envelope at the film&#39;s fps drives the speaker&#39;s mouth (lip sync). A line&#39;s
+<code>trimEnd</code> cuts the end of the take after the cache, with a two-frame fade; timing and lip sync follow the cut.</p>
+<h3 id="the-voice-cache"><a class="anchor" href="#the-voice-cache" aria-hidden="true">#</a>The voice cache</h3>
+<p>Each line is stored in <code>films/&lt;slug&gt;/voices/</code> as <code>&lt;id&gt;.wav</code> (48 kHz mono, 16-bit) and <code>&lt;id&gt;.json</code> (text, voice, tone,
+the prompt sent, the models, the QA transcript and error of every take, the envelope). The id is a hash of who speaks,
+the voice, the spoken text and the tone, so changing any of them makes a new line; an entry is reused while its text,
+voice and tone still match. Two identical lines share one take. A line whose text, tone or voice changes leaves its
+old take behind; it is never used again. <code>takes.mjs</code> lists those unused takes with the command to delete them, which
+is safe (they only cost a request if you change the line back).</p>
+<p>Once every line is cached, the film plans, mixes and renders with no network and no key. <code>plan</code> uses the real take
+lengths (unvoiced lines show an estimate of <code>words / 2.6 + 0.3</code> s, marked <code>~</code>). <code>voice</code> sends only missing lines, two
+at a time, retrying on rate limits (HTTP 429), server errors and network errors with exponential backoff. <code>render</code>
+voices missing lines first when <code>GEMINI_API_KEY</code> is set and stops when it isn&#39;t; <code>mix</code> and <code>animatic</code> skip unvoiced
+lines with a warning.</p>
+<p><code>voice</code> needs <code>GEMINI_API_KEY</code> in the environment, even when every line is cached. Keep the key in your shell profile;
+don&#39;t paste it into files or command lines.</p>
+<h2 id="music"><a class="anchor" href="#music" aria-hidden="true">#</a>Music</h2>
+<p>The score is composed from the film&#39;s music cues each time it is rendered (seeded by the film&#39;s top-level <code>seed</code>, so
+it is the same every time). A scene sets a cue with <code>music</code> (a mood name or <code>{ &quot;mood&quot;, &quot;intensity&quot;, … }</code>), and a
+<code>music</code> beat changes the cue, plays a sting or silences the score at that moment
+(<a href="storyboard.html#music">storyboard.md</a>). <code>&quot;music&quot;: &quot;none&quot;</code> fades the score out over 0.3 s.</p>
+<h3 id="moods"><a class="anchor" href="#moods" aria-hidden="true">#</a>Moods</h3>
+<div class="table"><table><thead><tr>
+<th>mood</th>
+<th>tempo</th>
+<th>meter</th>
+<th>mode</th>
+<th>sound</th>
+<th>default motif voice</th>
+</tr>
+</thead><tbody><tr>
+<td><code>wonder</code></td>
+<td>74</td>
+<td>4/4</td>
+<td>major</td>
+<td>celesta and flute over harp arpeggios, a string and choir pad, glockenspiel sparkle</td>
+<td><code>celesta</code></td>
+</tr>
+<tr>
+<td><code>pastoral</code></td>
+<td>100</td>
+<td>3/4</td>
+<td>major</td>
+<td>flute and clarinet over a guitar waltz, pizzicato bass</td>
+<td><code>bassoon</code></td>
+</tr>
+<tr>
+<td><code>tender</code></td>
+<td>66</td>
+<td>3/4</td>
+<td>major</td>
+<td>piano and strings, broken piano chords, a cello counter-line, no percussion</td>
+<td><code>cello</code></td>
+</tr>
+<tr>
+<td><code>playful</code></td>
+<td>116</td>
+<td>4/4</td>
+<td>major</td>
+<td>staccato clarinet and flute, pizzicato off-beats, glockenspiel doubling</td>
+<td><code>bassoon</code></td>
+</tr>
+<tr>
+<td><code>tension</code></td>
+<td>84</td>
+<td>4/4</td>
+<td>minor</td>
+<td>slow harmony over a tonic pedal, a low string pulse, a tremolo cluster, a heartbeat drum</td>
+<td><code>strings</code></td>
+</tr>
+<tr>
+<td><code>chase</code></td>
+<td>144</td>
+<td>4/4</td>
+<td>minor</td>
+<td>eighth-note string ostinati accented 3+3+2, kick on 1 and 3, a horn counter-line</td>
+<td><code>horn</code></td>
+</tr>
+<tr>
+<td><code>sad</code></td>
+<td>54</td>
+<td>4/4</td>
+<td>minor</td>
+<td>cello and piano, sparse piano chords, strings</td>
+<td><code>cello</code></td>
+</tr>
+<tr>
+<td><code>triumph</code></td>
+<td>100</td>
+<td>4/4</td>
+<td>major</td>
+<td>horns in thirds on a fanfare form of the theme, marcato strings, timpani</td>
+<td><code>tutti</code></td>
+</tr>
+<tr>
+<td><code>night</code></td>
+<td>56</td>
+<td>3/4</td>
+<td>major</td>
+<td>a lullaby: celesta like a music box with an echo, a warm pad, slow harp</td>
+<td><code>celesta</code></td>
+</tr>
+<tr>
+<td><code>mystery</code></td>
+<td>66</td>
+<td>4/4</td>
+<td>Hungarian minor</td>
+<td>a tonic drone, a harp cell, choir, bells</td>
+<td><code>flute</code></td>
+</tr>
+</tbody></table></div>
+<p><strong>Intensity</strong> (0..1, default 0.5) brings layers in at phrase boundaries: pad, accompaniment, melody, bass,
+counter-line, percussion, doublings. 0.3 is sparse, 0.8 is full.</p>
+<p>How cues fit together: music is written in four-bar phrases, and the tempo is nudged (up to ±13%) so a cue&#39;s last
+tonic chord lands about 3 s before it ends. Consecutive cues of the same mood merge into one continuous cue whose
+arrangement follows the intensity changes; different moods crossfade over 1.5 s. Two consequences to listen for (or
+measure with <code>node .claude/skills/cinecode/scripts/levels.mjs films/&lt;slug&gt;</code>, which flags a second or more of
+near-silence under a cue):</p>
+<ul>
+<li>A new mood that starts on a cut without <code>&quot;downbeat&quot;: true</code> can open with a near-silent lead-in of a second or more
+(seen: 1.5 s under a line, at −55 to −70 dB). Give a mood change on a cut <code>&quot;downbeat&quot;: true</code>.</li>
+<li>The last cue runs under the end card, but its final chord lands about 3 s before the film&#39;s end and dies away, so
+under a 2.5 s end card the score is already gone. <code>&quot;hold&quot;: true</code> on the last cue sustains it to the end. Without a score key, each cue picks a
+key from its mood&#39;s preferred keys, close on the circle of fifths to the previous cue.</li>
+</ul>
+<h3 id="the-motif"><a class="anchor" href="#the-motif" aria-hidden="true">#</a>The motif</h3>
+<p>A film can have a tune of its own, given once in <code>score</code>:</p>
+<pre><code class="language-json">&quot;score&quot;: { &quot;key&quot;: &quot;G&quot;, &quot;motif&quot;: &quot;D5:1 B4:0.5 D5:0.5 E5:2 G5:3&quot; }
+</code></pre>
+<p><code>motif</code> is <code>note:beats</code> tokens (<code>G4:1</code>, <code>Bb3:0.5</code>, <code>F#5:2</code>) written in <code>key</code> (<code>&quot;G&quot;</code>, <code>&quot;Eb&quot;</code>, <code>&quot;F#m&quot;</code>, <code>&quot;A minor&quot;</code>).
+With a score, every cue is in the score key and the composed melodies grow out of the motif&#39;s opening intervals.
+The motif is stored as scale degrees, so in a minor mood it is stated in the minor mode (the A of a C-major motif
+becomes A-flat in C minor).</p>
+<p>A cue states the motif when asked:</p>
+<div class="table"><table><thead><tr>
+<th>field on the cue</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>motif</code></td>
+<td><code>n</code>: state the first n notes (<code>true</code>: all of them) from the cue&#39;s first bar; the cue&#39;s own phrases continue after</td>
+</tr>
+<tr>
+<td><code>motifVoice</code></td>
+<td><code>bassoon</code>, <code>flute</code>, <code>cello</code>, <code>horn</code>, <code>celesta</code>, <code>violin</code>, <code>strings</code>, <code>music-box</code>, <code>tutti</code> (default: by mood, table above)</td>
+</tr>
+<tr>
+<td><code>hold</code></td>
+<td><code>true</code>: the last stated note sustains to the end of the cue, over slow chords that all contain it</td>
+</tr>
+<tr>
+<td><code>downbeat</code></td>
+<td><code>true</code>: bar 1 lands exactly on the cue&#39;s start with a struck chord, cutting the previous cue</td>
+</tr>
+<tr>
+<td><code>tempo</code></td>
+<td>20–300 bpm instead of the mood&#39;s tempo</td>
+</tr>
+</tbody></table></div>
+<p>The chords under a statement are chosen so every long or strong motif note is a chord tone. A motif cue starts exactly
+on its time; the cue before it holds its final chord into the statement only when that chord fits.</p>
+<p>A good plan: a few notes of the motif early (<code>&quot;motif&quot;: 3</code>), quietly, on a solo voice; the full statement saved for
+the turn or the ending (<code>&quot;motif&quot;: true</code>, <code>&quot;motifVoice&quot;: &quot;tutti&quot;</code>).</p>
+<h3 id="stings"><a class="anchor" href="#stings" aria-hidden="true">#</a>Stings</h3>
+<p>Short accents placed with their hit exactly on the beat&#39;s time, in the key of the music around them, with the score
+dipped underneath:</p>
+<div class="table"><table><thead><tr>
+<th>sting</th>
+<th>sound</th>
+</tr>
+</thead><tbody><tr>
+<td><code>surprise</code></td>
+<td>a harp run into a bright pizzicato hit</td>
+</tr>
+<tr>
+<td><code>sad</code></td>
+<td>a iv → i sigh</td>
+</tr>
+<tr>
+<td><code>triumph</code></td>
+<td>a horn fanfare on a timpani roll</td>
+</tr>
+<tr>
+<td><code>magic</code></td>
+<td>celesta shimmer, bell and choir</td>
+</tr>
+<tr>
+<td><code>plunk</code></td>
+<td>one low pizzicato pluck, a comic full stop</td>
+</tr>
+<tr>
+<td><code>stab</code></td>
+<td>timpani and brass on open fifths (fits a major or a minor cue)</td>
+</tr>
+<tr>
+<td><code>swell</code></td>
+<td>a 2.2 s cymbal and timpani roll with strings, cresting at the beat: put it just before a downbeat</td>
+</tr>
+</tbody></table></div>
+<h2 id="sound-effects"><a class="anchor" href="#sound-effects" aria-hidden="true">#</a>Sound effects</h2>
+<p>An <code>sfx</code> beat plays a synthesized effect (<a href="storyboard.html#sfx">storyboard.md</a>). Effects are calibrated to sit under the
+dialogue; <code>gain</code> scales one, and <code>params.level</code> trims it in dB. Each event is seeded by its name, time and shot, so
+editing one leaves the others alone.</p>
+<div class="table"><table><thead><tr>
+<th>name</th>
+<th>sound</th>
+<th>params</th>
+</tr>
+</thead><tbody><tr>
+<td><code>footstep-grass</code>, <code>footstep-dirt</code>, <code>footstep-wood</code>, <code>footstep-stone</code></td>
+<td>one footfall</td>
+<td><code>weight</code> 0..1</td>
+</tr>
+<tr>
+<td><code>hop</code></td>
+<td>a push-off: a brush of the ground and a breath of air</td>
+<td><code>weight</code>, <code>surface</code></td>
+</tr>
+<tr>
+<td><code>land</code></td>
+<td>arriving from a jump: a body whump and crushed ground cover</td>
+<td><code>weight</code>, <code>surface</code></td>
+</tr>
+<tr>
+<td><code>whoosh</code></td>
+<td>air rushing past</td>
+<td><code>dur</code>, <code>pitch</code></td>
+</tr>
+<tr>
+<td><code>splash</code></td>
+<td>water thrown up and falling back</td>
+<td><code>size</code></td>
+</tr>
+<tr>
+<td><code>plop</code></td>
+<td>a small thing dropping into water</td>
+<td><code>pitch</code></td>
+</tr>
+<tr>
+<td><code>rustle</code></td>
+<td>leaves and twigs moving</td>
+<td><code>dur</code>, <code>soft</code></td>
+</tr>
+<tr>
+<td><code>thud</code></td>
+<td>something heavy meeting soft ground</td>
+<td><code>weight</code></td>
+</tr>
+<tr>
+<td><code>pop</code></td>
+<td>a cork or cheek pop</td>
+<td><code>pitch</code></td>
+</tr>
+<tr>
+<td><code>chime</code></td>
+<td>struck chime tubes, a little pentatonic run</td>
+<td><code>notes</code> (how many), <code>base</code> (MIDI note), <code>down</code></td>
+</tr>
+<tr>
+<td><code>sparkle</code></td>
+<td>a magic twinkle: rising celesta-like pings</td>
+<td><code>count</code></td>
+</tr>
+<tr>
+<td><code>owl-hoot</code></td>
+<td>owl hoots</td>
+<td><code>kind</code>: <code>horned</code>, <code>tawny</code>, <code>simple</code>; <code>pitch</code></td>
+</tr>
+<tr>
+<td><code>birdsong</code></td>
+<td>one bird&#39;s song</td>
+<td><code>species</code>: <code>sparrow</code>, <code>tit</code>, <code>chaffinch</code>, <code>robin</code>, <code>blackbird</code>, <code>warbler</code>, <code>dove</code>, <code>cuckoo</code>, <code>lark</code>; <code>pitch</code>, <code>dur</code> (lark)</td>
+</tr>
+<tr>
+<td><code>cricket</code></td>
+<td>crickets (continuous)</td>
+<td><code>kind</code>: <code>field</code>, <code>tree</code>; <code>dur</code></td>
+</tr>
+<tr>
+<td><code>frog-croak</code></td>
+<td>a frog</td>
+<td><code>kind</code>: <code>ribbit</code>, <code>croak</code>; <code>size</code></td>
+</tr>
+<tr>
+<td><code>wind</code></td>
+<td>wind (continuous)</td>
+<td><code>dur</code>, <code>strength</code>, <code>leafy</code>, <code>whistle</code></td>
+</tr>
+<tr>
+<td><code>stream</code></td>
+<td>running water (continuous)</td>
+<td><code>dur</code>, <code>busy</code></td>
+</tr>
+<tr>
+<td><code>fire</code></td>
+<td>a crackling fire (continuous)</td>
+<td><code>dur</code></td>
+</tr>
+<tr>
+<td><code>door-creak</code></td>
+<td>a creaking hinge</td>
+<td><code>dur</code>, <code>close</code></td>
+</tr>
+<tr>
+<td><code>bell</code></td>
+<td>a church or hand bell</td>
+<td><code>f0</code> (Hz), <code>count</code>, <code>gap</code>, <code>size</code>, <code>pitch</code></td>
+</tr>
+<tr>
+<td><code>mouse-squeak</code></td>
+<td>a mouse&#39;s squeaks</td>
+<td><code>count</code>, <code>pitch</code></td>
+</tr>
+<tr>
+<td><code>songbird-tweet</code></td>
+<td>a small bird&#39;s tweets</td>
+<td><code>count</code>, <code>pitch</code></td>
+</tr>
+<tr>
+<td><code>wing-flap</code></td>
+<td>wingbeats</td>
+<td><code>flaps</code>, <code>size</code></td>
+</tr>
+<tr>
+<td><code>knock</code></td>
+<td>knuckles on a door</td>
+<td><code>count</code>, <code>per</code> (s between knocks)</td>
+</tr>
+<tr>
+<td><code>woodpecker</code></td>
+<td>a woodpecker drumming</td>
+<td></td>
+</tr>
+<tr>
+<td><code>anvil</code></td>
+<td>a smith&#39;s hammer on an anvil</td>
+<td><code>count</code>, <code>per</code></td>
+</tr>
+<tr>
+<td><code>hum</code></td>
+<td>someone humming a tune with closed lips</td>
+<td><code>notes</code> (<code>&quot;G4:1 E4:0.5 …&quot;</code>), <code>tempo</code>, <code>voice</code>: <code>child</code>, <code>adult</code>, <code>elder</code>; <code>transpose</code></td>
+</tr>
+<tr>
+<td><code>music-box</code></td>
+<td>a wind-up music box</td>
+<td><code>notes</code>, <code>tempo</code>, <code>octave</code>, <code>slow</code> 0..1 (the spring runs down)</td>
+</tr>
+<tr>
+<td><code>gasp</code></td>
+<td>a sharp intake of breath</td>
+<td><code>voice</code>: <code>child</code>, <code>adult</code>, <code>elder</code>; <code>dur</code></td>
+</tr>
+<tr>
+<td><code>sniff</code></td>
+<td>a wet sniff</td>
+<td><code>count</code>, <code>wet</code> 0..1, <code>pitch</code></td>
+</tr>
+<tr>
+<td><code>snore</code></td>
+<td>a snore</td>
+<td><code>dur</code>, <code>pitch</code></td>
+</tr>
+<tr>
+<td><code>breath</code></td>
+<td>breathing, from one quiet breath to panting</td>
+<td><code>heavy</code> 0..1, <code>count</code>, <code>dur</code>, <code>pitch</code></td>
+</tr>
+<tr>
+<td><code>slosh</code></td>
+<td>wading: water pushed around a body</td>
+<td><code>dur</code>, <code>size</code></td>
+</tr>
+<tr>
+<td><code>bubbles</code></td>
+<td>air escaping under water</td>
+<td><code>dur</code>, <code>size</code></td>
+</tr>
+<tr>
+<td><code>wind-swell</code></td>
+<td>a rising gust, strongest at its end</td>
+<td><code>dur</code>, <code>strength</code>, <code>release</code>, <code>leafy</code>, <code>whistle</code></td>
+</tr>
+<tr>
+<td><code>drip</code></td>
+<td>drops falling from something wet</td>
+<td><code>count</code>, <code>dur</code></td>
+</tr>
+</tbody></table></div>
+<p>Aliases: <code>footstep</code> (grass), <code>squeak</code>, <code>tweet</code>, <code>flap</code>, <code>hoot</code>, <code>croak</code>, <code>creak</code> and <code>gate-creak</code> (door-creak),
+<code>leaves</code> (rustle), <code>bird</code> (birdsong). Every effect also takes <code>level</code> (a trim in dB). A <code>hum</code> is treated like a
+voice: the score ducks under it (<code>&quot;params&quot;: { &quot;duck&quot;: false }</code> turns that off, <code>true</code> ducks the score under any
+effect).</p>
+<p>A film can add its own sounds in <code>custom.mjs</code> (<a href="effects.html#sounds">effects.md</a>).</p>
+<h3 id="automatic-sounds"><a class="anchor" href="#automatic-sounds" aria-hidden="true">#</a>Automatic sounds</h3>
+<p>You don&#39;t write footsteps. Every step of a walk or run plays a footstep for the ground under it (the set&#39;s <code>surface</code>
+and <code>paths</code>: grass, dirt, stone, wood), louder for heavier rigs; hops and landings play <code>hop</code> and <code>land</code>; owls and
+songbirds flap when they fly; steps in water splash and wading sloshes. Running on dirt kicks up dust (a visual <code>fx</code>).
+Sounds are panned by where they happen on screen.</p>
+<h2 id="ambience"><a class="anchor" href="#ambience" aria-hidden="true">#</a>Ambience</h2>
+<p>Each scene plays an ambience bed under everything: <code>&quot;ambience&quot;: &quot;auto&quot;</code> (the default) takes the kit&#39;s day or night
+bed by the scene&#39;s time (<a href="sets.html#ambience">sets.md</a>), a name forces one, <code>&quot;none&quot;</code> is silence.</p>
+<div class="table"><table><thead><tr>
+<th>bed</th>
+<th>what&#39;s in it</th>
+</tr>
+</thead><tbody><tr>
+<td><code>meadow-day</code></td>
+<td>a light breeze, a far skylark, three songbirds</td>
+</tr>
+<tr>
+<td><code>meadow-night</code></td>
+<td>a soft breeze, field crickets, an owl now and then</td>
+</tr>
+<tr>
+<td><code>forest-day</code></td>
+<td>wind in the leaves, four songbirds, a far cuckoo, a woodpecker</td>
+</tr>
+<tr>
+<td><code>forest-night</code></td>
+<td>wind in the leaves, tree crickets, a tawny owl, an occasional rustle</td>
+</tr>
+<tr>
+<td><code>stream</code></td>
+<td>running water, a breeze, two songbirds</td>
+</tr>
+<tr>
+<td><code>village-day</code></td>
+<td>a breeze, sparrows and garden birds, a far smithy&#39;s anvil, distant work, a bell</td>
+</tr>
+<tr>
+<td><code>village-night</code></td>
+<td>a faint breeze, crickets, an owl, a far door creaking</td>
+</tr>
+<tr>
+<td><code>wind-hill</code></td>
+<td>strong whistling wind and a far skylark</td>
+</tr>
+</tbody></table></div>
+<p>Beds never loop (every layer is a seeded process), start already alive, and crossfade over 1 s when the bed changes.</p>
+<p><code>ambience</code> takes only these eight. For a bed of your own (rain, a storm), write it as a sound in <code>custom.mjs</code> and lay
+it as one long effect at the start of the scene, with its length in <code>params</code> rather than on the beat: <code>{ &quot;sfx&quot;: &quot;rain-bed&quot;, &quot;params&quot;: { &quot;dur&quot;: 30 } }</code> takes no time in the shot and plays on across the cuts (a beat-level <code>&quot;dur&quot;: 30</code>
+would hold the shot for 30 s). The same works for the continuous built-ins (<code>wind</code>, <code>stream</code>, <code>fire</code>, <code>cricket</code>).</p>
+<h2 id="the-mix"><a class="anchor" href="#the-mix" aria-hidden="true">#</a>The mix</h2>
+<p><code>mix</code> (and <code>animatic</code> and <code>render</code>, which mix first) builds the soundtrack:</p>
+<div class="table"><table><thead><tr>
+<th></th>
+<th></th>
+</tr>
+</thead><tbody><tr>
+<td>dialogue</td>
+<td>each line high-passed at 70 Hz and normalized to −20 LUFS, panned up to ±0.3 by the speaker&#39;s place on screen</td>
+</tr>
+<tr>
+<td>music</td>
+<td>the score normalized to −27 LUFS, ducked 10 dB under dialogue and hums (attack 0.15 s, release 0.4 s, hold 0.25 s, 0.1 s lookahead)</td>
+</tr>
+<tr>
+<td>effects</td>
+<td>at their calibrated levels × <code>gain</code>, with a short outdoor reverb send (0.12)</td>
+</tr>
+<tr>
+<td>ambience</td>
+<td>1 s equal-power crossfades between beds, dipped 3 dB under dialogue</td>
+</tr>
+<tr>
+<td>bus</td>
+<td>gentle compression (2:1 from −18 dB) and a limiter at −1 dBFS</td>
+</tr>
+<tr>
+<td>master</td>
+<td>ffmpeg <code>loudnorm</code> two-pass to −16 LUFS integrated, −1.5 dBTP → <code>out/mix.wav</code>, 48 kHz 24-bit stereo</td>
+</tr>
+</tbody></table></div>
+<p><code>out/music.wav</code> is the score alone (48 kHz 24-bit) for judging the moods. Lines without a voice yet are skipped with
+one warning, so a film can be mixed (and an animatic made) before it is voiced. The mastering step runs <code>ffmpeg</code> from
+<code>PATH</code>.</p>
+
+<p class="edit"><a href="https://github.com/zakariaf/cinecode/blob/main/docs/sound.md">This page on GitHub</a></p></article></main><footer><div class="wrap"><p>cinecode is open source under the MIT licence · © 2026 Zakaria Fatahi · <a href="https://github.com/zakariaf/cinecode">github.com/zakariaf/cinecode</a></p>
+<p>Every picture, movement, note and sound in these films is made by code. Only the voices come from a model (Gemini TTS).</p></div></footer></body></html>

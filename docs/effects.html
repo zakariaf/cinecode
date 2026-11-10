@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Effects · cinecode</title><meta name="description" content="cinecode docs: Effects">
+<meta property="og:title" content="Effects · cinecode"><meta property="og:description" content="cinecode docs: Effects">
+<meta property="og:image" content="https://zakariaf.github.io/cinecode/films/seventy-six-summers.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../style.css"></head>
+<body><header class="top"><div class="wrap">
+  <a class="mark" href="../index.html">cine<span>code</span></a>
+  <nav><a href="../index.html#films">Films</a><a href="../index.html#install">Install</a><a href="../docs/storyboard.html" aria-current="page">Docs</a><a href="https://github.com/zakariaf/cinecode">GitHub</a></nav>
+</div></header><main class="docs wrap"><aside class="side"><p class="label">Docs</p><ul><li><a href="storyboard.html">Storyboard</a></li><li><a href="cast.html">Cast and rigs</a></li><li><a href="sets.html">Sets</a></li><li><a href="effects.html" aria-current="page">Effects</a></li><li><a href="sound.html">Voices, music and sound</a></li><li><a href="lint.html">Lint</a></li><li><a href="rendering.html">Rendering</a></li></ul>
+<p class="label">On this page</p><ul class="toc"><li><a href="#built-in-effects">Built-in effects</a></li><li><a href="#two-rules">Two rules</a></li><li><a href="#custom-beats">Custom beats</a></li><li><a href="#overlays">Overlays</a></li><li><a href="#props">Props</a></li><li><a href="#layers">Layers</a></li><li><a href="#the-api">The api</a></li><li><a href="#depth">Depth</a></li><li><a href="#sounds">Sounds</a></li><li><a href="#a-worked-example">A worked example</a></li></ul></aside><article class="prose"><h1 id="custom-effects-custommjs"><a class="anchor" href="#custom-effects-custommjs" aria-hidden="true">#</a>Custom effects: custom.mjs</h1>
+<p>When a film needs something the engine doesn&#39;t have (a comet, mist that parts, a glow around a lantern, a new sound,
+a new animal or place), it goes in the film&#39;s own <code>films/&lt;slug&gt;/custom.mjs</code>. cinecode loads it together with
+<code>film.json</code>; <code>check</code> reports <code>, custom.mjs</code> when it does, and every problem in it as a check error. Look at the
+<a href="#built-in-effects">built-in effects</a> first: they are used the same way.</p>
+<pre><code class="language-js">// films/&lt;slug&gt;/custom.mjs: every export is optional
+export const custom = { … };    // custom beats: { &quot;do&quot;: &quot;custom&quot;, &quot;name&quot;: … }
+export const overlays = { … };  // whole-scene drawings: a scene&#39;s &quot;overlays&quot;: [ … ]
+export const sounds = { … };    // new sound effects: { &quot;sfx&quot;: … } and custom beats&#39; sfx
+export const rigs = [ … ];      // new characters (see cast.md, &quot;Adding a rig&quot;)
+export const kits = { … };      // new locations (see sets.md, &quot;Adding a kit&quot;)
+</code></pre>
+<p><code>cinecode new</code> writes a working example (<code>templates/custom.mjs</code>): a custom beat that throws glints from a character,
+an overlay of sunbeams and a bell sound. <code>films/_test/custom.mjs</code> is another small one, and
+<code>films/seventy-six-summers/custom.mjs</code> with its <code>fx/</code> folder a large one (a comet, mist, a far hill, a reflection).</p>
+<p>Film code imports the engine&#39;s helpers by the name <code>cinecode</code>, never by a relative path, so a film works wherever it
+lives (in this repo, in another project, in a copy under <code>out/</code>):</p>
+<pre><code class="language-js">import { rng, ell, ink } from &#39;cinecode/lib&#39;;             // engine/core/lib.mjs
+import { cel, eye, darken } from &#39;cinecode/style&#39;;         // engine/core/style.mjs
+import { makeRig, mixPose } from &#39;cinecode/rig&#39;;           // engine/cast/rig.mjs
+import { makeSet } from &#39;cinecode/set&#39;;                    // engine/set/set.mjs
+import { ridge, paper } from &#39;cinecode/paint/paint&#39;;       // engine/paint/paint.mjs (nature, scenery, water, sky, …)
+import { glow } from &#39;cinecode/paint/structures&#39;;         // engine/paint/structures.mjs (cottages, lanterns, glow)
+import { grade } from &#39;cinecode/engine/film/grade.mjs&#39;;    // any other engine file
+</code></pre>
+<p><strong>Extension folders.</strong> Effects, rigs and kits can also be files of their own, loaded with the film before
+<code>custom.mjs</code> (which wins on a name clash). <code>check</code> lists every file it loaded.</p>
+<div class="table"><table><thead><tr>
+<th>folder</th>
+<th>each file</th>
+<th>registered as</th>
+</tr>
+</thead><tbody><tr>
+<td><code>films/&lt;slug&gt;/effects/</code></td>
+<td>exports <code>custom</code>, <code>overlays</code> and/or <code>sounds</code>, as above</td>
+<td>merged with <code>custom.mjs</code>&#39;s</td>
+</tr>
+<tr>
+<td><code>films/&lt;slug&gt;/rigs/</code></td>
+<td><code>export default makeRig({ kind, … })</code></td>
+<td>its <code>kind</code> (see cast.md, &quot;Adding a rig&quot;)</td>
+</tr>
+<tr>
+<td><code>films/&lt;slug&gt;/kits/</code></td>
+<td><code>export default (params) =&gt; makeSet({ … })</code></td>
+<td>the file name (see sets.md, &quot;Adding a kit&quot;)</td>
+</tr>
+<tr>
+<td><code>cinecode/effects/</code>, <code>cinecode/rigs/</code>, <code>cinecode/kits/</code></td>
+<td>the same, shared by every film of a project</td>
+<td>the nearest <code>cinecode/</code> folder above the film, up to the project root (the folder with <code>.git</code>)</td>
+</tr>
+</tbody></table></div>
+<p>Files whose name starts with <code>_</code> are skipped (helpers they import). A rig, kit or effect named like a built-in one
+replaces it for the whole film: <code>check</code> marks the file in its list (<code>cinecode/effects/rows.mjs (replaces the built-in custom beat &quot;sizerow&quot;)</code>) and adds the same note to the warnings, so give your own pieces names of their own unless you
+mean to replace one. Each kind has a gate that checks it the way the
+engine will use it and draws review images: <code>cinecode verify-effect &lt;film&gt; [names…]</code>, <code>cinecode verify-rig &lt;file&gt;</code>,
+<code>cinecode verify-kit &lt;file&gt;</code>; the <code>build-effect</code>, <code>build-rig</code> and <code>build-kit</code> skills walk through them.</p>
+<h2 id="built-in-effects"><a class="anchor" href="#built-in-effects" aria-hidden="true">#</a>Built-in effects</h2>
+<p>These come with the engine (<code>engine/effects/</code>), as custom beats and overlays exactly like a film&#39;s own: name one in
+<code>film.json</code> and the film gets it. Each file&#39;s header lists its params; the skill&#39;s
+<code>node .claude/skills/cinecode/scripts/inventory.mjs effects</code> prints them all.</p>
+<div class="table"><table><thead><tr>
+<th>effect</th>
+<th>as</th>
+<th>layer</th>
+<th>draws</th>
+</tr>
+</thead><tbody><tr>
+<td><code>skydot</code></td>
+<td>overlay</td>
+<td><code>grade</code></td>
+<td>a planet seen with the naked eye: a steady point of light with a soft glow at a world point (<code>x</code>, <code>y</code>) or an anchor (<code>at</code>)</td>
+</tr>
+<tr>
+<td><code>sunglow</code></td>
+<td>overlay or custom beat</td>
+<td><code>grade</code></td>
+<td>the Sun&#39;s glow, at a <code>planet</code> actor with body <code>sun</code> (<code>who</code>) or at a point of the frame (<code>x</code>, <code>y</code>, fractions, off the frame too)</td>
+</tr>
+<tr>
+<td><code>starstream</code></td>
+<td>custom beat</td>
+<td><code>sky</code></td>
+<td>travelling through space: star streaks streaming out of a vanishing point (<code>fx</code>, <code>fy</code>)</td>
+</tr>
+<tr>
+<td><code>eyepiece</code></td>
+<td>custom beat</td>
+<td><code>screen</code></td>
+<td>the view through a telescope: black outside a round field (<code>r</code>), or the field opening to fill the frame (<code>open</code>)</td>
+</tr>
+<tr>
+<td><code>lightpulse</code></td>
+<td>custom beat</td>
+<td><code>grade</code></td>
+<td>light travelling from the Sun (<code>from</code>) to a planet (<code>to</code>), flashing on its lit limb</td>
+</tr>
+<tr>
+<td><code>orbit</code></td>
+<td>custom beat</td>
+<td><code>back</code></td>
+<td>a planet&#39;s orbit as a dotted arc drawing itself in around a sun off to one <code>side</code></td>
+</tr>
+<tr>
+<td><code>sizerow</code></td>
+<td>custom beat</td>
+<td><code>depth</code></td>
+<td>small worlds (<code>body</code>, default Earths) popping in across a planet&#39;s equator, to true scale</td>
+</tr>
+<tr>
+<td><code>moonlets</code></td>
+<td>custom beat</td>
+<td><code>depth</code></td>
+<td>a planet&#39;s many moons appearing and going round in its ring plane, passing behind and in front of it</td>
+</tr>
+<tr>
+<td><code>debris</code></td>
+<td>custom beat</td>
+<td><code>depth</code></td>
+<td>chunks of ice and rock drifting past at many depths: a dolly flies through them</td>
+</tr>
+</tbody></table></div>
+<pre><code class="language-json">{ &quot;do&quot;: &quot;custom&quot;, &quot;name&quot;: &quot;eyepiece&quot;, &quot;at&quot;: 0, &quot;dur&quot;: 3, &quot;scope&quot;: &quot;shot&quot; }
+{ &quot;do&quot;: &quot;custom&quot;, &quot;name&quot;: &quot;sizerow&quot;, &quot;who&quot;: &quot;saturn&quot;, &quot;dur&quot;: 4.4, &quot;with&quot;: &quot;prev&quot;, &quot;hold&quot;: false }
+&quot;overlays&quot;: [{ &quot;name&quot;: &quot;skydot&quot;, &quot;params&quot;: { &quot;x&quot;: 1640, &quot;y&quot;: 480, &quot;size&quot;: 4 } }]
+</code></pre>
+<p>Film code can draw a world too: <code>import { drawBody, globeOf, atDepth, radiusOf } from &#39;cinecode/paint/planets&#39;</code> (the
+<code>planet</code> rig&#39;s painter, <code>drawBody(ctx, &#39;mars&#39;, cx, cy, R, { t })</code>; <code>globeOf(api, who)</code>, a planet actor&#39;s globe on
+screen at its depth; <code>atDepth(ctx, api, z)</code>, the world transform of a depth; <code>radiusOf(body)</code>, true radii in km).</p>
+<h2 id="two-rules"><a class="anchor" href="#two-rules" aria-hidden="true">#</a>Two rules</h2>
+<ul>
+<li><strong>Deterministic.</strong> No <code>Math.random()</code> or <code>Date.now()</code>. Use <code>api.seed</code> (or a fixed number) with a seeded
+generator: <code>rng(seed)</code> from <code>cinecode/lib</code>, or your own. Every render of a
+frame must be identical.</li>
+<li><strong>Stateless.</strong> Draw only from what you are given (the time, the params, the api), never from state kept between
+calls. Frames are drawn out of order: the contact sheet draws single frames, and a render splits the film between
+several worker processes. If something random decides whether an element is drawn at all, draw all its random
+numbers first, so the sequence is the same on every frame.</li>
+</ul>
+<p>Match the house style where you can: inked outlines, soft gouache colour, light from the upper left. Key timed events to
+<code>mark</code> beats (<code>api.marks</code>) rather than hard-coded seconds, so they move with the edit.</p>
+<h2 id="custom-beats"><a class="anchor" href="#custom-beats" aria-hidden="true">#</a>Custom beats</h2>
+<p>A custom beat draws something for a while inside a shot:</p>
+<pre><code class="language-json">{ &quot;do&quot;: &quot;custom&quot;, &quot;name&quot;: &quot;glints&quot;, &quot;who&quot;: &quot;pip&quot;, &quot;dur&quot;: 1.6, &quot;with&quot;: &quot;prev&quot; }
+</code></pre>
+<pre><code class="language-js">export const custom = {
+  glints: {
+    layer: &#39;world&#39;,                                   // default &#39;world&#39;
+    sfx: [{ at: 0, name: &#39;tiny-bell&#39;, gain: 0.6 }],   // sounds at seconds from the beat&#39;s start
+    draw(ctx, u, api) {                               // every frame of the beat; u goes 0 → 1
+      const a = api.actor(api.params.who);
+      if (!a) return;
+      …
+    },
+  },
+};
+</code></pre>
+<ul>
+<li>The beat lasts <code>dur</code> seconds (default 1) and takes that time in the beat timeline like any other beat
+(<a href="storyboard.html#timing-rules">storyboard.md</a>): use <code>with</code> / <code>after</code> to lay it over other beats. Laid <code>&quot;with&quot;: &quot;prev&quot;</code> over a line, a beat longer than the line holds the next line back until it ends; <code>&quot;hold&quot;: false</code> plays it
+for its whole <code>dur</code> while the next beats go on (the shot doesn&#39;t wait for it either).</li>
+<li>It lasts its whole <code>dur</code>, on into the later shots of its scene and, from the scene&#39;s last shot, into the fading
+picture of a dissolve; the plan warns when it does that without saying so (<code>warnings.mjs</code>, with the shots and the
+frames). <code>&quot;scope&quot;: &quot;shot&quot;</code> ends it at its shot&#39;s cut (drawn only in its own shot, until its end; its <code>sfx</code> from the
+cut on are dropped; <code>u</code> still runs over the full <code>dur</code>); <code>&quot;scope&quot;: &quot;scene&quot;</code> keeps it on and silences the warning.
+Every field of the beat arrives in <code>api.params</code>, and the engine reads <code>scope</code> and <code>hold</code> itself: don&#39;t give your
+own params those names.</li>
+<li>Every field of the beat, and of its <code>params</code> object, arrives in <code>api.params</code> (<code>api.params.who</code> above).</li>
+<li><code>sfx</code> entries are <code>{ at, name, gain, pan, params }</code>; <code>name</code> is a built-in effect or one of your <code>sounds</code>.</li>
+<li>A beat naming a custom effect that <code>custom.mjs</code> doesn&#39;t have is a warning, not an error: it only takes its time.</li>
+</ul>
+<h2 id="overlays"><a class="anchor" href="#overlays" aria-hidden="true">#</a>Overlays</h2>
+<p>An overlay draws over a whole scene, every frame, on one layer:</p>
+<pre><code class="language-json">{ &quot;id&quot;: &quot;s01&quot;, &quot;set&quot;: &quot;meadow&quot;, &quot;overlays&quot;: [&quot;sunbeams&quot;, { &quot;name&quot;: &quot;mist&quot;, &quot;params&quot;: { &quot;n&quot;: 2 } }], … }
+</code></pre>
+<pre><code class="language-js">export const overlays = {
+  sunbeams: {
+    layer: &#39;grade&#39;,
+    draw(ctx, api) { const k = api.params.strength ?? 1; … },
+  },
+};
+</code></pre>
+<p>A scene&#39;s <code>overlays</code> list holds custom overlay names, built-in overlays (<code>skydot</code>, <code>sunglow</code>) or the built-in fields
+(<code>leaves</code>, <code>rain</code>, <code>fireflies</code>, <code>motes</code>, <code>mist</code>), as a name or <code>{ &quot;name&quot;, &quot;params&quot;, &quot;shots&quot; }</code>; an unknown name is a
+check error. The overlay&#39;s <code>params</code> arrive in <code>api.params</code>. With <code>&quot;shots&quot;: [&quot;2.1&quot;, &quot;2.4&quot;]</code> (a non-empty list of the
+scene&#39;s shot ids) it draws only in those shots, including the fading picture of a dissolve out of the scene when its
+last shot is listed; a built-in field covers each run of consecutive listed shots.</p>
+<p>An overlay can follow an actor through the scene, which is how a reskinned rig gets what it lacks (a firefly is a
+butterfly plus a glow, <a href="cast.html">cast.md</a>): on the <code>grade</code> layer, take <code>api.actor(id)</code> (null while it is off stage),
+its world <code>box</code>, and draw at <code>api.toScreen</code> of its centre, sized by <code>api.cam.zoom</code> × the actor&#39;s <code>s</code>. An actor off
+the stage (<code>api.actor(id).z</code> not 0) is drawn at its depth&#39;s scale: place it with <code>api.project([x, y, a.z])</code>, which
+returns its screen point and its scale (<a href="#depth">depth</a>).</p>
+<h2 id="props"><a class="anchor" href="#props" aria-hidden="true">#</a>Props</h2>
+<p>The engine has no props: an object the story turns on is built from what it has.</p>
+<ul>
+<li><strong>On the ground, changing state</strong> (a strawberry that splits and is eaten): a small static rig (<a href="cast.html#adding-a-rig">adding a
+rig</a>) with a pose for each state and params for the rest (<code>do: set</code> changes them). As a cast
+member it sorts in depth, the camera can frame it (<code>on</code>), and lint sees it. Moving actors route round it like round
+any actor (near a small prop the detour can swing toward the camera: keep routes clear of it), and its ground
+shadow stays until it is faded (<code>do: fade</code>).</li>
+<li><strong>In the air</strong> (a kite, a ball, a lantern): a stand-in flier, a butterfly hovering with <code>height</code>, moved by <code>fly</code>
+beats and faded to 0 by its first beat (<code>{ &quot;do&quot;: &quot;fade&quot;, &quot;who&quot;: &quot;kite&quot;, &quot;to&quot;: 0, &quot;dur&quot;: 0.01 }</code>), carrying an
+overlay that draws the object at its <code>box</code>. <code>api.actor</code> still returns it at opacity 0 (its <code>alpha</code> is 0), and the
+camera frames it with <code>on</code>, so a shot can follow the kite. There is no hidden start: the stand-in is drawn in the
+first frame of its first shot (and in the opening card&#39;s dissolve into it), so draw the object over it.</li>
+<li><strong>Part of something big</strong> (the edge of a planet&#39;s rings, a tree&#39;s crown, a roof): no stand-in is needed to frame
+it closer. A <code>zoom</code> above 1 crops into a subject with no face, a camera <code>focus</code> puts any point of the subjects at the
+frame&#39;s centre, and <code>on</code> takes a point of the set (<code>&quot;x:1840,y:886&quot;</code>): <a href="storyboard.html#framing-part-of-a-subject">storyboard.md</a>.</li>
+<li><strong>Held, or on a string</strong>: draw it from the human&#39;s hand. <code>api.actor</code> gives no hand point, but the human rig&#39;s own
+<code>draw</code> with no canvas returns its anchors in world coordinates without drawing (not turned for a slope). The
+animal rigs return only <code>head</code>, <code>mouth</code> and <code>bounds</code>: take a paw from the <code>box</code>.</li>
+<li><strong>A part of the set</strong> that has no anchor (the crown of the hill&#39;s hawthorn): its painted extent is in <code>api.set.props</code>
+(<code>{ id, bounds: [x0, y0, x1, y1], solid, … }</code>, world px), and the skill&#39;s <code>inventory.mjs sets</code> lists every prop&#39;s.
+A stand-in hovering at its middle (<code>&quot;to&quot;: &quot;x:3160&quot;, &quot;height&quot;: 160</code> for the hawthorn: <a href="sets.html#hill">sets.md</a>) puts
+something in it.</li>
+</ul>
+<pre><code class="language-js">// the string of a kite: from June&#39;s front hand to the stand-in &quot;kite&quot;
+const a = api.actor(&#39;june&#39;), k = api.actor(&#39;kite&#39;);
+const { hand, hands } = a.R.draw(null, a.x, a.y + (a.sink || 0), a.s, a.face, a.st);   // hands.front, hands.back
+const tip = [(k.box[0] + k.box[2]) / 2, (k.box[1] + k.box[3]) / 2];
+</code></pre>
+<h2 id="layers"><a class="anchor" href="#layers" aria-hidden="true">#</a>Layers</h2>
+<p>Overlays and custom beats name the layer they draw on. In the order a frame is drawn:</p>
+<div class="table"><table><thead><tr>
+<th>layer</th>
+<th>drawn</th>
+<th>coordinates</th>
+</tr>
+</thead><tbody><tr>
+<td><code>sky</code></td>
+<td>after the sky, before any land (the horizon is at <code>api.toScreen([x, api.set.horizon])</code>)</td>
+<td>screen pixels</td>
+</tr>
+<tr>
+<td><code>back</code></td>
+<td>after the set&#39;s back layers, before props and actors</td>
+<td>world</td>
+</tr>
+<tr>
+<td><code>depth</code></td>
+<td>run before the set is drawn; draws only by handing pieces to <code>api.item([x, y, z], draw)</code>, which the frame sorts with the props and actors by depth (<a href="#depth">depth</a>)</td>
+<td>world, at each piece&#39;s depth</td>
+</tr>
+<tr>
+<td><code>world</code></td>
+<td>after props, actors and the built-in world effects (the default)</td>
+<td>world</td>
+</tr>
+<tr>
+<td><code>front</code></td>
+<td>after the set&#39;s front layers (foreground grass, branches)</td>
+<td>world</td>
+</tr>
+<tr>
+<td><code>grade</code></td>
+<td>after the time-of-day grade and the rim light: emitted light (a lamp, a comet) goes here, or the night grade turns it grey</td>
+<td>screen pixels</td>
+</tr>
+<tr>
+<td><code>screen</code></td>
+<td>after glowing effects such as fireflies, before titles and captions</td>
+<td>screen pixels</td>
+</tr>
+</tbody></table></div>
+<p>In world coordinates you draw in the set&#39;s own pixels (the numbers in the anchor tables) and the camera transform is
+already applied; <code>api.cam.zoom</code> tells you how much it is enlarged. In screen pixels (0..<code>api.W</code>, 0..<code>api.H</code>) use
+<code>api.toScreen</code> to place things. Each draw call runs between <code>ctx.save()</code> and <code>ctx.restore()</code>, so you may change
+composite modes, filters and transforms freely.</p>
+<h2 id="the-api"><a class="anchor" href="#the-api" aria-hidden="true">#</a>The api</h2>
+<p>Overlays get <code>draw(ctx, api)</code>, custom beats <code>draw(ctx, u, api)</code>. <code>api</code> holds:</p>
+<div class="table"><table><thead><tr>
+<th>field</th>
+<th>meaning</th>
+</tr>
+</thead><tbody><tr>
+<td><code>t</code></td>
+<td>film time (s)</td>
+</tr>
+<tr>
+<td><code>st</code>, <code>su</code></td>
+<td>seconds since the scene started, and the scene&#39;s progress 0..1</td>
+</tr>
+<tr>
+<td><code>lt</code></td>
+<td>seconds since the shot started</td>
+</tr>
+<tr>
+<td><code>scene</code>, <code>shot</code></td>
+<td>the plan&#39;s scene and shot records (<code>id</code>, <code>t0</code>, <code>t1</code>, …)</td>
+</tr>
+<tr>
+<td><code>set</code></td>
+<td>the set: <code>set.anchor(name)</code>, <code>set.scaleAt(x, y)</code>, <code>set.inWater(x, y)</code>, <code>set.groundAt(x)</code> (a ridge set&#39;s ground line; null on the others), <code>set.horizon</code> (world y), <code>set.props</code> (each prop&#39;s <code>id</code>, <code>bounds</code> <code>[x0, y0, x1, y1]</code> and <code>solid</code> footprint), <code>set.lens</code> (for depth), …</td>
+</tr>
+<tr>
+<td><code>cam</code></td>
+<td>the camera: <code>{ cx, cy, zoom }</code>, the world point at the centre of the frame and the zoom</td>
+</tr>
+<tr>
+<td><code>W</code>, <code>H</code></td>
+<td>the frame size in pixels</td>
+</tr>
+<tr>
+<td><code>plan</code></td>
+<td>the whole compiled plan</td>
+</tr>
+<tr>
+<td><code>marks</code></td>
+<td><code>{ name: film time }</code> of every <code>mark</code> beat</td>
+</tr>
+<tr>
+<td><code>params</code></td>
+<td>the overlay&#39;s params, or the beat&#39;s fields and params</td>
+</tr>
+<tr>
+<td><code>seed</code></td>
+<td>a seed for this overlay in this scene, or for this beat</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>the overlay&#39;s or beat&#39;s name</td>
+</tr>
+<tr>
+<td><code>actor(id)</code></td>
+<td>an actor on stage: its draw state (<code>x</code>, <code>y</code>, <code>z</code> its depth, <code>s</code> scale, <code>face</code> ±1, <code>alpha</code> 0..1, <code>st</code> with pose, expression and talk, <code>asleep</code>, <code>speaking</code>, <code>R</code> its rig, …) plus <code>head</code> and <code>mouth</code> points and its <code>box</code> <code>[x0, y0, x1, y1]</code>, all in world coordinates; <code>null</code> while it is off stage (not yet entered, or exited). An actor faded to 0 is still returned. The human&#39;s hands: see <a href="#props">props</a></td>
+</tr>
+<tr>
+<td><code>anchor(name)</code></td>
+<td>an anchor of the set: <code>{ x, y, s, type, … }</code></td>
+</tr>
+<tr>
+<td><code>toScreen([x, y])</code>, <code>toWorld([x, y])</code></td>
+<td>map a point between world and screen pixels (on the stage)</td>
+</tr>
+<tr>
+<td><code>project([x, y, z])</code></td>
+<td>a world point at depth z → <code>[sx, sy, s, a]</code>: its screen point, screen px per world px there, and its near fade (0: don&#39;t draw it)</td>
+</tr>
+<tr>
+<td><code>item([x, y, z], draw)</code></td>
+<td>on the <code>depth</code> layer only: hand the frame a piece to draw in the depth sort (<a href="#depth">depth</a>)</td>
+</tr>
+<tr>
+<td><code>silhouette(ctx, actor)</code></td>
+<td>draw an actor (an id, or a state from <code>plan.actorsAt</code>) in screen space exactly as the frame draws it (slope pitch, turn squash, wading cut), without shadows; use it for masks and cut-outs instead of calling the rig yourself</td>
+</tr>
+</tbody></table></div>
+<p>Custom beats also get <code>u</code> (0..1 across the beat), <code>bt</code> (seconds since the beat started), <code>dur</code> and <code>beat</code> (the beat
+object itself).</p>
+<h2 id="depth"><a class="anchor" href="#depth" aria-hidden="true">#</a>Depth</h2>
+<p>An actor, an anchor or an effect piece can be off the stage: <code>z</code> world px behind it (positive) or in front of it
+(negative), drawn at its depth&#39;s scale and sorted by depth before ground y
+(<a href="storyboard.html#depth">storyboard.md</a>). <code>api.actor(id).z</code> is an actor&#39;s depth; <code>api.set.lens</code> the kit&#39;s lens.</p>
+<ul>
+<li><strong>To place something at an actor&#39;s depth</strong> on any layer, <code>api.project([x, y, z])</code> → <code>[sx, sy, s, a]</code>: the screen
+point, its scale (screen px per world px; the stage&#39;s is <code>api.cam.zoom</code>) and its near fade (0 when the camera has
+come too near: don&#39;t draw it). <code>atDepth(ctx, api, z)</code> from <code>cinecode/paint/planets</code> sets ctx to the world transform
+of a depth.</li>
+<li><strong>To be hidden by what is nearer, and hide what is farther</strong>, draw on the <code>depth</code> layer. It runs before the set is
+drawn and draws only through <code>api.item([x, y, z], draw)</code>: each piece is sorted by z (farther first), then by its y,
+with the props and actors, and its <code>draw(ctx, P)</code> gets ctx in the world transform of its depth (globalAlpha = its
+fade) and <code>P = { x, y, s, z, a }</code> (its screen point, scale, depth and fade). Anything drawn straight on ctx there
+lands behind the set&#39;s layers, and <code>api.item</code> on another layer throws.</li>
+</ul>
+<pre><code class="language-js">export const custom = {
+  pebbles: {
+    layer: &#39;depth&#39;,
+    draw(ctx, u, api) {
+      const a = api.actor(api.params.who); if (!a) return;
+      for (const [dx, dz] of [[-80, -300], [60, 400]]) {           // one in front of the actor, one behind it
+        api.item([a.x + dx, a.y - 40, (a.z || 0) + dz], c =&gt; { c.fillStyle = &#39;#9a8f80&#39;; c.beginPath(); c.arc(a.x + dx, a.y - 40, 12, 0, 7); c.fill(); });
+      }
+    },
+  },
+};
+</code></pre>
+<h2 id="sounds"><a class="anchor" href="#sounds" aria-hidden="true">#</a>Sounds</h2>
+<p>A sound is a function that returns 48 kHz mono samples:</p>
+<pre><code class="language-js">export const sounds = {
+  &#39;tiny-bell&#39;: ({ dur } = {}) =&gt; {        // called with { seed, dur, params }
+    const sr = 48000, n = Math.round(sr * (dur || 1.6)), out = new Float32Array(n);
+    for (let i = 0; i &lt; n; i++) {
+      const t = i / sr, e = Math.min(1, t / 0.002) * Math.exp(-t * 3.2);
+      out[i] = 0.12 * e * (Math.sin(2 * Math.PI * 2093 * t) + 0.45 * Math.sin(2 * Math.PI * 5370 * t) * Math.exp(-t * 6));
+    }
+    return out;
+  },
+};
+</code></pre>
+<p>Use it like a built-in effect: <code>{ &quot;sfx&quot;: &quot;tiny-bell&quot;, &quot;dur&quot;: 2, &quot;params&quot;: { … } }</code>, or in a custom beat&#39;s <code>sfx</code>.
+<code>dur</code> and <code>params</code> come from the beat; <code>seed</code> is set per event. A sound under a whole scene (a rain bed) takes its
+length from <code>params</code> instead of the beat: <code>{ &quot;sfx&quot;: &quot;rain-bed&quot;, &quot;params&quot;: { &quot;dur&quot;: 30 } }</code> at the start of the scene
+takes no time in the shot and plays on across the cuts, while a beat-level <code>&quot;dur&quot;: 30</code> would hold the shot for 30 s. The mixer replaces non-finite samples with silence and
+softens the first 2 ms and last 5 ms. It does <strong>not</strong> level a custom sound the way it levels the built-in effects:
+set the level in the function (peaks around 0.1–0.3 sit under dialogue), and adjust with the beat&#39;s <code>gain</code>.</p>
+<h2 id="a-worked-example"><a class="anchor" href="#a-worked-example" aria-hidden="true">#</a>A worked example</h2>
+<p>The starter&#39;s custom beat, in full: 18 glints rise from a character&#39;s head and fade, each with its own start, life,
+direction and size.</p>
+<pre><code class="language-js">const rng = seed =&gt; () =&gt; { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed &gt;&gt;&gt; 15), 1 | seed); t ^= t + Math.imul(t ^ (t &gt;&gt;&gt; 7), 61 | t); return ((t ^ (t &gt;&gt;&gt; 14)) &gt;&gt;&gt; 0) / 4294967296; };
+
+export const custom = {
+  glints: {
+    layer: &#39;world&#39;,
+    sfx: [{ at: 0, name: &#39;tiny-bell&#39;, gain: 0.6 }],
+    draw(ctx, u, api) {
+      const a = api.actor(api.params.who);
+      if (!a) return;
+      const [hx, hy] = a.head, s = a.s, r = rng(api.seed);
+      ctx.globalCompositeOperation = &#39;lighter&#39;;
+      for (let i = 0; i &lt; 18; i++) {
+        // draw every random number before any `continue`, so each glint gets the same numbers on every frame
+        const t0 = r() * 0.5, life = 0.45 + r() * 0.3, ang = -Math.PI / 2 + (r() - 0.5) * 1.6, dist = (30 + r() * 70) * s, size = 4 + r() * 5;
+        const k = (u - t0) / life;
+        if (k &lt;= 0 || k &gt;= 1) continue;
+        …
+      }
+    },
+  },
+};
+</code></pre>
+<p>The full file is <code>templates/custom.mjs</code>. After writing an effect, run <code>check</code>, then look at it in motion with a strip
+of frames across the shot:</p>
+<pre><code class="language-sh">node engine/film/sheet.mjs films/&lt;slug&gt; films/&lt;slug&gt;/out/strip.jpg --shots=1.6@0.2,1.6@0.4,1.6@0.6,1.6@0.8 --cols=4 --tile=480
+</code></pre>
+<p>and make sure it never covers a face or makes a speaker hard to read.</p>
+
+<p class="edit"><a href="https://github.com/zakariaf/cinecode/blob/main/docs/effects.md">This page on GitHub</a></p></article></main><footer><div class="wrap"><p>cinecode is open source under the MIT licence · © 2026 Zakaria Fatahi · <a href="https://github.com/zakariaf/cinecode">github.com/zakariaf/cinecode</a></p>
+<p>Every picture, movement, note and sound in these films is made by code. Only the voices come from a model (Gemini TTS).</p></div></footer></body></html>
