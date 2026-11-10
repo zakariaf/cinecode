@@ -140,7 +140,9 @@ ${feats.map(feat => `<div class="feature">${video(feat)}<div><h3>${esc(feat.titl
 <div><h2>Install</h2><p>In Claude Code:</p>
 <pre><code>/plugin marketplace add zakariaf/cinecode
 /plugin install cinecode@cinecode</code></pre>
-<p>Then open Claude Code in any folder and ask for a film: <em>“make a two-minute animated film about a fox who is afraid of the dark.”</em> The first run checks Node 20+, ffmpeg and the drawing library. Voices need a <code>GEMINI_API_KEY</code>; everything else runs offline.</p></div>
+<p>Then open Claude Code in any folder and ask for a film in plain words, or call the skill by name:</p>
+<pre><code>/cinecode:cinecode make a two-minute animated film about a fox who is afraid of the dark</code></pre>
+<p>The first run checks Node 20+, ffmpeg and the drawing library. Voices need a <code>GEMINI_API_KEY</code>; everything else runs offline.</p></div>
 <div><h2>How a film is made</h2><ol class="steps">${STEPS.map(([h, p]) => `<li><strong>${h}.</strong> ${p}</li>`).join('')}</ol></div>
 </div></section>
 <section class="wrap engine"><h2>What's in the engine</h2>

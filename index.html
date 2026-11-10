@@ -25,7 +25,9 @@
 <div><h2>Install</h2><p>In Claude Code:</p>
 <pre><code>/plugin marketplace add zakariaf/cinecode
 /plugin install cinecode@cinecode</code></pre>
-<p>Then open Claude Code in any folder and ask for a film: <em>“make a two-minute animated film about a fox who is afraid of the dark.”</em> The first run checks Node 20+, ffmpeg and the drawing library. Voices need a <code>GEMINI_API_KEY</code>; everything else runs offline.</p></div>
+<p>Then open Claude Code in any folder and ask for a film in plain words, or call the skill by name:</p>
+<pre><code>/cinecode:cinecode make a two-minute animated film about a fox who is afraid of the dark</code></pre>
+<p>The first run checks Node 20+, ffmpeg and the drawing library. Voices need a <code>GEMINI_API_KEY</code>; everything else runs offline.</p></div>
 <div><h2>How a film is made</h2><ol class="steps"><li><strong>Write.</strong> A screenplay: logline, characters, places, music, then scenes and shots with their lines.</li><li><strong>Storyboard.</strong> <code>film.json</code>: the cast, the sets, and every shot's camera and beats, checked field by field.</li><li><strong>Voice.</strong> Each line from Gemini TTS, transcribed back and retried until it says the words. Cached on disk.</li><li><strong>Review.</strong> Contact sheets of every shot, and a lint for staging and editing: feet, framing, eyelines, cuts.</li><li><strong>Score and mix.</strong> A procedural score with a motif, synthesized effects and ambience, mastered to −16 LUFS.</li><li><strong>Render.</strong> Full HD in parallel worker processes, with subtitles.</li></ol></div>
 </div></section>
 <section class="wrap engine"><h2>What's in the engine</h2>
