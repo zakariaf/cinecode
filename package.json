@@ -1,6 +1,6 @@
 {
   "name": "cinecode",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Animated films from a storyboard, painted, animated, scored and mixed entirely by code. Only the voices come from a TTS model.",
   "type": "module",
