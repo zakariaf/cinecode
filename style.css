@@ -41,6 +41,7 @@ h2 { font-size: 2rem; margin: 0 0 0.6em; }
 section { padding: 56px 0; }
 .films video { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 10px; box-shadow: 0 8px 28px rgba(40, 28, 20, 0.25); }
 .feature { display: grid; grid-template-columns: 2fr 1fr; gap: 28px; align-items: start; }
+.feature + .feature { margin-top: 64px; padding-top: 48px; border-top: 1px solid var(--rule); }
 .feature h3 { font-size: 1.7rem; margin: 0 0 0.4em; }
 .len { font: 600 0.8rem var(--sans); color: var(--ink-2); background: var(--paper-2); padding: 2px 8px; border-radius: 999px; vertical-align: middle; }
 .meta { font: 0.85rem var(--sans); color: var(--ink-2); }
