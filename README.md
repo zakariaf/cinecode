@@ -5,9 +5,11 @@ work, captions, music, sound effects and a mastered mix, rendered to an MP4 with
 synthesized by code, with no image or music models and no stock assets. Only the voices come from a model (Gemini
 TTS); they are checked and cached on disk, so a voiced film re-renders the same way every time without a network.
 
-![Seventy-Six Summers: the comet over the hill at the end of the film](docs/images/ending.jpg)
+![Our Solar System: nine Earths side by side across Saturn](docs/images/solar-saturn.jpg)
 
-Watch the films and read the docs at **[zakaria.dev/cinecode](https://zakaria.dev/cinecode/)**.
+Watch the films and read the docs at **[zakaria.dev/cinecode](https://zakaria.dev/cinecode/)**. The main demo, *Our Solar
+System*, is a 15-minute film the plugin made: [watch it](https://zakaria.dev/cinecode/#films) or
+[download it in 1080p](https://github.com/zakariaf/cinecode/releases/tag/our-solar-system).
 
 ## How a film is made
 
@@ -89,7 +91,31 @@ set, `node bin/cinecode.mjs voice films/my-film` voices it and `node bin/cinecod
 `films/my-film/out/my-film.mp4`. Edit `film.json` from there; [docs/storyboard.md](docs/storyboard.md) lists every
 field.
 
-## The demo: Seventy-Six Summers
+## The demo: Our Solar System
+
+`films/solar-system/` is a 15:34 family film made with the cinecode plugin. On a hill at night a girl, Nell, asks her
+grandmother about a bright star; a narrator takes them past the Sun and every planet, out to Pluto and the Kuiper
+Belt, and home again for the sunrise. 21 scenes, 68 shots, 168 voiced lines, and every fact checked against NASA (the
+facts table is at the end of its screenplay). Claude Code wrote, staged, voiced, reviewed and assembled it with the
+plugin's skills: 36 agents in about six hours, then a 20-minute render.
+
+[Watch it](https://zakaria.dev/cinecode/#films) or [download the 1080p film](https://github.com/zakariaf/cinecode/releases/tag/our-solar-system). The folder holds the
+screenplay, the storyboard and the film's six effects of its own (the Sun's face, an orrery, a dive through Venus's
+clouds, Earth's night side, the pale ray of the "pale blue dot", the sunrise). The voice takes are in the release as
+`solar-system-voices.zip`: unzip it into `films/solar-system/voices/` and the film renders without a key:
+
+```sh
+node bin/cinecode.mjs render films/solar-system
+```
+
+| | |
+|---|---|
+| ![The hill at night: Nell, Gran and the telescope](docs/images/solar-hill.jpg) | ![The Sun](docs/images/solar-sun.jpg) |
+| ![Venus and Earth, almost twins](docs/images/solar-twins.jpg) | ![Venus's thick clouds](docs/images/solar-venus.jpg) |
+| ![Earth beside Jupiter's Great Red Spot](docs/images/solar-jupiter.jpg) | ![Saturn's rings, close](docs/images/solar-rings.jpg) |
+| ![Pluto and its heart, with Charon](docs/images/solar-pluto.jpg) | ![Sunrise on the hill](docs/images/solar-dawn.jpg) |
+
+## Seventy-Six Summers
 
 `films/seventy-six-summers/` is a 3:47 film made with cinecode: 12 scenes, 56 shots, 56 voiced lines. A
 hundred-year-old tortoise has one day to cross the valley and keep a promise he made to a six-year-old girl the last
@@ -151,7 +177,8 @@ engine/
   lint/                     the staging and editing checks and their report
   render/                   CLI commands, contact sheets, parallel encoding, subtitles
 films/
-  seventy-six-summers/      the demo film
+  solar-system/             the main demo (its voice takes are in the release)
+  seventy-six-summers/      the first demo film
   glim/                     a 27 s film a fresh agent made from one sentence with the skill
   kite/, strawberry-race/,
   storm-shelter/            three ~35 s films, each made by a fresh agent from one sentence
