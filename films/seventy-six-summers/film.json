@@ -638,9 +638,9 @@
           "beats": [
             { "say": "narrator", "text": "And this time, nobody climbed the hill alone.", "tone": "gentle, smiling", "at": 0.3 },
             { "music": { "mood": "triumph", "intensity": 0.6, "motif": 5, "motifVoice": "tutti" }, "with": "prev" },
-            { "fx": "fireflies", "at": "pebble", "n": 3, "dur": 8.2, "with": "prev" },
-            { "title": "SEVENTY-SIX SUMMERS", "sub": "Drawn, animated and scored entirely in code. Voices: Gemini TTS.", "at": 4.6, "dur": 3.4, "note": "after the line, as the crane settles into the sky" }
-          ], "dur": 8.2, "fadeOut": 1.0 }
+            { "fx": "fireflies", "at": "pebble", "n": 3, "dur": 10.0, "with": "prev" },
+            { "title": "SEVENTY-SIX SUMMERS", "sub": "Drawn, animated and scored entirely in code. Voices: Gemini TTS.\nMade with cinecode by Zakaria Fatahi · github.com/zakariaf/cinecode", "at": 4.6, "dur": 5.2, "note": "after the line, as the crane settles into the sky; the credit line gives it 1.8 s more" }
+          ], "dur": 10.0, "fadeOut": 1.0 }
       ]
     }
   ]

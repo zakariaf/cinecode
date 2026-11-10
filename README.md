@@ -7,6 +7,8 @@ TTS); they are checked and cached on disk, so a voiced film re-renders the same 
 
 ![Seventy-Six Summers: the comet over the hill at the end of the film](docs/images/ending.jpg)
 
+Watch the films and read the docs at **[zakaria.dev/cinecode](https://zakaria.dev/cinecode/)**.
+
 ## How a film is made
 
 1. **Screenplay.** `films/<slug>/screenplay.md`: logline, characters (rig, look, voice), locations and times, a music
@@ -89,7 +91,7 @@ field.
 
 ## The demo: Seventy-Six Summers
 
-`films/seventy-six-summers/` is a 3:45 film made with cinecode: 12 scenes, 56 shots, 56 voiced lines. A
+`films/seventy-six-summers/` is a 3:47 film made with cinecode: 12 scenes, 56 shots, 56 voiced lines. A
 hundred-year-old tortoise has one day to cross the valley and keep a promise he made to a six-year-old girl the last
 time the comet came, with a squirrel riding on his shell. Its screenplay, storyboard, custom effects and voice cache
 are all in the folder, so it renders without a key:
@@ -100,10 +102,10 @@ node bin/cinecode.mjs render films/seventy-six-summers
 
 | | |
 |---|---|
-| ![The prologue: a girl and a baby tortoise watch the comet](docs/images/prologue.jpg) | ![The meadow at dawn: the owl's tree, the tortoise and the squirrel](docs/images/meadow.jpg) |
-| ![The stream at noon: the squirrel on a stepping stone, a frog on its rock](docs/images/stream.jpg) | ![The valley at golden hour, the hill far off](docs/images/valley.jpg) |
-| ![The village at sunset](docs/images/village.jpg) | ![Nell at night under the comet](docs/images/nell.jpg) |
-| ![The tortoise and Nell meet at the standing stone](docs/images/reunion.jpg) | ![The last shot: the hill under the comet, fireflies](docs/images/ending.jpg) |
+| ![The prologue: a girl and a baby tortoise watch the comet](docs/images/prologue.jpg) | ![The meadow: Fidget the squirrel teases the tortoise](docs/images/meadow.jpg) |
+| ![The stream at noon: the squirrel on a stepping stone, a frog on its rock](docs/images/stream.jpg) | ![The valley, the hill far off](docs/images/valley.jpg) |
+| ![The village at dusk: the tortoise and the squirrel at her gate](docs/images/village.jpg) | ![Nell, seventy-six years later, under the comet](docs/images/nell.jpg) |
+| ![The three of them at the standing stone](docs/images/reunion.jpg) | ![The last shot: the hill under the comet, and the title](docs/images/ending.jpg) |
 
 ## Install as a Claude Code plugin
 

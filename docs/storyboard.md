@@ -649,7 +649,8 @@ if the end card is short (its final chord lands about 3 s before the end and die
 { "title": "SEVENTY-SIX SUMMERS", "sub": "a film in code", "dur": 2.7, "place": "upper" }
 ```
 
-Big italic lettering in the picture for `dur` seconds (default 3). `sub` (or `subtitle`) adds a smaller line.
+Big italic lettering in the picture for `dur` seconds (default 3). `sub` (or `subtitle`) adds a smaller line; a `\n`
+in it starts another line under it (a credit, say).
 `place`: `"auto"` (default: the calmest band of the picture, centred over the subjects), `top`, `upper`, `center`
 (or `middle`), `lower`, `bottom`, or a fraction 0..1 of the frame height for the title line.
 
