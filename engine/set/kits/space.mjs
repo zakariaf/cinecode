@@ -4,7 +4,14 @@
 // planet reads as travelling toward it while the stars stay put; the backdrop is a deep navy, not black.
 //
 // Params: seed (another starfield), milky (0..1, the Milky Way's strength, default 1), nebula (0..1, default 1),
-// tint ('violet' | 'blue' | 'teal': the nebula colour, default 'violet').
+// tint ('violet' | 'blue' | 'teal': the nebula colour, default 'violet'), dust (the near field, a number ≥ 0, default 1:
+// 0 or false none, 0.5 half as many specks, 2 twice as many).
+//
+// The near field (makeSet's `field`, DESIGN §10): specks of dust and stars at every depth out to 1.5 × the lens from the
+// camera, so a camera moving through depth (`z` / `zTo`) reads as flight: the specks stream out from the frame centre,
+// the nearer the faster and bigger, streaking with the move, and pass the lens, while the painted sky stays fixed. They
+// show only while the camera moves through depth (fading in and out with its speed): a still shot, a pan or a lens zoom
+// shows none of them, so nothing sits on a planet like a star.
 //
 // Time: one of its own, `space` (makeSet times): no grade but the house vignette (the backdrop as painted) and no sun,
 // and with no ground to shade (groundShadows false) nothing throws a shadow. Scenes here use "ambience": "none".
@@ -72,6 +79,8 @@ const SPOTS = [['centre', 1600, 1000], ['west', 900, 1000], ['east', 2300, 1000]
 const hold = (x, y) => ({ type: 'perch', branch: { pts: [[x - 200, y], [x + 200, y]], w0: 0, w1: 0 }, at: 0.5 });
 
 export default function space(params = {}) {
+  const dust = params.dust === false ? 0 : params.dust ?? 1;
+  if (!(typeof dust === 'number' && Number.isFinite(dust) && dust >= 0)) throw new Error(`dust must be a number ≥ 0 or false (1: the usual near field, 2: twice as many specks, 0 or false: none), not ${JSON.stringify(params.dust)}`);
   const sky = (x, r, w, h) => paintSpace(x, rng(9001 + (params.seed || 0) * 131), w, h, params);
   return makeSet({
     id: 'space', W: 3200, H: 1800, refX: 1600, refY: 900, seed: params.seed || 0,
@@ -81,6 +90,7 @@ export default function space(params = {}) {
     horizon: -3000, laneY: 1000, baseS: 1,
     skies: { space: sky }, times: { space: { grade: 'neutral', sun: null } }, defaultSky: 'space',
     groundShadows: false,
+    field: { density: dust },
     layers: [],
     props: [],
     anchors: {

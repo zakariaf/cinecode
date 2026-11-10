@@ -198,7 +198,13 @@ when the camera zooms, so a push-in on a planet reads as travelling toward it wh
   little smaller, near ones (y 1400) a little bigger
 - **time:** its own, `space` (the only one: no grade but the house vignette, no sun); no ground to shade, so nothing
   throws a shadow at all (`groundShadows: false`). **ambience:** scenes there use `"ambience": "none"`
-- **params:** `seed` (another starfield), `milky` and `nebula` (0..1, default 1), `tint` (`violet`, `blue`, `teal`)
+- **params:** `seed` (another starfield), `milky` and `nebula` (0..1, default 1), `tint` (`violet`, `blue`, `teal`),
+  `dust` (the near field, a number ≥ 0, default 1; 0 or `false` none, 0.5 half as many specks, 2 twice as many)
+- **near field:** specks of dust and stars at every depth, out to 1.5 × the lens, so a camera moving through depth
+  (`z` / `zTo`) reads as flight: they stream out from the frame's centre, the nearer the faster and bigger, streaking
+  with the move, and pass the lens, while the painted sky stays fixed. They show only while the camera moves through
+  depth (faded in and out with its speed): a still shot, a pan or a lens zoom shows none, so no speck sits on a planet
+  like a star ([storyboard.md](storyboard.md#depth))
 - **depth:** with no painted ground, any actor may be off the stage: a scene actor's `"z"` of 2400 is about half size
   behind everything on the stage, −900 about 1.6× in front ([storyboard.md](storyboard.md#depth))
 
@@ -386,6 +392,7 @@ The description:
 | `times` | a kit not under Earth's sky: `{ name: { grade, sun, haze } }`, each with a painter in `skies`; they are then all the times the kit has, and the first is its default. `grade`: `'neutral'` (default: the picture as painted, under the house vignette), one of Earth's eight (its grade), or `{ sl: [r, g, b, a], mul: [r, g, b], vig, con }`; `sun`: `null` (default: no sun, no cast shadows), one of Earth's eight, or `{ len, a }`; `haze`: `[r, g, b]` that far layers fade toward (default none). `{ night: {} }` among them keeps Earth's night as it is. A time's name means one light in a film: two kits may declare the same name only with the same light. |
 | `groundShadows` | `false`: no ground to shade (space), so no figure, flier or prop throws a shadow and no figure draws its contact shadow |
 | `lens` | world px from a camera at depth 0 to the stage (default 2304: about a 45° view across a 1920-px frame at zoom 1); it sets how depth scales things ([storyboard.md](storyboard.md#depth)), and camera `z` / `zTo` must stay under 3/4 of it |
+| `field` | `{ density }`: a near field of specks at every depth that a camera moving through depth streams past (density 1 the usual count, 0 none; default none), seen only while it moves through depth. The frame draws it in the depth sort, each shot's laid out for its first camera |
 | `ambience` | `{ day, night }` bed names for `"ambience": "auto"` |
 
 Paint in the house style with the helpers in `engine/paint/` (`nature.mjs`: trees, foliage, grass; `scenery.mjs`:

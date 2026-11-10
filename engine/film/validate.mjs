@@ -20,6 +20,7 @@ import { parseTarget, rigPose, poseNames } from './util.mjs';
 import { TITLE_PLACES } from './text.mjs';
 import { hasLight } from './grade.mjs';
 import { LENS, NEAR_FADE } from '../set/set.mjs';
+import { allowProblems } from '../lint/rules.mjs';
 
 export const SIZES = ['establishing', 'wide', 'full', 'medium', 'close', 'extreme-close'];
 export const MOVES = ['static', 'push-in', 'pull-out', 'pan', 'track', 'tilt-up', 'tilt-down', 'handheld'];
@@ -477,6 +478,8 @@ export function validateFilm(film, ctx) {
       });
     });
   });
+  // each shot's "lint": { "allow": [warning rules], "note" } (engine/lint/rules.mjs: lint reads it too)
+  problems.push(...allowProblems(film));
   return { problems, warnings };
 }
 

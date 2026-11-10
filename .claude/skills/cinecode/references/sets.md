@@ -219,7 +219,10 @@ Props (painted extent in world px, x0–x1 × y0–y1; * = solid: routes go roun
   no shadows): scenes there take `"time": "space"` (or no `time`) and `"ambience": "none"`, and any of Earth's eight
   is an error. Bodies (the `planet` rig) hold at the perch anchors: `centre`, `west`, `east`, `far*` (a little
   smaller), `near*` (a little bigger); `ground_<each>`, 60 px below each, is walkable stage for a walker or a stand-in.
-  Params: `seed`, `milky` and `nebula` (0..1), `tint` (violet, blue, teal). Off the stage: a scene actor's `z` of 2400
+  Params: `seed`, `milky` and `nebula` (0..1), `tint` (violet, blue, teal), `dust` (the near field: specks at every
+  depth that stream past a camera moving through depth, so a dolly reads as flight; default 1, 0 or false none, 2
+  twice as many; seen only while the camera moves through depth: a still shot, a pan or a lens zoom shows none).
+  Off the stage: a scene actor's `z` of 2400
   draws it behind everything on the stage at about half size, −900 in front at about 1.6× (p = 2304 / (2304 + z)).
 - **Kits with their own times** say so on their first line ("its own times: …"): only those are valid there. Every
   other kit has Earth's eight.

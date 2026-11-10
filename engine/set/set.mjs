@@ -1,8 +1,9 @@
 // A set: painted parallax layers, depth-sorted props, anchors, walkable ground, routing and a sky.
 // Everything an actor can touch (ground, stump tops, branches, hollows, stones, water) is defined once,
 // as data, and both the painting and the staging read that same data.
-// Depth (DESIGN §10): S.lens (the kit's `lens`, default LENS), an anchor's `z` (its depth off the stage), and layers
-// drawn scaled by a camera's depth (cam.z) and faded as it reaches them.
+// Depth (DESIGN §10): S.lens (the kit's `lens`, default LENS), an anchor's `z` (its depth off the stage), layers
+// drawn scaled by a camera's depth (cam.z) and faded as it reaches them, and a near field of specks at every depth
+// (makeSet's `field`, S.fieldSpecks) that a camera moving through depth streams past.
 import { rng, clamp, lerp, canvas } from '../core/lib.mjs';
 import { branchTop } from '../paint/nature.mjs';
 import { inkSilhouette } from '../paint/brush.mjs';
@@ -19,9 +20,26 @@ export const CLOSE_PX = 24e6;                      // the most pixels one close 
 // it fades out from NEAR_FADE × the lens (nearFade: 0..1 at distance d from the lens D, eased).
 export const LENS = 2304, NEAR = 0.1, NEAR_FADE = 0.25;
 export const nearFade = (d, D) => { const u = clamp((d - NEAR * D) / ((NEAR_FADE - NEAR) * D)); return u * u * (3 - 2 * u); };
+// Things off the stage (actors, effect pieces, a set's near field) pass the lens instead: drawn whole until PASS_FADE ×
+// the lens from it (25× their size on the stage), faded out by PASS × it (passFade, eased). By then whatever is off the
+// camera's axis has grown out of the frame, so only what the lens truly meets fades, briefly and filling the frame, never
+// as a small see-through ghost in the middle of it. (A layer is the whole frame: it keeps NEAR / NEAR_FADE.)
+export const PASS = 0.01, PASS_FADE = 0.04;
+export const passFade = (d, D) => { const u = clamp((d - PASS * D) / ((PASS_FADE - PASS) * D)); return u * u * (3 - 2 * u); };
 // A layer with parallax k seen from a camera at depth c (lens D): its scale about the frame centre relative to the
 // stage, r, and its near fade, a (k = 0: the sky, at infinity).
 export const layerDepth = (k, c, D) => ({ r: (D - c) / (D - k * c), a: k > 0 ? nearFade(D / k - c, D) : 1 });
+
+// The near field (S.fieldSpecks): cells FIELD_CELL field units across and FIELD_CELLZ world px deep, FIELD_SHARE of
+// them holding a speck at density 1, seen out to FIELD_REACH × the lens, and seen whole while the camera moves through
+// depth at FIELD_GO × the lens a second or more; their colours (rgb).
+const FIELD_CELL = 140, FIELD_CELLZ = 160, FIELD_SHARE = 0.33, FIELD_REACH = 1.5, FIELD_GO = 0.06;
+const SPECKS = ['255,250,236', '255,250,236', '226,234,255', '255,238,206'];
+const cellHash = (i, j, l, s) => {
+  let h = Math.imul(i, 0x27d4eb2d) ^ Math.imul(j, 0x165667b1) ^ Math.imul(l, 0x9e3779b1) ^ s;
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b); h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return (h ^ (h >>> 16)) >>> 0;
+};
 
 // The sprite resolution a prop drawn at screen scale `scale` (device px per world unit) uses: its base `res` until the
 // sprite would be enlarged more than 1.25×, then the smallest of res·2, res·4, … (and `max` itself) that is not, up to
@@ -147,6 +165,9 @@ export function makeSet(def) {
   const times = def.times ? declareTimes(id, def.times, def.skies) : null;     // the kit's own times, or Earth's
   if (times && def.defaultSky && !times.includes(def.defaultSky)) throw new Error(`set ${id}: defaultSky "${def.defaultSky}" is not one of its times (${times.join(', ')})`);
   if (def.groundShadows !== undefined && typeof def.groundShadows !== 'boolean') throw new Error(`set ${id}: groundShadows must be true or false (false: no ground to shade, so no figure, flier or prop throws a shadow)`);
+  const fd = def.field?.density ?? 1;
+  if (def.field != null && !(typeof def.field === 'object' && !Array.isArray(def.field) && Number.isFinite(fd) && fd >= 0)) throw new Error(`set ${id}: field must be { density } (density ≥ 0, 1 the usual count of specks; 0 or no field: none)`);
+  const field = def.field && fd > 0 ? { density: fd } : null;
 
   const S = {
     id, def, W, H, refX, refY, area, view, bounds: { ...view }, light, walk,
@@ -155,7 +176,7 @@ export function makeSet(def) {
     skyNames: times ? times.slice() : Object.keys(def.skies || {}).length ? Object.keys(def.skies) : SKY_TIMES.slice(),
     defaultSky: def.defaultSky || (times ? times[0] : 'morning'),
     props, stones, region, ridge, built: false, L: [],
-    lens: def.lens ?? LENS,
+    lens: def.lens ?? LENS, field,
   };
 
   // ── perspective and ground ──
@@ -480,6 +501,55 @@ export function makeSet(def) {
     const zOf = k => (k > 0 ? D * (1 / k - 1) : Infinity), isFront = ly => !!ly.front || ly.k > 1;
     const backdrop = Math.min(Infinity, ...S.L.filter(ly => !isFront(ly) && ly.k > 0 && ly.k < 1).map(ly => zOf(ly.k)));
     return S.L.map(ly => ({ ly, front: isFront(ly), z: isFront(ly) ? Math.min(0, zOf(ly.k)) : ly.k === 1 ? backdrop : zOf(ly.k) }));
+  };
+  // The near field (makeSet's `field`, DESIGN §10): specks of dust and stars at every depth, so a camera moving through
+  // depth streams past them (the nearer, the faster and bigger, streaking with the move) while the sky stays put. It
+  // shows only while the camera moves through depth (faded in with its speed, whole from FIELD_GO × the lens a second):
+  // a camera that holds, pans or zooms its lens sees none of it, so no speck ever sits on a planet like a star. An
+  // endless grid of cells (FIELD_CELL field units across, FIELD_CELLZ world px deep), a share of them (FIELD_SHARE × the
+  // density) holding one speck at a hashed spot: every frame finds the same specks. A shot sees the field scaled about
+  // its first camera (ref): world x, y = ref's centre + field units × the lens / ref's Z per 1080 px of frame (Z = zoom ×
+  // (lens − depth): screen px per world px at unit distance), a speck's size with them, so a shot starts with the same
+  // amount of it at any zoom and resolution, and it stays put in the world through the shot. Specks are seen out to
+  // FIELD_REACH × the lens (fading in over its last 40%) and pass the lens as things do (passFade).
+  // S.fieldSpecks(cam, ref, prev, W, H, dt) → [{ id, x, y, z, r, a, streak, draw(ctx) }], farther first: each speck's
+  // screen point, radius and alpha, and its streak (screen px) from where the camera at `prev`, dt s before, saw it;
+  // draw(ctx) paints it in screen space. None without a `prev` dt > 0 s before or with no move through depth since.
+  S.fieldSpecks = (cam, ref, prev, W, H, dt) => {
+    if (!field || !prev || !(dt > 0)) return [];
+    const D = cam.lens ?? S.lens, v = clamp(Math.abs((cam.z || 0) - (prev.z || 0)) / (dt * FIELD_GO * D)), go = v * v * (3 - 2 * v);
+    if (!(go > 0)) return [];
+    const k = H / 1080, q = Math.min(1, FIELD_SHARE * field.density), g = (ref.zoom * (D - (ref.z || 0))) / (D * k);
+    // a camera's view of the field: the field point (X, Y) at depth z is at W/2 + (X − X0)·G/d, d = D + z − its depth
+    const view = c => ({ c: c.z || 0, G: (c.zoom * (D - (c.z || 0))) / g, X0: (c.cx - ref.cx) * g, Y0: (c.cy - ref.cy) * g });
+    const V = view(cam), P = view(prev), dMin = PASS * D, dMax = FIELD_REACH * D, out = [];
+    const at = (v, X, Y, d) => [W / 2 + ((X - v.X0) * v.G) / d, H / 2 + ((Y - v.Y0) * v.G) / d];
+    for (let iz = Math.floor((V.c - D + dMin) / FIELD_CELLZ); iz * FIELD_CELLZ < V.c - D + dMax; iz++) {
+      // the cells of this slab the frame may show (with room for a streak coming in from outside it)
+      const dF = Math.min(dMax, D + (iz + 1) * FIELD_CELLZ - V.c), m = 0.3 * W + 3 * k;
+      const hx = ((W / 2 + m) * dF) / V.G, hy = ((H / 2 + m) * dF) / V.G;
+      for (let iy = Math.floor((V.Y0 - hy) / FIELD_CELL); iy * FIELD_CELL < V.Y0 + hy; iy++) for (let ix = Math.floor((V.X0 - hx) / FIELD_CELL); ix * FIELD_CELL < V.X0 + hx; ix++) {
+        const h = cellHash(ix, iy, iz, seed);
+        if (h / 4294967296 >= q) continue;
+        const r = rng(h ^ 0x5bd1e995), X = (ix + r()) * FIELD_CELL, Y = (iy + r()) * FIELD_CELL, z = (iz + r()) * FIELD_CELLZ, d = D + z - V.c;
+        const r0 = 0.6 + 1.8 * r() ** 3, a0 = 0.55 + 0.45 * r(), col = SPECKS[Math.floor(r() * SPECKS.length)];
+        if (d < dMin || d > dMax) continue;
+        // its size (a speck is a speck: drawn 0.6 to 3 px across per 1080, one under that dimmed by its area), its fade in
+        // from far away and out at the lens, and the camera's speed
+        const [x, y] = at(V, X, Y, d), rad = (r0 * V.G) / d, rd = clamp(rad, 0.6 * k, 3 * k), u = clamp((dMax - d) / (0.4 * dMax));
+        const a = go * a0 * u * u * (3 - 2 * u) * passFade(d, D) * Math.min(1, (rad / (0.6 * k)) ** 2);
+        // the streak: from where it was a moment before (none when it was at the lens then), at most 0.3 of the frame
+        const dp = D + z - P.c, [px, py] = dp > dMin ? at(P, X, Y, dp) : [x, y], L = Math.hypot(x - px, y - py), Lc = Math.min(L, 0.3 * W);
+        const x0 = L > Lc ? x - ((x - px) * Lc) / L : px, y0 = L > Lc ? y - ((y - py) * Lc) / L : py, e = rd;
+        if (a < 0.01 || Math.max(x, x0) < -e || Math.min(x, x0) > W + e || Math.max(y, y0) < -e || Math.min(y, y0) > H + e) continue;
+        out.push({ id: `${ix},${iy},${iz}`, x, y, z, r: rad, a, streak: Lc, draw: c => {
+          // a round dab, or a streak when it moves (its light spread along it)
+          c.strokeStyle = `rgba(${col},${(a * Math.sqrt((2 * rd) / (2 * rd + Lc))).toFixed(3)})`; c.lineWidth = 2 * rd; c.lineCap = 'round';
+          c.beginPath(); c.moveTo(x0, y0); c.lineTo(x + (Lc > 0.01 ? 0 : 0.01), y); c.stroke();
+        } });
+      }
+    }
+    return out.sort((A, B) => B.z - A.z);
   };
   S.propsSorted = () => {
     if (!S.built) S.build();

@@ -14,7 +14,9 @@ seconds (default 1/6), every beat and line boundary, and the first and last fram
 on every frame. Hits of the same rule, actor and shot less than a second apart merge into one issue spanning their
 time range, reported at its worst moment. A framing fault (`edge-cut`, `tangent`, `halo`) counts only when it is held
 for 0.5 s in one stretch, so a move sweeping past an edge or a figure turning is not an issue. The command prints every
-issue and exits with status 1 when there is at least one error (warnings alone exit 0):
+issue and exits with status 1 when there is at least one error (warnings alone exit 0); its summary line also counts
+the warnings shots keep on purpose (`2 errors, 4 warnings (1 kept: allowed by their shots' "lint" blocks)`, [kept
+warnings](#kept-warnings)):
 
 ```
 lint     2 errors, 4 warnings → films/lintdemo/out/lint.json, lint.jpg    3.5 s
@@ -64,18 +66,24 @@ in frame pixels, `frames` the two times of a cut issue, `note` a kept warning's 
 
 ## Kept warnings
 
-Some warnings are deliberate: a wide shot of a tiny mouse, a tangent you like, a crop into a planet that lint judges as
-if the whole planet should be in frame. Mark them on the shot, with the rules and the reason:
+Some warnings are deliberate: a wide shot of a tiny mouse, a tangent you like, a cut-jump into an end title over the
+same sky. Mark them on the shot, with the rules and the reason:
 
 ```json
-{ "id": "2.3", "camera": { "size": "full", "on": ["saturn"], "focus": [0.95, 0.5], "zoom": 2 },
-  "lint": { "allow": ["subject-size"], "note": "a crop into the edge of the rings" }, "beats": [ … ] }
+{ "id": "1.1", "camera": { "size": "wide", "on": ["tilly"] },
+  "lint": { "allow": ["subject-size"], "note": "a tiny mouse in a big meadow, on purpose" }, "beats": [ … ] }
 ```
+
+(A crop into a planet needs none for [subject-size](#subject-size) or [edge-cut](#edge-cut): lint takes a shot with a
+`focus`, a `zoom` above 1 on subjects with no face, or a dolly through depth as framing part of its subject. A
+[tangent](#tangent) still warns there: an outline that grazes the frame's edge in a crop is kept on the shot like any
+other.)
 
 That shot's warnings of those rules are then **kept**: listed apart (`kept` in `lint.json`, drawn last on `lint.jpg`
 in green with the note, no fix tried) and no longer counted as warnings. `allow` is a non-empty list of rules that
 warn (`collision` too, the one error that is a warning while a beat brings two actors together); `note` is required.
-Errors are never kept. A malformed block stops `lint` with the problem's path, as `check` does.
+Errors are never kept. A malformed block is a film.json problem: `check` (and every command that loads the film) stops
+with its path.
 
 ## Rules
 
@@ -157,11 +165,12 @@ track with fast runners, a subject still entering or leaving, a static shot whos
 push-in or pull-out to another size (judged at its starting size), and a small cast member the closest zoom can't
 enlarge. Fix: change the size, stage the subjects closer together, or cut between singles.
 
-It does not know a shot that frames part of a subject on purpose ([storyboard.md](storyboard.md#framing-part-of-a-subject):
-a `focus`, a `zoom` above 1 on subjects with no face, a point in `on`) or one that moves the camera through depth
-(`z`, `zTo`: a subject off the stage grows by its own depth's scale, not the stage zoom's), so it can warn there
-that the subject is missing or too big. Look at the frame, and keep the warning on the shot when the frame is right
-([kept warnings](#kept-warnings)).
+A shot that frames part of a subject on purpose ([storyboard.md](storyboard.md#framing-part-of-a-subject): a camera
+`focus`, a `zoom` above 1 on subjects that all have no face) or that moves the camera through depth (a `zTo` other than
+its `z`) is a crop: there the subject may fill the frame or leave it, so only a subject too small is reported. A dolly
+through depth is judged at its first frame (each subject at the scale its depth had then), as a push-in to another
+size is judged at its start. A point in `on` is not a crop: look at that frame, and keep a warning there on the shot
+when the frame is right ([kept warnings](#kept-warnings)).
 
 A `zoom` rarely clears it: the accepted range scales with `zoom` too (`"zoom": 1.12` on a full shot accepts 34%–91%),
 so a zoom only helps when the camera can't reach the size's framing (its closest zoom, or the edge of the set). A
@@ -179,8 +188,9 @@ frame and looks small until it happens. Start the shot in the final pose (`{ "do
 
 The frame edge cuts a head near its eyes (the eyes closer than 0.3 head heights to an edge, or past it with some of
 the head still in), or only a sliver of an actor is in frame (under 25% of its drawing, its head out; a carrier under
-its riders is their ground, not a sliver). Actors walking in or out are judged at the top and bottom only. Held for
-0.5 s. Fix: apply the change in the message: a camera `offset` or `size` that frames the head in or takes the whole
+its riders is their ground, not a sliver). Actors walking in or out are judged at the top and bottom only. A subject
+its shot crops on purpose (a `focus`, a `zoom` above 1 on subjects with no face, a dolly through depth) is no sliver,
+and in a dolly nothing is (it sweeps everything past the edges). Held for 0.5 s. Fix: apply the change in the message: a camera `offset` or `size` that frames the head in or takes the whole
 figure out, or a staging. When the message says no simple change clears it, re-block the shot.
 
 ### tangent

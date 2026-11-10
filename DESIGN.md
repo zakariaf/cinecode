@@ -399,8 +399,9 @@ zoom 1) is how far in front of the stage a camera at depth 0 stands. A camera (c
 
 `zoom` stays the stage's zoom (what `cameraAt` returns and every 2D consumer uses): on the stage p = 1 whatever the
 camera's depth, so everything staged keeps today's arithmetic, and a camera at depth 0 with nothing off the stage
-draws byte-identical frames. `camera.mjs` exports `LENS`, `NEAR`, `NEAR_FADE`, `depthScale(cam, z)` (p),
-`depthFade(cam, z)` and `project(cam, W, H, x, y, z) → [sx, sy, s]` (s = zoom·p: screen px per world px there).
+draws byte-identical frames. `camera.mjs` exports `LENS`, `NEAR`, `NEAR_FADE`, `PASS`, `PASS_FADE`,
+`depthScale(cam, z)` (p), `depthFade(cam, z)` and `project(cam, W, H, x, y, z) → [sx, sy, s]` (s = zoom·p: screen px
+per world px there).
 
 - **Layers.** A layer with parallax k is at z = D(1/k − 1) (k = 1: the stage; k < 1 behind it; k > 1 in front; the
   sky at infinity). Its sideways parallax stays §3's (the image as painted is what the camera sees from depth 0); a
@@ -410,8 +411,12 @@ draws byte-identical frames. `camera.mjs` exports `LENS`, `NEAR`, `NEAR_FADE`, `
   its painted ground) is a floor, not a wall, so for the sort it reaches back to the nearest backdrop (the nearest back
   layer with 0 < k < 1; none: to infinity) and what is between the stage and that backdrop shows over the ground
   (`S.layerDepths(D)` → [{ ly, front, z }]; a front layer is never behind the stage).
-- **Cull and fade.** Whatever is nearer the lens than NEAR·D (0.1 D; behind the camera too) is not drawn; it fades
-  out (smoothly) from NEAR_FADE·D (0.25 D). A camera stays more than NEAR_FADE·D in front of the stage (c < 0.75 D,
+- **Cull and fade.** A thing (an actor, an effect piece, a near-field speck) passes the lens: drawn whole until
+  PASS_FADE·D (0.04 D: 25× its size on the stage) from it, faded out (smoothly) by PASS·D (0.01 D; behind the camera
+  too it is not drawn). Off the camera's axis it has grown out of the frame by then, so only what the lens truly meets
+  fades, briefly and filling the frame, never as a small see-through ghost mid-frame. A layer (the whole frame) is not
+  drawn nearer than NEAR·D (0.1 D) and fades out from NEAR_FADE·D (0.25 D). A camera stays more than NEAR_FADE·D in
+  front of the stage (c < 0.75 D,
   validated against the set's lens), so the stage never fades and its zoom stays finite: to fly past something, put
   it in front of the stage (negative z) and what the camera flies toward behind it, or give the kit a longer lens.
 - **Things with a depth.** Actors: the scene actor's `z`, else the `z` of the anchor it starts at (0 without one). A
@@ -447,7 +452,10 @@ draws byte-identical frames. `camera.mjs` exports `LENS`, `NEAR`, `NEAR_FADE`, `
   pull-out `to` a size composes its end framing as seen from `zTo`: the subjects frame as asked and only what lies at
   other depths changes (a dolly-zoom when z goes against the zoom). Every other move composes its framing at `z`, and
   the camera then travels along its axis (the frame centre is the vanishing point): the stage grows by
-  (D − z)/(D − c). Subjects off the stage are framed by their size as seen from the framing's depth: each mapped onto
+  (D − z)/(D − c). Moving in (zTo > z), that growth (a subject at depth s grows by (D + s − z)/(D + s − zTo)) would
+  carry an off-centre composition out of the frame, so each of its framings keeps the framed region inside the frame
+  as the move's end shows it: the frame's bounds are drawn in about its centre by the most any subject grows (all the
+  way for one the lens passes), and subjects without a face that still can't fit are centred, not hung from the top. Subjects off the stage are framed by their size as seen from the framing's depth: each mapped onto
   the stage about the centre of the framing it feeds (each end of a pan or a move, the held frame of a still shot,
   each sample of a track and its containment), solved for that centre (exact for subjects at one depth, iterated for
   several); the framing's point then stays a world point at its depth, so re-solving it at another zoom (a push-in,
@@ -456,7 +464,7 @@ draws byte-identical frames. `camera.mjs` exports `LENS`, `NEAR`, `NEAR_FADE`, `
   pulled back, the nearest layer's), so no layer shows its edge. Every camera of a scene that uses depth carries `z`
   and `lens`.
 - **Geometry.** `frameInfo` boxes come from the same projection; its actors carry `z` and `zoom` (screen px per world
-  px at their depth: use it, not `camera.zoom`, for an actor off the stage); an actor nearer than NEAR·D is left out.
+  px at their depth: use it, not `camera.zoom`, for an actor off the stage); an actor nearer than PASS·D is left out.
 
 ## 11. Round 6 extensions (all generic; first used by the Saturn chapter of a solar-system film)
 
@@ -475,6 +483,9 @@ Everything in §1–10 still holds; a film that uses none of these renders as be
 | shot | `lint` | `{ "allow": [warning rules], "note" }`: those warnings are kept (lint's `kept`), not reported as warnings; errors never. (lint) |
 | kit | `times` | `{ name: { grade, sun, haze } }` with a painter per name in `skies`: then the kit's only times, the first its default. `grade`: `'neutral'` (default), an Earth time's, or `{ sl, mul, vig, con }`; `sun`: `null` (default, no sun), an Earth time's, or `{ len, a }`; `haze`: `[r, g, b]` or none. A name means one light in a film. `grade.mjs` `gradeOf` / `sunLight` look a time up; a name neither Earth's nor declared is an error (no morning fallback). (sets, film) |
 | kit | `groundShadows` | `false`: no figure, flier or prop throws a shadow, and no figure draws its contact shadow. (sets) |
+| kit | `field` | `{ density }`: a near field of specks at every depth (to 1.5 D), so a camera moving through depth streams past them (flight, not a zoom) while the sky stays fixed. Seen only while the camera moves through depth, faded in with its speed (whole from 0.06 D a second): a still shot, a pan or a lens zoom draws none, so no speck sits on a planet like a star. `S.fieldSpecks(cam, ref, prev, W, H, dt)` → `[{ id, x, y, z, r, a, streak, draw(ctx) }]` (screen space, farther first; a shot's field is laid out for its first camera, `ref`, so a flight starts with the same amount of it at any zoom and the field stays put in the world through the shot; `prev`: the camera `dt` s before, for the speed and the streaks; none without one); the frame sorts them with everything else in runs between the others' depths. The `space` kit's `dust` param (a number ≥ 0 or false, default 1). (sets, film) |
+| camera | lead room | a subject without a face gets none and does not count toward it (a planet is centred across the frame). (film) |
+| camera | `zTo` > `z` (not to a size) | the framings keep the framed region inside the frame as the move's end shows it (§10 Camera). (film) |
 
 - **Library** (`engine/cast/planet.mjs`, `telescope.mjs`, `engine/set/kits/space.mjs`, `engine/paint/planets.mjs`,
   `engine/effects/`): the `planet` rig (eleven bodies, `sizes(params)`, faceless, upright, no shadow), the `telescope`

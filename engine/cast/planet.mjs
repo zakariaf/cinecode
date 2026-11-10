@@ -1,7 +1,7 @@
 // A planet, moon or star as an actor: the camera frames it (`on`), pushes in on it and lints it like a character, and
 // it stands on a set's ground or holds at a perch anchor (the `space` kit's anchors). One rig, a `body` preset per world:
-// saturn (default), jupiter, earth, mars, venus, mercury, uranus, neptune, moon, titan, sun. The painter is
-// engine/paint/planets.mjs (drawBody), shared with the space effects (sizerow, moonlets, …).
+// saturn (default), jupiter, earth, mars, venus, mercury, uranus, neptune, pluto, moon, titan, charon, sun. The painter
+// is engine/paint/planets.mjs (drawBody), shared with the space effects (sizerow, moonlets, ringfield, …).
 //
 // Params: body; tilt (the rings' opening, radians: 0 = edge-on; Saturn's default 0.38 ≈ 22°); roll (the whole body
 // turned in the picture, radians); axis (a ringless body's sub-observer latitude: how much of its north pole we see);

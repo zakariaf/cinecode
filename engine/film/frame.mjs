@@ -24,8 +24,10 @@
 // (onScreen), the depth layer's items (api.item, api.project), layers (set.mjs) and the sky (the lens zoom). Props,
 // actors, one-shot fx and depth items are drawn sorted by z (farther first), then by key; the depth layer hands its
 // items over before the set is drawn, and a set layer something lies beyond (or, a front one, nearer than) joins the
-// sort at its own z (S.layerDepths). An actor nearer the lens than NEAR × it is left out and fades in from NEAR_FADE ×
-// it; one off the stage throws no ground shadow.
+// sort at its own z (S.layerDepths), and so do the specks of a set's near field (S.fieldSpecks, while the camera moves
+// through depth; laid out for the shot's first camera: one piece per run of them between the others' depths). An actor
+// or a piece passes the lens whole: it fades only in the last stretch, from PASS_FADE × the lens, and is left out
+// nearer than PASS × it (camera.mjs depthFade); one off the stage throws no ground shadow.
 import { createCanvas } from '@napi-rs/canvas';
 import { grade, black, deckle, sunOf } from './grade.mjs';
 import { drawEvent, rain, zzz, airShadow, ONE_SHOT, groundTone } from './fx.mjs';
@@ -377,10 +379,14 @@ function layerRunner(ctx, plan, shot, t, cam, actors, deep = null) {
   };
 }
 
+// The camera a shot sees its set's near field from (S.fieldSpecks): its first.
+const REF = new WeakMap();
+const fieldRef = shot => { if (!REF.has(shot)) REF.set(shot, shot.cameraAt(shot.t0)); return REF.get(shot); };
+
 // A piece an effect hands to the depth sort (api.item, DESIGN §10) at the world point [x, y, z]: sorted by z, then by y
 // (as an actor standing there); drawn with ctx in the world transform of its depth (zoom × p about the camera centre)
-// and its near fade as globalAlpha, and P = { x, y, s, z, a } (its screen point, screen px per world px there, its depth
-// and fade). null when the lens has come too near it (or passed it).
+// and its pass of the lens as globalAlpha, and P = { x, y, s, z, a } (its screen point, screen px per world px there, its
+// depth and fade). null when the lens has come too near it (or passed it).
 function depthItem(ctx, cam, W, H, [x, y, z = 0], draw) {
   const a = depthFade(cam, z);
   if (!(a > 0)) return null;
@@ -445,10 +451,13 @@ function picture(ctx, plan, shot, t, titles = true) {
   // (the depth layer's pieces, sorted with the props and actors below: handed over before the set is drawn, so its
   // layers know what lies beyond or nearer than them)
   layer('depth', world);
+  // (the set's near field: specks at every depth while the camera moves through depth, streaking with its move over the
+  // last frame)
+  const tb = Math.max(shot.t0, t - 1 / plan.fps), specks = S.field ? S.fieldSpecks(cam, fieldRef(shot), shot.cameraAt(tb), W, H, t - tb) : [];
   // depth (DESIGN §10): a set layer something lies beyond (a back layer) or nearer than (a front layer) is drawn in the
   // depth sort at its own z (S.layerDepths) instead of before or after everything; the 'back' overlays then go with
   // the stage (after every back layer, before what is on the stage)
-  const zs = [...actors.filter(a => a.z && depthFade(cam, a.z) > 0).map(a => a.z), ...deep.map(d => d.z)];
+  const zs = [...actors.filter(a => a.z && depthFade(cam, a.z) > 0).map(a => a.z), ...deep.map(d => d.z), ...specks.map(q => q.z)];
   const mid = zs.length ? S.layerDepths(cam.lens ?? S.lens).filter(L => (L.front ? zs.some(v => v < L.z) : zs.some(v => v > L.z))) : [];
   const inSort = new Set(mid.map(L => L.ly)), only = inSort.size ? { layers: ly => !inSort.has(ly) } : {}, backIn = mid.some(L => !L.front);
   const backOpts = { t, dof: dofPx > 0 ? 2 : 0, haze: sky }, frontOpts = { t, dof: dofPx > 0 ? Math.max(2, dofPx / z) : 0 };
@@ -469,6 +478,15 @@ function picture(ctx, plan, shot, t, titles = true) {
   items.push(...deep);
   for (const L of mid) items.push({ key: L.front ? 1e9 : -1e9, z: L.z, ord: L.front ? 9 : -1, draw: () => { world(); (L.front ? S.drawFront : S.drawBack)(ctx, cam, { ...(L.front ? frontOpts : backOpts), layers: ly => ly === L.ly }); } });
   if (backIn) items.push({ key: -1e9, z: 0, ord: -0.5, draw: () => layer('back', world) });
+  // the near field's specks (farther first) join the sort as one piece per run of them between the others' depths
+  if (specks.length) {
+    const cuts = [...new Set(items.map(it => it.z || 0))].sort((a, b) => b - a);
+    for (let i = 0, j = 0; j <= cuts.length; j++) {
+      const run = [];
+      while (i < specks.length && (j === cuts.length || specks[i].z > cuts[j])) run.push(specks[i++]);
+      if (run.length) items.push({ key: 0, z: run[0].z, ord: 4, draw: () => { reset(ctx); ctx.save(); for (const q of run) q.draw(ctx); ctx.restore(); } });
+    }
+  }
   // farther first: by depth (DESIGN §10), then by key (ground y), then props, actors, one-shot fx, depth pieces (a back
   // layer before everything at its depth, a front one after)
   items.sort((a, b) => (b.z || 0) - (a.z || 0) || a.key - b.key || a.ord - b.ord);

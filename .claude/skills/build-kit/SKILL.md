@@ -35,6 +35,7 @@ Use this after the cinecode skill decided no built-in kit (meadow, forest, strea
 | `skies`, `times` | Earth's eight painted skies by default (`skies.<one of them>` repaints it). A kit not under Earth's sky declares its own `times: { name: { grade, sun, haze } }` with a painter `skies.<name>: (ctx, rnd, w, h) => …` for each: those are then its only times, the first its default (`space.mjs`: `times: { space: { grade: 'neutral', sun: null } }`). `grade` `'neutral'` (default), an Earth time's name or `{ sl, mul, vig, con }`; `sun` `null` (default: no cast shadows), an Earth time's name or `{ len, a }`; `haze` `[r, g, b]` or none. `{ night: {} }` among them keeps Earth's night. A sky with no declared light, or a scene time the kit doesn't have, is a `check` error. |
 | `groundShadows` | `false` when there is no ground to shade (space): no figure, flier or prop throws a shadow |
 | `lens` | world px from a depth-0 camera to the stage (default 2304): how much a depth `z` scales things |
+| `field` | `{ density }`: a near field of specks at every depth that a camera moving through depth streams past, seen only while it moves through depth (1 the usual count; leave it out for none). For a kit with no painted ground (space); expose it as a param (`space`'s `dust`) and check that param yourself, so a bad value names it |
 | optional | `light`, `defaultSky`, `surface`, `sampleRoute` |
 
 Paint only with the `r()` you are given (never `Math.random()`), and from the params: two builds must paint the same picture.

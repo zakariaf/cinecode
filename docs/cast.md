@@ -292,20 +292,27 @@ Height 50 units, length 96. Speeds (units/s at scale 1): walk 15, run 34. Has a 
 
 A planet, moon or star as an actor: the camera frames it (`on`), pushes in on it and lints it like a character. One
 rig with a `body` preset per world: `saturn` (default), `jupiter`, `earth`, `mars`, `venus`, `mercury`, `uranus`,
-`neptune`, `moon` (Earth's), `titan`, `sun`. Every globe is drawn 100 units across (Saturn is 226 with its rings, 91.5
-tall), so sizes come from the cast `scale`: for true relative sizes, multiply by the ratio of their radii (`radiusOf`
-in `cinecode/paint/planets`, true equatorial radii in km: Earth / Saturn = 0.1058, so an Earth beside a Saturn at
-`scale` 2.5 is 0.26). Saturn's rings are at their true radii (the C, B and A rings, the Cassini Division and the Encke
-Gap); the colours are a storybook's.
+`neptune`, `moon` (Earth's), `titan`, `pluto`, `charon`, `sun`. Every globe is drawn 100 units across (Saturn is 226
+with its rings, 91.5 tall), so sizes come from the cast `scale`: for true relative sizes, multiply by the ratio of their
+radii (`radiusOf` in `cinecode/paint/planets`, true equatorial radii in km: Earth / Saturn = 0.1058, Pluto / Earth =
+0.186, Charon / Pluto = 0.51, so an Earth beside a Saturn at `scale` 2.5 is 0.26). Saturn's rings are at their true
+radii (the C, B and A rings, the Cassini Division and the Encke Gap), and the globe's shadow lies across them, away from
+the Sun, soft-edged. The near rings cross in front of the globe: the bright B and A rings hide its limb; through the
+faint C ring the globe and its outline show, as through a veil. The colours are a storybook's after NASA's pictures:
+Jupiter's pale Equatorial Zone between its two dark belts and the Great Red Spot at 22°S, Neptune's Great Dark Spot at
+20°S, Pluto's bright heart (Tombaugh Regio, about 60% of the disc across: two lobes narrowing to a point, the western
+one, Sputnik Planitia, the brighter) and dark red Cthulhu, Charon grey with its red north pole.
 
 - **poses:** `stand`, `perch`; it holds at a `perch` anchor (the [`space`](sets.md#space) kit's) or stands on the ground
 - **expressions:** `neutral` only: no face. It stays upright on a slope and throws no shadow.
-- **params:** `body`; `tilt` (the rings' opening, radians: 0 edge-on, Saturn's default 0.38), `roll` (the whole body
+- **params:** `body`; `tilt` (the rings' opening, radians: 0 edge-on, Saturn's default 0.38; the rings are drawn
+  from the north whatever its sign, a negative tilt only shows the globe's south), `roll` (the whole body
   turned in the picture), `axis` (how much of a ringless body's pole we see), `spin` (band and feature drift per
   second), `size`
 - Its `head` is the globe's centre, so a `close` shot frames the globe. A moon behind or in front of a planet is
   another planet actor with a `z` ([depth](storyboard.md#depth)); the built-in space effects (`sizerow`, `moonlets`,
-  `orbit`, `lightpulse`, `sunglow`: [effects.md](effects.md#built-in-effects)) take a planet actor as `who`.
+  `orbit`, `ringfield`, `lightpulse`, `lightbeam`, `sunglow`: [effects.md](effects.md#built-in-effects)) take a
+  planet actor as `who` (or `to`).
 
 ### telescope
 

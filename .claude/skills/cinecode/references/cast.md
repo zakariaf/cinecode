@@ -161,11 +161,11 @@ Speeds are units/s at scale 1. On screen an actor covers `speed × s` world px/s
   stepping stones every rig jumps stone to stone, 0.7–1.5 s a stone (the small rigs the longest) whatever its gait or `speed`.
 - **owl**: expression `one-eye` (a dozing owl peeking). Perches on `perch` anchors; can fly.
 - **planet**: a planet, moon or star, one rig with a `body` preset: saturn (default), jupiter, earth, mars, venus,
-  mercury, uranus, neptune, moon, titan, sun. Other params: `tilt` (the rings' opening, radians; Saturn 0.38),
+  mercury, uranus, neptune, moon, titan, pluto, charon, sun. Other params: `tilt` (the rings' opening, radians; Saturn 0.38; the rings are drawn from the north whatever its sign),
   `roll` (the whole body turned), `axis` (how much of a ringless body's pole we see), `spin` (band drift per second),
   `size`. Saturn's rings are at their true radii. Size it with the cast `scale` (the Saturn chapter's Saturn is 2.5);
   for true relative sizes multiply by the ratio of radii (`radiusOf` in `cinecode/paint/planets`:
-  Earth / Saturn = 0.1058). It holds at a `perch` anchor (the `space` kit's), stays upright, throws no shadow, has
+  Earth / Saturn = 0.1058, Pluto / Earth = 0.186, Charon / Pluto = 0.51). It holds at a `perch` anchor (the `space` kit's), stays upright, throws no shadow, has
   no face (the camera crops into it: `zoom` above 1, `focus`), and its `head` is the globe's centre, so `close`
   frames the globe. A moon behind or in front of it is a second planet actor with a `z` (SKILL.md, "Space and depth").
 - **telescope**: a refractor on a wooden tripod, a prop (no face), pointing up the way it faces; params `angle`

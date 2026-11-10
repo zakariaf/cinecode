@@ -524,20 +524,23 @@ test('a shot\'s "lint": { "allow", "note" } keeps its warnings of those rules (w
     assert.equal(j.kept[0].note, r.kept[0].note);
     assert.equal(out.tiles, r.errors.length + r.warnings.length + r.kept.length);
   } finally { rmSync(dir, { recursive: true, force: true }); }
-  // malformed blocks: every problem with its path
+  // malformed blocks: every problem with its path, from check (loadFilm) and from lint on a plan that carries them
   const bad = brokenFilm(), sh = bad.scenes[0].shots;
   sh[0].lint = { allow: ['tangent', 'floating', 'nope'] };
   sh[1].lint = { allow: 'tangent', note: 'x', why: 1 };
   sh[2].lint = ['tangent'];
-  const p2 = compile(await loadFilm(bad));
-  assert.throws(() => lintPlan(p2), e => {
+  const six = e => {
     assert.equal(e.name, 'ValidationError');
     const m = e.problems.map(q => q.message);
     for (const re of [/^scenes\[0\]\.shots\[0\]\.lint\.allow\[1\]: "floating" is an error: errors are never kept/, /^scenes\[0\]\.shots\[0\]\.lint\.allow\[2\]: unknown rule "nope"/,
       /^scenes\[0\]\.shots\[0\]\.lint\.note: say why/, /^scenes\[0\]\.shots\[1\]\.lint\.why: unknown field/, /^scenes\[0\]\.shots\[1\]\.lint\.allow: must be a non-empty array/, /^scenes\[0\]\.shots\[2\]\.lint: must be an object/]) assert.ok(m.some(x => re.test(x)), `${re} in ${m.join('\n')}`);
     assert.equal(m.length, 6, m.join('\n'));
     return true;
-  });
+  };
+  await assert.rejects(loadFilm(bad), six);
+  const p2 = compile(await loadFilm(brokenFilm()));
+  p2.film.scenes[0].shots.forEach((s, i) => { if (i < 3) s.lint = sh[i].lint; });
+  assert.throws(() => lintPlan(p2), six);
 });
 
 // ───────────── the moon on a head ─────────────

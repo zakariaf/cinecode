@@ -26,7 +26,7 @@ const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const BIN = join(ROOT, 'bin', 'cinecode.mjs');
 const SKILLS = join(ROOT, '.claude', 'skills');
 const cli = (cwd, ...args) => spawnSync(process.execPath, [BIN, ...args], { cwd, encoding: 'utf8', env: { ...process.env, GEMINI_API_KEY: '' } });
-const EFFECTS = ['debris', 'eyepiece', 'lightpulse', 'moonlets', 'orbit', 'sizerow', 'starstream', 'sunglow'];
+const EFFECTS = ['debris', 'eyepiece', 'lightbeam', 'lightpulse', 'moonlets', 'orbit', 'ringfield', 'sizerow', 'starstream', 'sunglow'];
 
 // A small film in space: Saturn (and a Sun) as actors, with the given beats and overlays.
 const spaceFilm = ({ beats = [], overlays = [], saturn = {}, size = 'wide', dur = 4, W = 480, H = 270 } = {}) => ({
@@ -39,7 +39,7 @@ const spaceFilm = ({ beats = [], overlays = [], saturn = {}, size = 'wide', dur 
 });
 const pixels = (plan, t) => { const c = createCanvas(plan.W, plan.H), x = c.getContext('2d'); drawFrame(x, plan, t); return x.getImageData(0, 0, plan.W, plan.H).data; };
 
-test('the space pieces are built in: the planet and telescope rigs, the space kit, nine effects', () => {
+test('the space pieces are built in: the planet and telescope rigs, the space kit, eleven effects', () => {
   for (const k of ['planet', 'telescope']) { assert.ok(listRigs().includes(k), k); assert.ok(BUILTIN_RIGS.includes(k), k); }
   assert.ok(BUILTIN_KITS.includes('space'));
   assert.deepEqual(Object.keys(BUILTIN_EFFECTS.custom).sort(), EFFECTS);
@@ -52,8 +52,8 @@ test('the planet and telescope rigs pass verify-rig; the space kit passes verify
   assert.deepEqual(verifyKit(getKit('space'), 'space').filter(c => !c.ok), []);
 });
 
-test('the planet rig: eleven bodies, Saturn\'s rings in true proportion, true radii for relative sizes', () => {
-  assert.deepEqual(Object.keys(BODIES).sort(), ['earth', 'jupiter', 'mars', 'mercury', 'moon', 'neptune', 'saturn', 'sun', 'titan', 'uranus', 'venus']);
+test('the planet rig: thirteen bodies, Saturn\'s rings in true proportion, true radii for relative sizes', () => {
+  assert.deepEqual(Object.keys(BODIES).sort(), ['charon', 'earth', 'jupiter', 'mars', 'mercury', 'moon', 'neptune', 'pluto', 'saturn', 'sun', 'titan', 'uranus', 'venus']);
   const S = BODIES.saturn, ring = n => S.rings[n];
   assert.equal(S.ob, 0.902, 'polar / equatorial radius');
   assert.deepEqual([ring(0).r0, ring(0).r1, ring(1).r1, ring(2).r1, ring(3).r1], [1.24, 1.53, 1.95, 2.03, 2.27], 'C, B rings, Cassini Division, A ring');

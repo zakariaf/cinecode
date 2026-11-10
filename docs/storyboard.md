@@ -201,7 +201,7 @@ nobody could stand), only kept inside the set's area.
 | `grade`, `gradeTo` | this shot's story grade, and a grade to blend to across the shot (`"none"` = no story grade): `"grade": "memory", "gradeTo": "none"` |
 | `music` | a music cue starting at the shot's first frame (same forms as the scene's `music`) |
 | `fadeIn`, `fadeOut` | seconds of fade from / to black at the shot's start / end |
-| `lint` | `{ "allow": ["subject-size"], "note": "why" }`: the shot's [lint](lint.md#kept-warnings) warnings of those rules are intended. Lint lists them as kept, with the note and no fix tried. Errors can't be kept. |
+| `lint` | `"lint": { "allow": ["subject-size"], "note": "why" }`: the shot's [lint](lint.md#kept-warnings) warnings of those rules are intended. Lint lists them as kept, with the note and no fix tried. Errors can't be kept, and `check` rejects a malformed block. |
 | `note` | free text for people; ignored |
 
 Shot boundaries land on frames. A shot is at least one frame long.
@@ -242,7 +242,8 @@ Moves:
 - `handheld` adds a small seeded drift to the framing.
 
 Moves are eased over the whole shot unless confined (below). Framing keeps lead room in the direction a single subject
-faces, keeps headroom, keeps the heads of subjects with a face above the caption band, and is clamped to the set's view
+faces (a subject without a face, a planet or a prop, faces nowhere and gets none: it is centred across the frame),
+keeps headroom, keeps the heads of subjects with a face above the caption band, and is clamped to the set's view
 so the frame never shows unpainted edges.
 
 What gets framed is each subject's poses over the shot, not the peaks of its gestures and jumps. A `static` or
@@ -284,9 +285,9 @@ hidden stand-in:
 - **A point as the subject**: `"on": ["x:1840,y:886"]` frames that point of the set at the shot size (a box the size of
   a standing hare at the lane's scale below it).
 
-Lint judges these shots by the whole subject, so `subject-size` can warn there (and `edge-cut`, when the crop leaves
-a sliver of a figure): keep them with the shot's `"lint": { "allow": ["subject-size"], "note": "a crop into the
-rings" }`. A hidden stand-in is still the way to
+Lint takes a focused shot (and a `zoom` above 1 on faceless subjects, and a dolly) as a deliberate crop: it doesn't
+warn that the subject is too big or gone off frame, nor that the crop leaves a sliver of the subject
+([lint](lint.md#subject-size)). A hidden stand-in is still the way to
 give the camera a subject that moves through the air ([effects.md](effects.md#props)).
 
 ## Beats
@@ -540,8 +541,28 @@ kits), so a camera at depth 0 sees z 2400 at about half size and z −900 at abo
   over the move's window (`moveAt` / `moveDur`, else the whole shot), with any move: the near things grow faster than
   the far, and the sky stays put. A `push-in` or `pull-out` `to` a size composes its end as seen from `zTo`: the
   subjects frame as asked and only what lies at other depths changes (a dolly-zoom when the depth goes against the
-  zoom). Every other move travels along the camera's axis. Both must stay under 3/4 of the set's lens. Whatever comes
-  nearer the lens than 0.1 × it (or passes it) is not drawn, and it fades out from 0.25 × it.
+  zoom). Every other move travels along the camera's axis (the frame's centre is where it flies toward), so what it
+  frames grows out from the centre: a move in is composed with the subjects near enough the centre that they are still
+  in frame at its end (a planet framed `wide` starts a little higher than a still `wide` puts it, and ends a little
+  lower; one that ends bigger than the frame is flown at dead centre). Both must stay under 3/4 of the set's lens.
+- **Passing the lens.** An actor or an effect piece the camera comes up to is drawn whole until it is 0.04 × the lens
+  from it (25× its size on the stage), then fades out by 0.01 × it (or as it passes it): whatever is off the camera's
+  axis has grown out of the frame by then, so only what the lens truly meets fades, briefly, filling the frame. Don't
+  `fade` a body out by hand as the camera passes it (it would turn see-through mid-frame): the pass takes it out. A
+  painted layer (the whole frame) fades out from 0.25 × the lens to 0.1 × it.
+- **Flying past something.** A thing grows as it nears the lens and slides out from the frame's centre (the camera's
+  axis: its `cx`, `cy`); it leaves the frame when its offset from the axis × its depth's scale reaches half the frame,
+  so it is then about its own width × (half the frame width) / its offset across. To have a moon swing past big, stage
+  it near the axis: Titan (11 world px across at cast scale 0.11) 180 px off the axis leaves at about 60 px, a dot;
+  20 px off it leaves at half the frame height. Give it a depth in front of the stage (`"z": -1400`) that the dolly
+  passes (`zTo` beyond `z + lens`: there the camera is level with it).
+- **The near field.** A kit may have one (`space` does, its `dust` param): specks of dust and stars at every depth,
+  out to 1.5 × the lens, so a camera moving through depth reads as flight: they stream out from the frame's centre,
+  the nearer the faster and bigger, streaking with the move, while the painted sky stays put. They show only while
+  the camera moves through depth, faded in and out with its speed (whole from about 0.06 × the lens a second): a still
+  shot, a pan, a zoom with no `z` / `zTo`, and the hold before or after a windowed move show none, so no speck sits on a
+  planet like a star and nothing pops at a cut. A shot's field is laid out for its first camera (a flight at any zoom
+  starts with the same amount of it).
 - **Framing** a subject off the stage is exact when the subjects share one depth (several depths are iterated).
 - **Effects** draw at depth on the overlay layer `depth` ([effects.md](effects.md#depth)).
 

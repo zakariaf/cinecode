@@ -4,7 +4,13 @@
 //
 // Kept warnings: a shot's "lint": { "allow": [rule names], "note": "why" } marks its warnings of those rules as
 // intended. They are reported in `kept` (each with the note, no fix tried), not in `warnings`; errors are never kept.
-// lintPlan throws a ValidationError when a shot's lint block is malformed (allowProblems).
+// lintPlan throws a ValidationError when a shot's lint block is malformed (allowProblems, in rules.mjs with RULES, so
+// check finds it first: engine/film/validate.mjs).
+//
+// Crops on purpose (DESIGN §11): a shot with a camera `focus`, a `zoom` above 1 on subjects that all have no face, or a
+// dolly through depth (`zTo` other than `z`) frames part of its subjects as it means to: subject-size reports only a
+// subject too small there (not one too big or out of frame), and edge-cut no sliver of a subject (in a dolly, of
+// anyone: it sweeps everything past the edges).
 //
 // Rigs without a face (faceless(): only the 'neutral' expression, or the rig's own `faceless: true`): their head point
 // is only where close shots frame them. The rules about heads and faces skip them (edge-cut's head cut near the eyes,
@@ -28,7 +34,8 @@
 // sight on purpose is not a framing fault. Scale divides out the cast scale; a cast member scaled below 1 that even
 // the closest zoom cannot fill is judged at scale 1. Scene overlays, marks, fx, music and sfx beats are drawings,
 // sounds and instants, not actors: they hide no one and bring no one together. A push-in / pull-out that ends at
-// another size or zoom ("to", "toOn", "zoomTo") is judged at its starting size.
+// another size or zoom ("to", "toOn", "zoomTo") is judged at its starting size, a dolly through depth at its first
+// frame (each subject at the scale its depth had then).
 //
 // Issue: { rule, severity, t, t0, t1, frame, shot, scene, actor?, other?, message, note?, box?, marks?, frames?, samples }
 //   t, frame  the worst moment (seconds, and the frame index t·fps); t0–t1 the span the hits cover
@@ -44,42 +51,9 @@ import { ValidationError } from '../film/load.mjs';
 import { regionOf, SIZE_SPEC, ZMAX, LOOSER } from '../film/camera.mjs';
 import { profile, rigSizes, probe, parseTarget } from '../film/util.mjs';
 import { SKY_STYLE, SKY_TIMES, SKY_W, SKY_H } from '../paint/sky.mjs';
+import { RULES, allowProblems } from './rules.mjs';
 
-// Each rule: its severity, what it catches and how to fix it (the report's rule table; lint.json "fixes").
-export const RULES = {
-  floating: { severity: 'error', catches: 'contact point not on the ground, an anchor surface or a perch, and not airborne by action',
-    fix: 'send the actor to an anchor or a point inside the walk region (see the set sheet); don\'t hold a pose or lift that leaves the ground' },
-  'inside-solid': { severity: 'error', catches: 'contact point inside a solid prop footprint (walking through a tree, stump, rock)',
-    fix: 'move the target off the prop\'s footprint (the red ellipse on the set sheet), or stop beside it with near:<actor> or an anchor' },
-  'in-water': { severity: 'error', catches: 'contact point in water, not on a stone, and the rig cannot swim',
-    fix: 'stand on a stepping stone or the bank, or make the walk "wade": true' },
-  collision: { severity: 'error', catches: 'two actors\' footprints overlap at similar depth (a warning when a beat makes them interact)',
-    fix: 'move one along x or to another depth (y); "near:<actor>" stops beside someone instead of on them' },
-  'offscreen-speaker': { severity: 'error', catches: 'a speaking actor (not vo) is less than 60% visible',
-    fix: 'put the speaker in "on" (or a looser size), bring them out from behind what hides them, or mark the line "vo": true' },
-  'subject-size': { severity: 'warning', catches: 'the framed subject\'s screen height is outside the range for the shot size',
-    fix: 'follow the cause in the message: frame the subject alone or stage the others closer; for a subject that grows later in the shot (a pose, a rider), make that change at the end of the shot before; at the closest zoom use a looser size. "zoom" never clears it (the range scales with it); a push-in or pull-out is judged at its start' },
-  'edge-cut': { severity: 'warning', catches: 'a head cut by the frame edge (its eyes at or past the edge; not for a rig with no face), or a sliver of an actor (under 25% of it in frame, head out; a walker only at the top or bottom) held for 0.5 s or more',
-    fix: 'apply the change in the message, tried on the recompiled film: a camera change ("offset" or "size") that frames the actor in or out without a new edge-cut, tangent or halo, else a staging (move where the actor stands as the shot starts and where it goes in it)' },
-  tangent: { severity: 'warning', catches: 'an actor\'s outline just touching a frame edge (an ear or a tail tip against the top, feet just above the bottom; measured on the part of the drawing facing the frame) for 0.5 s or more',
-    fix: 'apply the change in the message, tried on the recompiled film: a camera change ("offset" or "zoom") that clears the edge or lets it cut clearly without a new framing fault, else a staging (move where the actor stands as the shot starts and where it goes in it)' },
-  halo: { severity: 'warning', catches: 'the sun or moon disc of the sky touching or behind a head (of a rig with a face) for 0.5 s or more',
-    fix: 'apply the change in the message, tried on the recompiled film: a camera change ("offset", "angle", "size", "zoom") or a staging that moves the head off the disc without a new framing fault; else re-block the scene under a clear sky' },
-  'caption-face': { severity: 'warning', catches: 'the caption box overlaps a speaker\'s face (a rig with a face)',
-    fix: 'stage the speaker higher in frame (an "offset" or the "high" angle), or a tighter size' },
-  'cut-jump': { severity: 'warning', catches: 'consecutive shots of the same set with nearly identical framing',
-    fix: 'change the size (a zoom ratio of at least 1.2), the subject or the angle between the two shots, or make them one shot' },
-  continuity: { severity: 'warning', catches: 'an actor\'s pose (lying, low: sitting or crouching, standing, raised: sitting or rearing up) or place changes across a cut in the same set (or a dissolve to a shot too short to pass time) without the change being seen',
-    fix: 'let the change happen on screen (a walk, a pose with a "dur") before or after the cut, start the shot where the last one left them, or cut away first' },
-  axis: { severity: 'warning', catches: 'the left/right order of two talking actors flips across a cut',
-    fix: 'keep each talker on their side for the whole conversation, or show the crossing inside a shot' },
-  teleport: { severity: 'error', catches: 'an actor moves more than 40 px (rig units) between two frames inside a shot',
-    fix: 'walk there instead of placing, or place while the actor is off screen' },
-  scale: { severity: 'warning', catches: 'actor scale differs from set.scaleAt by more than 15% (perched actors use the anchor depth)',
-    fix: 'usually an engine bug or a custom kit\'s anchor with a wrong depth: check the anchor on the set sheet' },
-  timing: { severity: 'warning', catches: 'overlapping dialogue, shots seen on their own (after a dissolve or fade) for under 1.2 s, captions faster than 20 characters per second',
-    fix: 'hold the shot longer ("hold", "dur") so it plays 1.2 s on its own after a dissolve or fade, space the lines ("after"), or shorten the caption' },
-};
+export { RULES, allowProblems };
 
 export const LIMITS = {
   minVisible: 0.6,        // offscreen-speaker
@@ -108,8 +82,6 @@ const BARE_NAME = { wide: 'body', full: 'body', medium: 'upper part', close: 'he
 /** A rig with no face: its own `faceless` (true / false) when it says, else only the 'neutral' expression. */
 export const faceless = R => (typeof R?.faceless === 'boolean' ? R.faceless : !(R?.expressions?.length > 1));
 const regionName = (size, R) => (faceless(R) ? BARE_NAME : REGION_NAME)[size];
-// The rules a shot may keep (warnings; a collision is one while a beat brings the two together).
-const KEEPABLE = Object.keys(RULES).filter(r => RULES[r].severity === 'warning' || r === 'collision');
 const MOVES = new Set(['walk', 'run', 'hop', 'fly', 'enter', 'exit']);
 const ORDER = Object.keys(RULES);
 const HELD = new Set(['edge-cut', 'tangent', 'halo']);   // rules whose faults must last LIMITS.edgeHold
@@ -126,26 +98,6 @@ export function lintPlan(plan, opts = {}) {
   const bad = allowProblems(plan.film);
   if (bad.length) throw new ValidationError(bad);
   return new Linter(plan, opts).run();
-}
-
-/**
- * A shot's lint block, "lint": { "allow": [rule names], "note": "why" }, checked on the film JSON: allow is a
- * non-empty list of rules that can warn, note says why. → problems [{ path, message }] as validateFilm lists them.
- */
-export function allowProblems(film) {
-  const out = [], P = (path, m) => out.push({ path, message: `${path}: ${m}` });
-  (Array.isArray(film?.scenes) ? film.scenes : []).forEach((sc, i) => (Array.isArray(sc?.shots) ? sc.shots : []).forEach((sh, j) => {
-    const L = sh?.lint, p = `scenes[${i}].shots[${j}].lint`;
-    if (L === undefined) return;
-    if (!L || typeof L !== 'object' || Array.isArray(L)) { P(p, 'must be an object { "allow": [rule names], "note": "why" }'); return; }
-    for (const k of Object.keys(L)) if (k !== 'allow' && k !== 'note') P(`${p}.${k}`, 'unknown field (a shot\'s lint block takes "allow" and "note")');
-    if (!Array.isArray(L.allow) || !L.allow.length) P(`${p}.allow`, `must be a non-empty array of rule names (${KEEPABLE.join(', ')})`);
-    else L.allow.forEach((r, k) => {
-      if (!KEEPABLE.includes(r)) P(`${p}.allow[${k}]`, RULES[r] ? `"${r}" is an error: errors are never kept, fix it` : `unknown rule ${JSON.stringify(r)} (one of ${KEEPABLE.join(', ')})`);
-    });
-    if (typeof L.note !== 'string' || !L.note.trim()) P(`${p}.note`, 'say why the warning is intended ("note": "…")');
-  }));
-  return out;
 }
 
 // ───────────── geometry ─────────────
@@ -682,10 +634,12 @@ class Linter {
     }
     const live = ids.map(id => c.states.get(id)).filter(s => s && s.visible && s.mode !== 'off' && s.alpha > 0.05);
     if (!live.length) return;                                          // off stage or gone: nothing to frame
-    // a push-in / pull-out that ends at another size or zoom is judged at its starting size: the fill at that zoom
-    const cs = this.srec.get(shot.id)?.def?.camera || {}, fr = shot.frames || {};
+    // a push-in / pull-out that ends at another size or zoom is judged at its starting size: the fill at that zoom; a
+    // dolly through depth at its first frame: each subject at the scale its depth had then
+    const cs = this.srec.get(shot.id)?.def?.camera || {}, fr = shot.frames || {}, { dolly } = this.crop(shot);
     const resized = (shot.move === 'push-in' || shot.move === 'pull-out') && !!(cs.to || cs.toOn || cs.zoomTo) && fr.from?.zoom > 0;
-    const zk = resized ? fr.from.zoom / c.cam.zoom : 1, fill = g => ((g[3] - g[1]) / H) * zk;
+    const z0 = dolly ? this.startZoom(shot) : null;
+    const zkOf = a => (resized ? fr.from.zoom / c.cam.zoom : z0 && a.zoom > 0 && z0.get(a.id) > 0 ? z0.get(a.id) / a.zoom : 1), fill = (g, a) => ((g[3] - g[1]) / H) * zkOf(a);
     const f = spec.f * (cs.zoom ?? 1), lo = 0.5 * f, hi = Math.min(1.35 * f, 1.15);
     // Each subject as the camera frames it: alone, or a carrier together with its riders (one figure), whichever is
     // nearer the size (the camera frames riders that stay on for most of the shot). g: the whole body, gv: the part
@@ -696,13 +650,17 @@ class Linter {
       return box === a.screenBox ? a : { ...a, screenBox: box, visibleBox: vis };
     };
     const subs = live.map(s => c.byId.get(s.id)).filter(Boolean).map(a => {
-      const fig = figure(a), near = x => Math.abs(Math.log(Math.max(1e-4, fill(framedRegion(x, size))) / f));
+      const fig = figure(a), near = x => Math.abs(Math.log(Math.max(1e-4, fill(framedRegion(x, size), a)) / f));
       const x = fig !== a && near(fig) < near(a) ? fig : a;
       return { a, g: framedRegion(x, size), gv: framedRegion(seen(x), size) };
     });
     if (!subs.length) return;
+    // a crop on purpose (a focus, a zoom above 1 on subjects with no face, a dolly through depth): the subject may
+    // fill the frame or leave it, so only too small is judged
+    const cropped = this.crop(shot, subs.map(s => s.a)).crop;
     const what = R => { const n = regionName(size, R); return n === 'body' || n.endsWith('region') || faceless(R) ? n : `${n} region`; };
     if (!subs.some(s => frac(s.gv, W, H) >= 0.5)) {
+      if (cropped) return;
       // entering or leaving, a wade going under (in frame, below the waterline), or a move toward other subjects
       const under = subs.some(s => frac(s.g, W, H) >= 0.5);
       if (!under && !live.some(s => s.action === 'enter' || s.action === 'exit') && !(resized && cs.toOn)) {
@@ -715,18 +673,18 @@ class Linter {
     // is seen, too small is the whole body (a wade sinking out of sight is not a framing fault)
     let best = null, U = null, V = null;
     for (const { a, g, gv } of subs) {
-      const m = fill(g);
-      if (!best || m > best.m) best = { a, g, gv, m, mv: fill(gv) };
+      const m = fill(g, a);
+      if (!best || m > best.m) best = { a, g, gv, m, mv: fill(gv, a) };
       U = U ? [Math.min(U[0], a.screenBox[0]), Math.max(U[1], a.screenBox[2])] : [a.screenBox[0], a.screenBox[2]];
       V = V ? [Math.min(V[0], g[1]), Math.max(V[1], g[3])] : [g[1], g[3]];
     }
     const big = best.mv > hi;
-    if (!big && best.m >= lo) return;
+    if ((big && cropped) || (!big && best.m >= lo)) return;
     const hfit = spec.region === 'head' || spec.region === 'face' ? 0.94 : 0.86;
     if (!big) {
       if (live.length < ids.length) return;                            // someone not on yet: framed at their destination
       if (subs.length > 1 && (U[1] - U[0]) / W > 0.55 * spec.wmax) return;   // a two-shot fitted to the width
-      if (subs.length > 1 && ((V[1] - V[0]) / H) * zk > 0.55 * hfit) return;   // ... or to the height (one above the other)
+      if (subs.length > 1 && ((V[1] - V[0]) / H) * zkOf(best.a) > 0.55 * hfit) return;   // ... or to the height (one above the other)
       if (shot.move === 'track') { const v = Math.max(0, ...[...this.motion(shot).values()].map(m => m.v)); if (v > 1 && c.cam.zoom <= (1.05 * W / v) * 1.03) return; }   // fast runners framed looser on purpose
     }
     const zmax = ZMAX * Math.max(1, Math.min(W, H) / 1080) * 0.98;
@@ -936,6 +894,23 @@ class Linter {
     return Math.abs(s2.t0 - shot.t0) < 1e-6 && Math.abs(s2.t1 - shot.t1) < 1e-6 && this.clears(r, this.view(shot, s2, { id: a.id, base, p }));
   }
   camSpec(shot) { return this.srec.get(shot.id)?.def?.camera || {}; }
+  // A shot that frames part of its subjects on purpose (DESIGN §11): a camera `focus`, a `zoom` above 1 on subjects
+  // that all have no face (`subs`: the sampled subjects), or a dolly through depth (a `zTo` other than its `z`).
+  // → { crop, dolly }
+  crop(shot, subs = []) {
+    const cs = this.camSpec(shot), dolly = cs.zTo !== undefined && cs.zTo !== (cs.z ?? 0);
+    const bare = subs.length > 0 && subs.every(a => a.st?.R && faceless(a.st.R));
+    return { crop: dolly || cs.focus !== undefined || ((cs.zoom ?? 1) > 1 && bare), dolly };
+  }
+  // Each subject's screen px per world px at its depth on the shot's first frame (a dolly is judged there). → Map id → zoom
+  startZoom(shot) {
+    this._z0 ||= new Map();
+    if (!this._z0.has(shot.id)) {
+      const t = Math.round(shot.t0 * this.fps) / this.fps, info = frameInfo(this.plan, t);
+      this._z0.set(shot.id, new Map(info.shot === shot.id ? info.actors.map(a => [a.id, a.zoom]) : []));
+    }
+    return this._z0.get(shot.id);
+  }
   // A screen point in world px at a sample.
   world(c, [x, y]) { const cam = c.cam; return [(x - this.W / 2) / cam.zoom + cam.cx, (y - this.H / 2) / cam.zoom + cam.cy]; }
   // Moving an actor that isn't framed (not in "on") moves only it. Sideways a screen px is 1 / zoom world px; up and
@@ -970,6 +945,7 @@ class Linter {
     const cut = this.on('edge-cut'), tan = this.on('tangent');
     if (!cut && !tan) return;
     const W = this.W, H = this.H, T = LIMITS.tangent * H, z = c.cam.zoom, subj = new Set(c.shot.on || []), size = c.shot.size || 'wide', zk = this.camSpec(c.shot).zoom || 1;
+    const crop = this.crop(c.shot, c.actors.filter(a => subj.has(a.id)));
     const side = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
     // how far the picture moves toward edge e to take the in-frame box I out of frame (a little past it)
     const outOf = (e, I) => ({ left: I[2] + 0.02 * W, right: W - I[0] + 0.02 * W, top: I[3] + 0.02 * H, bottom: H - I[1] + 0.02 * H })[e];
@@ -1008,9 +984,10 @@ class Linter {
       if (bx[0] > T && bx[1] > T && bx[2] < W - T && bx[3] < H - T) continue;
       sil ||= silhouette(this.plan, c.info, a, st);
       if (!sil.box) continue;
-      // a sliver: a little of a big drawing, its head out of frame (a walker's only at the top or bottom)
+      // a sliver: a little of a big drawing, its head out of frame (a walker's only at the top or bottom); not of a
+      // subject its shot crops on purpose, nor of anything a dolly through depth sweeps past the frame's edges
       if (cut && sil.frac < LIMITS.sliver && sil.area >= 0.001 * W * H && !(hx >= 0 && hx <= W && hy >= 0 && hy <= H)
-        && ![...ridersOf(c.states, a.id)].some(r => c.byId.get(r)?.vis > 0.3)) {
+        && ![...ridersOf(c.states, a.id)].some(r => c.byId.get(r)?.vis > 0.3) && !(crop.dolly || (own && crop.crop))) {
         const I = sil.inside, e = Object.keys(side).reduce((m, k) => { const g = { left: I[0], right: W - I[2], top: I[1], bottom: H - I[3] }; return g[k] < g[m] ? k : m; }, 'left');
         if (!sides.includes(e)) continue;
         // the whole drawing out (toward the edge), or for a subject all of it in (away from it)

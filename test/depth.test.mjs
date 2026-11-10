@@ -8,7 +8,7 @@ import { createCanvas } from '@napi-rs/canvas';
 import { loadFilm } from '../engine/film/load.mjs';
 import { compile } from '../engine/film/compile.mjs';
 import { drawFrame, frameInfo, gradeFocus } from '../engine/film/frame.mjs';
-import { depthScale, depthFade, project, LENS, NEAR, NEAR_FADE } from '../engine/film/camera.mjs';
+import { depthScale, depthFade, project, LENS, NEAR_FADE, PASS, PASS_FADE } from '../engine/film/camera.mjs';
 import { OVERLAY_LAYERS } from '../engine/film/validate.mjs';
 import { makeSet } from '../engine/set/set.mjs';
 import { registerKit } from '../engine/set/kits/index.mjs';
@@ -48,11 +48,11 @@ test('projection: p = (D − c)/(D + z − c); the stage is 1 for any camera dep
   assert.ok(Math.abs(sx - (400 + 200 * 2 * 0.6)) < 1e-9 && Math.abs(sy - 200) < 1e-9 && Math.abs(s - 1.2) < 1e-12);
   // a stage point projects exactly as the 2D camera always did
   assert.deepEqual(project({ cx: 1000, cy: 600, zoom: 1.7 }, 800, 400, 1234, 567).slice(0, 2), [(1234 - 1000) * 1.7 + 400, (567 - 600) * 1.7 + 200]);
-  // the near cull and fade (distance d = D + z − c from the lens)
+  // the near cull and fade (distance d = D + z − c from the lens): a thing passes the lens
   assert.equal(depthFade(cam, 0), 1);
-  assert.equal(depthFade(cam, -1500 + NEAR * 2000 - 1), 0);
-  assert.equal(depthFade(cam, -1500 + NEAR_FADE * 2000 + 1), 1);
-  const mid = depthFade(cam, -1500 + ((NEAR + NEAR_FADE) / 2) * 2000);
+  assert.equal(depthFade(cam, -1500 + PASS * 2000 - 1), 0);
+  assert.equal(depthFade(cam, -1500 + PASS_FADE * 2000 + 1), 1);
+  const mid = depthFade(cam, -1500 + ((PASS + PASS_FADE) / 2) * 2000);
   assert.ok(mid > 0.3 && mid < 0.7, `half way through the fade: ${mid}`);
   assert.equal(depthFade({ cx: 0, cy: 0, zoom: 1 }, 0), 1);
   assert.equal(LENS, 2304);
@@ -199,16 +199,16 @@ test('camera z / zTo: a dolly keeps its axis and grows the stage by (D − z)/(D
 
 test('the near cull: an actor the camera flies past fades and leaves the picture (and frameInfo)', async () => {
   const film = tiny({ actors: { hare: { at: 'x:1400,y:1060', face: 'right' }, fox: { at: 'x:1250,y:1060', face: 'right', z: -1200 } },
-    shots: [{ id: 'fly', camera: { size: 'wide', on: ['hare'], zTo: 1000 }, dur: 4, beats: [] }] });
+    shots: [{ id: 'fly', camera: { size: 'wide', on: ['hare'], zTo: 1150 }, dur: 4, beats: [] }] });
   const plan = compile(await loadFilm(film)), s = shotOf(plan, 'fly');
   const fox = t => frameInfo(plan, t).actors.find(a => a.id === 'fox');
   assert.ok(fox(0.01) && fox(0.01).alpha === 1, 'at first it is whole');
-  // d = D − 1200 − c: fades from NEAR_FADE·D, gone under NEAR·D
+  // d = D − 1200 − c: fades from PASS_FADE·D, gone under PASS·D
   const tc = t => s.cameraAt(t).z, seen = [];
   for (let t = 0; t < 4; t += 1 / 24) { const a = fox(t), d = LENS - 1200 - tc(t); seen.push([d, a ? a.alpha : 0]); }
   for (const [d, a] of seen) {
-    if (d > NEAR_FADE * LENS + 1) assert.equal(a, 1);
-    if (d < NEAR * LENS - 1) assert.equal(a, 0);
+    if (d > PASS_FADE * LENS + 1) assert.equal(a, 1);
+    if (d < PASS * LENS - 1) assert.equal(a, 0);
   }
   assert.ok(seen.some(([, a]) => a > 0.05 && a < 0.95), 'and fades in between');
 });

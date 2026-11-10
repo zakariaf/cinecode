@@ -1,29 +1,37 @@
 // Planets: the painter shared by the `planet` rig (engine/cast/planet.mjs) and the space effects (engine/effects/:
 // sizerow, moonlets, sunglow, …). Film code draws a world with it too: import { drawBody } from 'cinecode/paint/planets'.
-// Bodies: saturn, jupiter, earth, mars, venus, mercury, uranus, neptune, moon (Earth's), titan, sun.
+// Bodies: saturn, jupiter, earth, mars, venus, mercury, uranus, neptune, moon (Earth's), titan, pluto, charon, sun.
 //
 // drawBody(ctx, P, cx, cy, R, o) paints one world centred at (cx, cy) with equatorial radius R (ctx units): its globe
 // (latitude bands seen from the sub-observer latitude, spots, continents, clouds, craters), the shading of a sphere lit
 // from the upper left (a soft fall-off and the house's hard lavender cel crescent), the ink outline, and rings in two
-// passes (the whole ring behind the globe, with the globe's shadow on its far half; the near half again over the globe).
+// passes (the whole ring behind the globe; the near half again over the globe: an opaque ring hides the limb, a
+// see-through one, the C ring, is laid once over the globe and its outline, so no line shows where it crosses the limb).
+// On the rings lies the globe's shadow: the cylinder of shadow the globe casts away from the Sun, cut by the ring plane,
+// soft-edged (sunDir, ringShade). The rings are drawn seen from the north whatever the sign of tilt.
 // P: a body name ('saturn') or { body, tilt, roll, axis, spin, … } (params override the preset). o: { t (s, for the
 // spin), light ([x, y] toward the light in ctx's frame; default upper left), lw (ink width, ctx units), ink (false: no
 // outline) }.
 //
 // Proportions are true where they are known: Saturn's polar radius is 0.902 of its equatorial one; its C ring spans
 // 1.24–1.53, the B ring 1.53–1.95, the Cassini Division 1.95–2.03, the A ring 2.03–2.27 equatorial radii, with the
-// Encke Gap at 2.21. Colours are a storybook's, not a photograph's.
+// Encke Gap at 2.21. Colours are a storybook's, not a photograph's, after NASA's: Jupiter's pale Equatorial Zone between
+// its two dark belts and the Great Red Spot at 22°S, Neptune's Great Dark Spot at 20°S with its white companion cloud,
+// Pluto's bright heart (Tombaugh Regio, 1 600 km across: two lobes, the western one Sputnik Planitia) and dark red
+// Cthulhu Macula, Charon grey with its red north pole.
 //
 // radiusOf(body) is a body's true equatorial radius in km (RADIUS_KM), for true relative sizes: Earth / Saturn = 0.1058.
 // globeOf(api, who) finds a planet actor's globe for an effect (the overlay / custom-beat api), at its depth.
-import { ell, ink, clamp, rng, INK } from '../core/lib.mjs';
+// sunDir(light, tilt) and ringShade(S, ob, u, v): the Sun's direction in a ringed body's frame and how much of it the
+// globe hides at a point of its ring plane, for an effect that draws on the rings (ringfield).
+import { ell, ink, clamp, rng, smooth, INK } from '../core/lib.mjs';
 import { SHADE, lineScale } from '../core/style.mjs';
 
 export const R0 = 50;   // the planet rig's equatorial radius, in local units
 
-// True equatorial radii, km (the Moon is Earth's).
+// True equatorial radii, km (the Moon is Earth's; Pluto and Charon from New Horizons).
 export const RADIUS_KM = { sun: 695700, mercury: 2439.7, venus: 6051.8, earth: 6378.1, moon: 1738.1, mars: 3396.2, jupiter: 71492, saturn: 60268,
-  uranus: 25559, neptune: 24764, titan: 2574.7 };
+  uranus: 25559, neptune: 24764, titan: 2574.7, pluto: 1188.3, charon: 606 };
 export const radiusOf = body => RADIUS_KM[body] ?? RADIUS_KM.saturn;
 
 const SATURN_RINGS = [
@@ -43,10 +51,12 @@ export const BODIES = {
   saturn: { ob: 0.902, tilt: 0.38, roll: -0.1, spin: 0.035, base: '#bfa985', wave: 0.012, rings: SATURN_RINGS,
     bands: [[0.86, '#cdb48a'], [0.66, '#dcc597'], [0.47, '#e6d1a1'], [0.3, '#d6b884'], [0.16, '#e9d4a2'], [0.02, '#f2e2b4'], [-0.14, '#ead4a0'],
       [-0.26, '#d4b27c'], [-0.4, '#e8d3a2'], [-0.56, '#dcc496'], [-0.72, '#ccb68e'], [-0.86, '#b9ae94']] },
-  jupiter: { ob: 0.935, axis: 0.05, roll: 0, spin: 0.05, base: '#b8a68e', wave: 0.02,
-    bands: [[0.86, '#cbb797'], [0.7, '#e6d6b6'], [0.52, '#c39a70'], [0.4, '#eee2c6'], [0.28, '#c28656'], [0.12, '#f3e8ce'], [-0.07, '#c8905c'],
-      [-0.22, '#efe2c4'], [-0.36, '#bf9068'], [-0.52, '#e5d5b4'], [-0.7, '#c9b391'], [-0.86, '#b6a68e']],
-    spots: [{ lon: 0.7, lat: 0.36, w: 0.2, h: 0.1, col: '#c25b3a', ring: '#e8c8a0' }] },
+  // the pale Equatorial Zone (7°S–7°N) between the dark North (7°–17°N) and South (7°–20°S) Equatorial Belts, the
+  // tropical zones and temperate belts, grey-brown poles; the Great Red Spot (16 000 km across) at 22°S, in its hollow
+  jupiter: { ob: 0.935, axis: 0.05, roll: 0, spin: 0.05, base: '#b6a68e', wave: 0.02,
+    bands: [[0.86, '#bcb09a'], [0.68, '#cbb797'], [0.52, '#e3d4b4'], [0.41, '#c69a70'], [0.29, '#eee2c6'], [0.12, '#b97d50'], [-0.12, '#f2e8d0'],
+      [-0.34, '#bb8459'], [-0.45, '#efe4c8'], [-0.54, '#bf9670'], [-0.66, '#e2d3b2'], [-0.86, '#c9b896']],
+    spots: [{ lon: 0.7, lat: -0.375, w: 0.115, h: 0.07, col: '#c0603e', ring: '#ead2b0' }] },
   earth: { ob: 0.997, axis: 0.25, roll: 0.15, spin: 0.08, base: '#3a6db6', bands: [[-0.86, '#3a6db6']],
     land: [[0.2, 0.55, 0.35, 0.28, '#5c8a46'], [0.55, 0.15, 0.22, 0.38, '#6b8f48'], [0.62, -0.4, 0.12, 0.2, '#8e8250'], [2.2, 0.45, 0.6, 0.3, '#6e9050'],
       [2.6, -0.1, 0.2, 0.3, '#8a7e4c'], [3.4, -0.45, 0.24, 0.18, '#b39a5e'], [4.6, 0.6, 0.25, 0.22, '#5e8a48'], [5.0, 0.15, 0.18, 0.4, '#6c9050'], [5.3, -0.35, 0.1, 0.22, '#7c8c4a']],
@@ -61,11 +71,19 @@ export const BODIES = {
     land: [[0.3, 0.35, 0.3, 0.22, '#9e998f'], [-0.2, 0.05, 0.25, 0.2, '#a29d93'], [0.5, -0.1, 0.22, 0.25, '#9a958c']] },
   uranus: { ob: 0.977, tilt: 0.55, roll: 1.42, axis: 0.55, spin: 0.03, base: '#a6d8dc', wave: 0.005, rings: URANUS_RINGS,
     bands: [[0.5, '#a9dde0'], [0, '#b0e2e4'], [-0.5, '#b9e6e6']] },
+  // the Great Dark Spot (Voyager 2) at 20°S, a white methane cloud along its southern edge
   neptune: { ob: 0.983, axis: 0.2, roll: 0.05, spin: 0.04, base: '#3d5fc0', wave: 0.01,
     bands: [[0.6, '#3a5ab8'], [0.3, '#4468c8'], [-0.1, '#4a70cf'], [-0.45, '#4064c4'], [-0.75, '#3a5cbc']],
-    spots: [{ lon: 0.4, lat: 0.3, w: 0.16, h: 0.08, col: '#273e8e' }] },
+    spots: [{ lon: 0.4, lat: -0.34, w: 0.16, h: 0.08, col: '#273e8e' }, { lon: 0.44, lat: -0.43, w: 0.11, h: 0.025, col: '#e6ecf6' }] },
   titan: { ob: 1, axis: 0.1, roll: 0, spin: 0.01, base: '#d39a48', wave: 0.02, haze: '#e8b864',
     bands: [[0.6, '#cf9644'], [0.2, '#d8a24e'], [-0.3, '#dca854'], [-0.7, '#c99a58']] },
+  // New Horizons: pale tan, a lighter north, the bright nitrogen-ice "heart" (Tombaugh Regio, centred at 25°N) and the
+  // dark red-brown Cthulhu Macula west of it along the equator
+  pluto: { ob: 1, axis: 0.15, roll: 0, spin: 0.01, base: '#bf9f80', bands: [[0.55, '#d4c0a8'], [0.2, '#c9ac8c'], [-0.86, '#bf9f80']],
+    land: [[-0.65, -0.08, 0.42, 0.16, '#6f4634'], [-1.2, -0.14, 0.3, 0.12, '#7a4c36'], [2.6, -0.1, 0.5, 0.14, '#764a35']], craters: 8, crater: '#a88a6e',
+    heart: [0.45, 0.42, 1.6, 0.95, '#e4d7c3', '#f5efe5'] },
+  // grey water ice, its north pole stained red-brown (Mordor Macula)
+  charon: { ob: 1, axis: 0.2, roll: 0, spin: 0.01, base: '#9c9690', bands: [[0.82, '#7c5444'], [0.7, '#94827a'], [-0.86, '#9c9690']], craters: 16, crater: '#85807a' },
   sun: { ob: 1, axis: 0, roll: 0, spin: 0.01, base: '#ffd46a', bands: [[-0.86, '#ffe08a']], emissive: true },
 };
 
@@ -95,6 +113,10 @@ export function lightIn(ctx) {
 
 const TAU = Math.PI * 2;
 const fillPts = (c, P) => { c.beginPath(); P.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.fill(); };
+// screen pixels per unit of ctx (a rig's context knows the canvas transform under it)
+const pxOf = c => { if (c.pxPerUnit) return c.pxPerUnit(); const m = c.getTransform(); return Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1; };
+// clip to a globe's disc (R, Rp), out by m ctx units
+const discClip = (c, disc, R, Rp, m = 0) => { const kx = 1 + m / R, ky = 1 + m / Rp; c.beginPath(); disc.forEach(([x, y], i) => (i ? c.lineTo(x * kx, y * ky) : c.moveTo(x * kx, y * ky))); c.closePath(); c.clip(); };
 // A point at longitude lam (from the central meridian, + toward +x) and latitude phi on a globe (R, Rp) seen from
 // sub-observer latitude Bo: [x, y, mu] (mu > 0: on the near side; y down is south).
 const onGlobe = (lam, phi, R, Rp, Bo) => [R * Math.cos(phi) * Math.sin(lam), Rp * (-Math.sin(phi) * Math.cos(Bo) + Math.cos(phi) * Math.cos(lam) * Math.sin(Bo)),
@@ -128,16 +150,78 @@ function onSphere(c, lam, phi, w, h, col, R, Rp, Bo, a = 1, seed = 1) {
   c.restore();
 }
 
-function ringHalf(c, B, R, tilt, half, light, lw, rp, t) {
-  // No seam: the far pass paints the whole ring (the globe then hides what is behind it); the near pass repaints only
-  // the near half where it crosses the globe, clipped to the globe's disc (and its ink line) and to the near side (y ≥ 0).
-  const sy = Math.sin(tilt), Rp = R * rp, front = half === 'front', a0 = 0, a1 = front ? Math.PI : 2 * Math.PI, ccw = false;
-  const band = (r0, r1) => { c.beginPath(); c.ellipse(0, 0, r1 * R, Math.max(0.02, Math.abs(r1 * R * sy)), 0, a0, a1, ccw); c.ellipse(0, 0, r0 * R, Math.max(0.02, Math.abs(r0 * R * sy)), 0, a1, a0, !ccw); c.closePath(); };
+// Pluto's heart (Tombaugh Regio) on the sphere: H = [lon, lat (radians), width, height (radians), colour, the western
+// lobe's colour]: two lobes, the western one (Sputnik Planitia, brighter) larger and running down into the point, which
+// leans south-west. What has turned past the limb is laid along it.
+function heartOn(c, H, R, Rp, Bo, ph) {
+  const [lon, lat, w, h, col, west] = H, out = [], sp = [];
+  const at = (x, y) => {
+    const [X, Y, mu] = onGlobe(lon - ph + (x * w) / 2, lat + (y * h) / 2, R, Rp, Bo);
+    if (mu >= 0) return [X, Y, mu];
+    const k = 1 / (Math.hypot(X / R, Y / Rp) || 1); return [X * k, Y * k, mu];
+  };
+  for (let i = 0; i < 72; i++) {
+    const t = (i / 72) * TAU, y = (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) / 16 + 0.155;
+    let x = Math.sin(t) ** 3;
+    if (x > 0) x *= 0.82;
+    out.push(at(x - 0.22 * clamp((0.4 - y) / 1.3), y));
+    // Sputnik Planitia: an oval over the western lobe, down into the point
+    sp.push(at(-0.4 + 0.42 * Math.cos(t) - 0.12 * (0.5 - 0.5 * Math.sin(t)), -0.15 + 0.72 * Math.sin(t)));
+  }
+  if (!out.some(p => p[2] > 0)) return;
+  c.save(); c.fillStyle = col; fillPts(c, out); c.clip(); c.fillStyle = west; fillPts(c, sp); c.restore();
+}
+
+// The Sun's direction [u, v, w] in a ringed body's frame (u: the picture's x, v: in the ring plane toward the viewer,
+// w: the north pole), from `light` (toward the light on the picture, in the body's rolled frame) as the globe's shading
+// has it (the sub-solar point at 0.55 of the radius toward it), its height over the ring plane kept within SUN_EL
+// (Saturn's is at most 27°; at 17° the shadow reaches across all its rings). tilt: the rings' opening (its sign is
+// ignored, as drawBody draws the rings seen from the north).
+const SUN_EL = 0.3, PHASE = 0.55, PEN = 0.07;   // PEN: the shadow's soft edge, ± this many globe radii
+export function sunDir(light, tilt) {
+  const L = Math.hypot(light[0], light[1]) || 1, x = (light[0] / L) * PHASE, y = (light[1] / L) * PHASE, z = Math.sqrt(1 - PHASE * PHASE);
+  const st = Math.abs(Math.sin(tilt)), ct = Math.cos(tilt), u = x, v = y * st + z * ct, w = -y * ct + z * st;
+  const el = clamp(Math.asin(clamp(w, -1, 1)), -SUN_EL, SUN_EL), h = Math.hypot(u, v) || 1;
+  return [(Math.cos(el) * u) / h, (Math.cos(el) * v) / h, Math.sin(el)];
+}
+// The globe's shadow on its ring plane: the points (p along the Sun's direction in the plane, q across it, in globe
+// radii) whose line to the Sun passes through the globe (polar radius ob): p < 0 and (ĉ p)² + q² < 1, ĉ the Sun's
+// height over the plane in the frame where the globe is round. → [the Sun's direction in the plane (radians), ĉ]
+const shadowOf = (S, ob) => [Math.atan2(S[1], S[0]), Math.max(0.05, Math.abs(S[2] / ob) / Math.hypot(S[0], S[1], S[2] / ob))];
+// How much of the Sun the globe hides at the point (u, v) of the ring plane (globe radii): 0 (lit) .. 1, soft-edged.
+export function ringShade(S, ob, u, v) {
+  const [ang, cc] = shadowOf(S, ob), p = u * Math.cos(ang) + v * Math.sin(ang), q = -u * Math.sin(ang) + v * Math.cos(ang);
+  return p >= 0 ? 0 : 1 - smooth(1 - PEN, 1 + PEN, Math.hypot(cc * p, q));
+}
+
+const OPAQUE = 0.6;   // a ring more opaque than this hides the globe's limb; a thinner one (the C ring) is seen through
+
+// The outer edge of the globe's ink line (ink() replayed into a recorder; the disc itself with no ink): what the globe
+// and its line cover. A clip there meets the line's own antialiased edge, so a ring laid over both shows no seam.
+function rimOf(disc, lw) {
+  if (lw <= 0) return disc;
+  const subs = [], rec = { beginPath() {}, moveTo(x, y) { subs.push([[x, y]]); }, lineTo(x, y) { subs[subs.length - 1].push([x, y]); }, closePath() {}, fill() {} };
+  ink(rec, disc, lw, { seed: 23 });
+  const area = P => Math.abs(P.reduce((s, [x, y], i) => { const [u, v] = P[(i + 1) % P.length]; return s + x * v - u * y; }, 0));
+  return subs.reduce((a, b) => (area(b) > area(a) ? b : a));
+}
+
+function ringHalf(c, B, R, tilt, half, lw, rp, S, disc, rim) {
+  // The far pass paints the whole ring (the globe then hides what is behind it: no seam). The near pass repaints the
+  // near half where it crosses the globe: an opaque ring clipped to the globe's disc out 0.6 px (else the globe's
+  // antialiased edge shows as a dark hairline; the globe's ink is left out under it), a see-through one to the outer
+  // edge of the globe's ink line (`rim`), over the globe and its line (painted again beside the limb, or over the
+  // globe's bare antialiased edge, it shows the limb as a light line).
+  // The rings are drawn as seen from the north (the near half below the centre) whatever the sign of tilt.
+  const sy = Math.abs(Math.sin(tilt)), Rp = R * rp, front = half === 'front', a0 = 0, a1 = front ? Math.PI : 2 * Math.PI, ccw = false;
+  const band = (r0, r1) => { c.beginPath(); c.ellipse(0, 0, r1 * R, Math.max(0.02, r1 * R * sy), 0, a0, a1, ccw); c.ellipse(0, 0, r0 * R, Math.max(0.02, r0 * R * sy), 0, a1, a0, !ccw); c.closePath(); };
   // nearly edge-on: a thin bright line, the near half crossing the globe
-  const thin = Math.abs(sy) * R < 0.6;
-  c.save();
-  if (front) { const m = Math.max(lw * 0.6, 0.5); c.beginPath(); c.ellipse(0, 0, R + m, Rp + m, 0, 0, TAU); c.clip(); c.beginPath(); c.rect(-3 * R, 0, 6 * R, 3 * R); c.clip(); }
-  for (const q of B.rings) {
+  const thin = sy * R < 0.6, last = B.rings[B.rings.length - 1], ro = last.r1;
+  const see = q => !thin && q.a <= OPAQUE;
+  const px = pxOf(c), onDisc = m => discClip(c, disc, R, Rp, m / px);
+  // the near half of the rim, as a clip that adds nothing to a rig's box (its context's mask)
+  const onRim = () => { c.beginPath(); rim.forEach(([x, y], i) => (i ? c.lineTo(x, Math.max(0, y)) : c.moveTo(x, Math.max(0, y)))); c.closePath(); if (c.mask) c.mask(); else c.clip(); };
+  const paint = q => {
     c.globalAlpha = q.a; c.fillStyle = q.col; band(q.r0, q.r1); c.fill();
     // ringlets: fine concentric lines of lighter and darker ice
     if (q.lets && !thin) {
@@ -145,26 +229,51 @@ function ringHalf(c, B, R, tilt, half, light, lw, rp, t) {
       for (let i = 0; i < q.lets; i++) {
         const rr = q.r0 + (q.r1 - q.r0) * ((i + 0.5 + (r() - 0.5) * 0.6) / q.lets), dark = r() < 0.5;
         c.globalAlpha = 0.18 + 0.2 * r(); c.strokeStyle = dark ? '#8c7c62' : '#fff6de'; c.lineWidth = (0.25 + 0.5 * r()) * R / R0;
-        c.beginPath(); c.ellipse(0, 0, rr * R, Math.max(0.02, Math.abs(rr * R * sy)), 0, a0, a1, ccw); c.stroke();
+        c.beginPath(); c.ellipse(0, 0, rr * R, Math.max(0.02, rr * R * sy), 0, a0, a1, ccw); c.stroke();
       }
     }
     if (q.gap) { c.globalAlpha = 0.7; c.fillStyle = '#3a3350'; band(q.gap[0], q.gap[1]); c.fill(); }
-  }
+  };
   // ink: the outer edge of the rings, one closed line (the near pass redraws the same line where it crosses the globe)
-  if (lw > 0 && !thin) {
-    const ro = B.rings[B.rings.length - 1].r1, P = [];
+  const edge = () => {
+    if (lw <= 0 || thin) return;
+    const P = [];
     for (let i = 0; i < 128; i++) { const a = (TAU * i) / 128; P.push([Math.cos(a) * ro * R, Math.sin(a) * ro * R * sy]); }
     c.globalAlpha = 0.75; ink(c, P, lw * 0.6, { closed: true, seed: 61, color: INK });
-  }
-  c.restore();
-  // the globe's shadow on the far half of the rings: away from the light
-  if (!front && !thin) {
-    c.save(); c.beginPath();
-    c.ellipse(0, 0, B.rings[B.rings.length - 1].r1 * R + 1, Math.abs(B.rings[B.rings.length - 1].r1 * R * sy) + 1, 0, Math.PI, TAU, ccw);
-    c.ellipse(0, 0, B.rings[0].r0 * R - 1, Math.max(0.02, Math.abs(B.rings[0].r0 * R * sy) - 1), 0, TAU, Math.PI, !ccw); c.closePath(); c.clip();
-    c.globalAlpha = 0.72; c.fillStyle = '#1c1830';
-    const sx = -light[0] * R * 0.62, sy2 = -light[1] * R * 0.62 * Math.abs(sy);
-    c.beginPath(); c.ellipse(sx, sy2, R * 1.02, R * rp * 1.02, 0, 0, TAU); c.fill();
+  };
+  if (!front) {
+    c.save(); for (const q of B.rings) paint(q); edge(); c.restore();
+    // the globe's shadow on the rings (only here: the Sun is on our side of the globe, so the shadow falls behind it,
+    // never on the near half where it crosses the globe): a disc in the frame where the shadow (a half-ellipse 1/ĉ long
+    // and the globe wide, away from the Sun) is round, soft at its edge. One pass over all the ring material (the rings
+    // at least 0.3 opaque, not the space a nearly empty division shows), its clip a pixel past their edges: clipped to
+    // each ring, or to their own edges, it would leave a light line where the ring's antialiased edge meets the clip's.
+    if (!thin) {
+      const [sang, cc] = shadowOf(S, rp), k = (1 + PEN) * R, e = Math.min(1, 1 / px), iv = [];
+      for (const q of B.rings) if (q.a >= 0.3) { const l = iv[iv.length - 1]; if (l && Math.abs(l[1] - q.r0) < 1e-9) l[1] = q.r1; else iv.push([q.r0, q.r1]); }
+      c.save(); c.beginPath();
+      for (const [r0, r1] of iv) {
+        c.moveTo(r1 * R + e, 0); c.ellipse(0, 0, r1 * R + e, r1 * R * sy + e, 0, 0, TAU);
+        c.ellipse(0, 0, Math.max(0.02, r0 * R - e), Math.max(0.02, r0 * R * sy - e), 0, TAU, 0, true); c.closePath();
+      }
+      c.clip(); c.scale(1, sy); c.rotate(sang); c.scale(1 / cc, 1);
+      const g = c.createRadialGradient(0, 0, (1 - PEN) * R, 0, 0, k);
+      g.addColorStop(0, 'rgba(28,24,48,0.88)'); g.addColorStop(1, 'rgba(28,24,48,0)');
+      c.fillStyle = g; c.fillRect(-k, -k, k, 2 * k);
+      c.restore();
+      // a rig's box holds the rings out a unit past their edge, room for its ink line (its context counts what a clip
+      // encloses: this one paints nothing)
+      c.save(); c.beginPath(); c.ellipse(0, 0, ro * R + 1, ro * R * sy + 1, 0, 0, TAU); c.clip(); c.restore();
+    }
+  } else {
+    // the see-through rings over the rim (beyond the clip below, which keeps within the globe's ink line)
+    for (const q of B.rings) if (see(q)) { c.save(); onRim(); paint(q); c.restore(); }
+    if (see(last)) { c.save(); onRim(); edge(); c.restore(); }
+    // (the near pass clips to the globe and its ink line, as the edge-on line keeps doing: the rig's box)
+    c.save();
+    const m = Math.max(lw * 0.6, 0.5); c.beginPath(); c.ellipse(0, 0, R + m, Rp + m, 0, 0, TAU); c.clip(); c.beginPath(); c.rect(-3 * R, 0, 6 * R, 3 * R); c.clip();
+    for (const q of B.rings) if (!see(q)) { c.save(); if (!thin) onDisc(0.6); paint(q); c.restore(); }
+    if (!see(last)) { onDisc(0.6); edge(); }
     c.restore();
   }
   if (thin) {
@@ -182,14 +291,14 @@ export function drawBody(c, Pin, cx, cy, R, o = {}) {
   const L0 = o.light || lightIn(c), lw = o.ink === false ? 0 : (o.lw ?? 1.3 * R / R0) * lineScale();
   c.save(); c.translate(cx, cy); c.rotate(roll);
   const light = [L0[0] * Math.cos(-roll) - L0[1] * Math.sin(-roll), L0[0] * Math.sin(-roll) + L0[1] * Math.cos(-roll)];
-  if (B.rings) ringHalf(c, B, R, tilt, 'back', light, lw, rp, t);
+  const S = B.rings ? sunDir(light, tilt) : null, disc = ell(0, 0, R, Rp, 17, R * 0.004);
+  if (B.rings) ringHalf(c, B, R, tilt, 'back', lw, rp, S, disc);
   // a thick atmosphere (Titan): a soft haze around the limb
   if (B.haze) {
     c.save(); const g = c.createRadialGradient(0, 0, R * 0.92, 0, 0, R * 1.08);
     g.addColorStop(0, B.haze); g.addColorStop(0.55, B.haze); g.addColorStop(1, 'rgba(232,184,100,0)');
     c.fillStyle = g; c.beginPath(); c.ellipse(0, 0, R * 1.08, Rp * 1.08, 0, 0, TAU); c.fill(); c.restore();
   }
-  const disc = ell(0, 0, R, Rp, 17, R * 0.004);
   c.save(); c.beginPath(); disc.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.clip();
   c.fillStyle = B.base; c.fillRect(-R - 2, -Rp - 2, 2 * R + 4, 2 * Rp + 4);
   const ph = t * TAU;
@@ -207,6 +316,7 @@ export function drawBody(c, Pin, cx, cy, R, o = {}) {
       onSphere(c, lon - ph - sz * 0.25, lat + sz * 0.25, sz * 0.75, sz * 0.75, '#ffffff', R, Rp, Bo, 0.18, k + 50);
     }
   }
+  if (B.heart) heartOn(c, B.heart, R, Rp, Bo, ph);
   for (const sp of B.spots || []) {
     if (sp.ring) onSphere(c, sp.lon - ph, Math.asin(sp.lat), sp.w * 1.25, sp.h * 1.35, sp.ring, R, Rp, Bo, 0.9, 7);
     onSphere(c, sp.lon - ph, Math.asin(sp.lat), sp.w, sp.h, sp.col, R, Rp, Bo, 1, 8);
@@ -236,8 +346,19 @@ export function drawBody(c, Pin, cx, cy, R, o = {}) {
     c.restore();
   }
   c.restore();
-  if (lw > 0 && !B.emissive) { c.save(); if (B.haze) c.globalAlpha = 0.35; ink(c, disc, lw, { seed: 23 }); c.restore(); }
-  if (B.rings) ringHalf(c, B, R, tilt, 'front', light, lw, rp, t);
+  if (lw > 0 && !B.emissive) {
+    c.save(); if (B.haze) c.globalAlpha = 0.35;
+    // no limb under the near opaque rings (their near pass covers the disc only, so the line would show through them);
+    // a see-through ring is painted over it (the globe's outline seen through the C ring)
+    const sy = Math.sin(tilt);
+    if (B.rings && Math.abs(sy) * R >= 0.6) {
+      c.beginPath(); c.rect(-3 * R, -3 * R, 6 * R, 6 * R);
+      for (const q of B.rings) if (q.a > OPAQUE) { c.moveTo(q.r1 * R, 0); c.ellipse(0, 0, q.r1 * R, Math.abs(q.r1 * R * sy), 0, 0, Math.PI); c.ellipse(0, 0, q.r0 * R, Math.abs(q.r0 * R * sy), 0, Math.PI, 0, true); c.closePath(); }
+      if (c.mask) c.mask('evenodd'); else c.clip('evenodd');   // (the rig's context: a clip that adds no bounds)
+    }
+    ink(c, disc, lw, { seed: 23 }); c.restore();
+  }
+  if (B.rings) ringHalf(c, B, R, tilt, 'front', lw, rp, S, disc, rimOf(disc, lw));
   c.restore();
 }
 

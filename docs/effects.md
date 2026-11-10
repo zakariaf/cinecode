@@ -61,20 +61,27 @@ These come with the engine (`engine/effects/`), as custom beats and overlays exa
 | `starstream` | custom beat | `sky` | travelling through space: star streaks streaming out of a vanishing point (`fx`, `fy`) |
 | `eyepiece` | custom beat | `screen` | the view through a telescope: black outside a round field (`r`), or the field opening to fill the frame (`open`) |
 | `lightpulse` | custom beat | `grade` | light travelling from the Sun (`from`) to a planet (`to`), flashing on its lit limb |
+| `lightbeam` | custom beat | `grade` | sunlight reaching from the Sun (`from`) to a planet (`to`) as a soft shaft as wide as the globe; it stops at the limb and the sunward side brightens, gently, and stays so |
 | `orbit` | custom beat | `back` | a planet's orbit as a dotted arc drawing itself in around a sun off to one `side` |
 | `sizerow` | custom beat | `depth` | small worlds (`body`, default Earths) popping in across a planet's equator, to true scale |
-| `moonlets` | custom beat | `depth` | a planet's many moons appearing and going round in its ring plane, passing behind and in front of it |
+| `moonlets` | custom beat | `depth` | a planet's many moons appearing and going round near its ring plane, passing behind and in front of it: each a small lit world (a lit side, a night side, no glow), the `big` one (`titan`) at least twice the biggest |
 | `debris` | custom beat | `depth` | chunks of ice and rock drifting past at many depths: a dolly flies through them |
+| `ringfield` | custom beat | `depth` | a ringed planet's (`who`) rings up close, as pieces of ice and rock lying in them (out of the divisions and gaps, inside the edges, dark in the globe's shadow), near chunks a dolly flies past, and soft, out-of-focus grains of dust near the lens (`motes`); give it the shot's length and `"scope": "shot"` |
 
 ```json
 { "do": "custom", "name": "eyepiece", "at": 0, "dur": 3, "scope": "shot" }
 { "do": "custom", "name": "sizerow", "who": "saturn", "dur": 4.4, "with": "prev", "hold": false }
+{ "do": "custom", "name": "lightbeam", "from": [-0.06, 0.3], "to": "saturn", "dur": 4.2, "with": "prev", "hold": false, "scope": "shot" }
 "overlays": [{ "name": "skydot", "params": { "x": 1640, "y": 480, "size": 4 } }]
 ```
 
 Film code can draw a world too: `import { drawBody, globeOf, atDepth, radiusOf } from 'cinecode/paint/planets'` (the
 `planet` rig's painter, `drawBody(ctx, 'mars', cx, cy, R, { t })`; `globeOf(api, who)`, a planet actor's globe on
 screen at its depth; `atDepth(ctx, api, z)`, the world transform of a depth; `radiusOf(body)`, true radii in km).
+Something drawn on a planet's rings can darken where the globe's shadow lies on them, as `ringfield` does:
+`sunDir(light, tilt)` (the Sun's direction in the body's frame, from the light on the picture in its rolled frame; the
+sign of `tilt` is ignored, as the painter draws the rings) and
+`ringShade(S, ob, u, v)` (0 lit .. 1 in shadow, at a point of the ring plane in globe radii).
 
 ## Two rules
 
@@ -226,7 +233,7 @@ Overlays get `draw(ctx, api)`, custom beats `draw(ctx, u, api)`. `api` holds:
 | `actor(id)` | an actor on stage: its draw state (`x`, `y`, `z` its depth, `s` scale, `face` ±1, `alpha` 0..1, `st` with pose, expression and talk, `asleep`, `speaking`, `R` its rig, …) plus `head` and `mouth` points and its `box` `[x0, y0, x1, y1]`, all in world coordinates; `null` while it is off stage (not yet entered, or exited). An actor faded to 0 is still returned. The human's hands: see [props](#props) |
 | `anchor(name)` | an anchor of the set: `{ x, y, s, type, … }` |
 | `toScreen([x, y])`, `toWorld([x, y])` | map a point between world and screen pixels (on the stage) |
-| `project([x, y, z])` | a world point at depth z → `[sx, sy, s, a]`: its screen point, screen px per world px there, and its near fade (0: don't draw it) |
+| `project([x, y, z])` | a world point at depth z → `[sx, sy, s, a]`: its screen point, screen px per world px there, and its pass of the lens (1 until 0.04 × the lens from it; 0: don't draw it) |
 | `item([x, y, z], draw)` | on the `depth` layer only: hand the frame a piece to draw in the depth sort ([depth](#depth)) |
 | `silhouette(ctx, actor)` | draw an actor (an id, or a state from `plan.actorsAt`) in screen space exactly as the frame draws it (slope pitch, turn squash, wading cut), without shadows; use it for masks and cut-outs instead of calling the rig yourself |
 
@@ -240,8 +247,10 @@ An actor, an anchor or an effect piece can be off the stage: `z` world px behind
 ([storyboard.md](storyboard.md#depth)). `api.actor(id).z` is an actor's depth; `api.set.lens` the kit's lens.
 
 - **To place something at an actor's depth** on any layer, `api.project([x, y, z])` → `[sx, sy, s, a]`: the screen
-  point, its scale (screen px per world px; the stage's is `api.cam.zoom`) and its near fade (0 when the camera has
-  come too near: don't draw it). `atDepth(ctx, api, z)` from `cinecode/paint/planets` sets ctx to the world transform
+  point, its scale (screen px per world px; the stage's is `api.cam.zoom`) and its pass of the lens: 1 until it is 0.04
+  × the lens from it (25× its size on the stage), fading to 0 by 0.01 × it (don't draw it). A piece off the camera's
+  axis has grown out of the frame by then, so a near piece needs no fade of its own: never fade one out yourself
+  while it is still in the middle of the frame (it reads as a see-through ghost). `atDepth(ctx, api, z)` from `cinecode/paint/planets` sets ctx to the world transform
   of a depth.
 - **To be hidden by what is nearer, and hide what is farther**, draw on the `depth` layer. It runs before the set is
   drawn and draws only through `api.item([x, y, z], draw)`: each piece is sorted by z (farther first), then by its y,

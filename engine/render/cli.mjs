@@ -271,7 +271,8 @@ async function cmdLint(opts, ctx) {
     const r = lintPlan(plan, opts.step ? { step: opts.step } : {});
     mkdirSync(paths.out, { recursive: true });
     await writeLintReport(plan, r, paths.out);
-    return { ...r, msg: `${plural(r.errors.length, 'error')}, ${plural(r.warnings.length, 'warning')} → ${rel(ctx, paths.out)}/lint.json, lint.jpg` };
+    const kept = r.kept?.length ? ` (${r.kept.length} kept: allowed by their shots' "lint" blocks)` : '';
+    return { ...r, msg: `${plural(r.errors.length, 'error')}, ${plural(r.warnings.length, 'warning')}${kept} → ${rel(ctx, paths.out)}/lint.json, lint.jpg` };
   });
   for (const i of [...result.errors, ...result.warnings]) {
     ctx.out.write(`  ${i.severity === 'error' || result.errors.includes(i) ? 'error' : 'warn '}  ${String(i.rule).padEnd(17)} ${(i.shot ?? '').toString().padEnd(9)} ${Number.isFinite(i.t) ? clock(i.t).padStart(7) : '       '}  ${i.message}\n`);

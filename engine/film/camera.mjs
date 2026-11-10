@@ -20,12 +20,13 @@
 // head of a subject with a face stays above the caption band (CAPTION_BAND; feet may go into it), even with a "zoom"
 // or a low angle.
 // Round 6: framing part of a subject. A subject without a face (s.faceless: a rig whose only expression is 'neutral',
-// a planet, a prop) has no head to keep above the captions; when no subject in the shot has one, a "zoom" above 1
-// crops into the size's framing (about where it is composed) instead of being held back, and the offset moves the
-// framing as given. A "focus" (focusPoint: [fx, fy] in the subjects' box, "head", or a world point "x:…,y:…") frames
-// that point at the centre of the frame (moved by the offset) at the size's zoom of the whole subjects × "zoom", with
-// no other placement (no lead room or headroom, no caption band; a close shot neither follows a held gesture nor clears
-// actors in front; a track does not pull the subjects back in): any part of any subject, faces included.
+// a planet, a prop) has no head to keep above the captions and no lead room (it faces nowhere: it is centred across
+// the frame); when no subject in the shot has one, a "zoom" above 1 crops into the size's framing (about where it is
+// composed) instead of being held back, and the offset moves the framing as given. A "focus" (focusPoint: [fx, fy] in
+// the subjects' box, "head", or a world point "x:…,y:…") frames that point at the centre of the frame (moved by the
+// offset) at the size's zoom of the whole subjects × "zoom", with no other placement (no lead room or headroom, no
+// caption band; a close shot neither follows a held gesture nor clears actors in front; a track does not pull the
+// subjects back in): any part of any subject, faces included.
 // A low angle sits the subjects lower, under more sky; a high one higher, over more ground.
 // A close shot keeps other actors that would come between the lens and its subject out of frame when it can.
 // A zoom move with "zoomTo" zooms about its target (the subjects plus any offset): that point keeps its place. A move
@@ -41,16 +42,19 @@
 // for each subject on its own size (compile warns about an actor dwarfed by an anchor or a much bigger actor).
 // Depth (DESIGN §10): a thing at depth z (world px behind the stage; negative: nearer) is seen by a camera at depth
 // cam.z with lens D (cam.lens, the set's) at p = (D − cam.z)/(D + z − cam.z) × the stage's zoom, about the camera centre
-// (depthScale, project; depthFade: its near fade). A camera's "z" / "zTo" move it through depth over the move: a
+// (depthScale, project; depthFade: its pass of the lens, whole until PASS_FADE × D from it, gone by PASS × D: whatever is
+// off the axis has left the frame by then). A camera's "z" / "zTo" move it through depth over the move: a
 // push-in / pull-out "to" a size composes its end as seen from zTo; every other move composes at "z" and travels along
-// its axis (the stage grows by (D − z)/(D − cam.z)). Subjects off the stage are framed as that depth shows them: mapped
-// onto the stage about the centre of the framing they feed (onStage), solved for it (solveDeep; each end of a pan or a
-// move, each sample of a track and its containment), its point kept as a world point at its depth (at, anchored).
+// its axis (the stage grows by (D − z)/(D − cam.z)), and moving in, composes its subjects near enough the frame centre
+// that they are still in frame at its end (frameFlat's grow). Subjects off the stage are framed as that depth shows
+// them: mapped onto the stage about the centre of the framing they feed (onStage), solved for it (solveDeep; each end of
+// a pan or a move, each sample of a track and its containment), its point kept as a world point at its depth (at,
+// anchored).
 // Cameras of a shot or scene using depth carry z and lens; a depth camera is clamped on its widest view (clampDeep).
 // A track keeps a crop's composition and offset as it keeps a focus (no containment).
 import { noise1 } from '../core/lib.mjs';
 import { clamp, lerp, ease, easeIO, parseTarget } from './util.mjs';
-import { LENS, NEAR, NEAR_FADE, nearFade } from '../set/set.mjs';
+import { LENS, NEAR, NEAR_FADE, PASS, PASS_FADE, passFade } from '../set/set.mjs';
 
 // closest zoom (screen px per world px): enough for the head of a squirrel or a child-sized tortoise to fill a
 // close-up; the painted set is that soft only behind the subject, where the depth of field blurs it anyway
@@ -81,7 +85,7 @@ export function regionOf(sub, size) {
 const union = (A, B) => (A ? [Math.min(A[0], B[0]), Math.min(A[1], B[1]), Math.max(A[2], B[2]), Math.max(A[3], B[3])] : B.slice());
 
 // ───────────── depth (DESIGN §10) ─────────────
-export { LENS, NEAR, NEAR_FADE };
+export { LENS, NEAR, NEAR_FADE, PASS, PASS_FADE };
 // The size of a thing at depth z relative to the stage, as cam sees it: p = (D − c)/(D + z − c) (1 on the stage, for any
 // camera; 0 at or behind the lens).
 export function depthScale(cam, z = 0) {
@@ -89,11 +93,12 @@ export function depthScale(cam, z = 0) {
   const D = cam.lens ?? LENS, c = cam.z || 0, d = D + z - c;
   return d > 0 ? (D - c) / d : 0;
 }
-// How much of a thing at depth z cam draws: 0 nearer the lens than NEAR × D (or behind it), 1 from NEAR_FADE × D on.
+// How much of a thing at depth z cam draws: 0 nearer the lens than PASS × D (or behind it), 1 from PASS_FADE × D on: it
+// passes the lens (passFade) whole until it truly reaches it.
 export function depthFade(cam, z = 0) {
   if (!z && !cam.z) return 1;
   const D = cam.lens ?? LENS;
-  return nearFade(D + z - (cam.z || 0), D);
+  return passFade(D + z - (cam.z || 0), D);
 }
 // A world point at depth z on screen → [sx, sy, s] (s: screen px per world px there).
 export function project(cam, W, H, x, y, z = 0) {
@@ -166,7 +171,7 @@ export function frameSubjects(subs, size, opts = {}) {
   return subs.some(s => s.z) ? frameDeep(subs, size, opts) : frameFlat(subs, size, opts);
 }
 // (subjects on the stage)
-function frameFlat(subs, size, { W, H, angle = 'eye', zoomK = 1, offset = null, focus = null, S = null, faceHint = 0, refH = null, refHs = null } = {}) {
+function frameFlat(subs, size, { W, H, angle = 'eye', zoomK = 1, offset = null, focus = null, S = null, faceHint = 0, refH = null, refHs = null, grow = null } = {}) {
   const spec = SIZE_SPEC[size] || SIZE_SPEC.wide;
   const px = offset && (Math.abs(offset[0]) > 2 || Math.abs(offset[1]) > 2) ? offset : null, frac = px ? null : offset;
   const fp = focusPoint(subs, focus);
@@ -183,7 +188,8 @@ function frameFlat(subs, size, { W, H, angle = 'eye', zoomK = 1, offset = null, 
   }
   const head = spec.region === 'head' || spec.region === 'face';
   let R = null, B = null, faces = 0, hmax = 0;
-  for (const s of subs) { const g = regionOf(s, size); R = union(R, g); B = union(B, s.box); faces += s.face; hmax = Math.max(hmax, g[3] - g[1]); }
+  // (a subject without a face has no lead room to give: only those with one count)
+  for (const s of subs) { const g = regionOf(s, size); R = union(R, g); B = union(B, s.box); if (!s.faceless) faces += s.face; hmax = Math.max(hmax, g[3] - g[1]); }
   const rw = Math.max(1, R[2] - R[0]), rh = Math.max(1, R[3] - R[1]);
   // the size sets the zoom from the subject's own height (refH: its typical height over the shot); the union of
   // everything the subjects do in the shot only has to fit inside the frame
@@ -208,7 +214,7 @@ function frameFlat(subs, size, { W, H, angle = 'eye', zoomK = 1, offset = null, 
   const face = Math.sign(faces || faceHint);
   // horizontal: the region's centre, pushed back against the lead (more room ahead of the subjects)
   const vw = W / zoom;
-  let lead = (subs.length === 1 || Math.abs(faces) === subs.length ? spec.lead : spec.lead * 0.4) * vw * face;
+  let lead = (faced.length === 1 || Math.abs(faces) === faced.length ? spec.lead : spec.lead * 0.4) * vw * face;
   const slack = Math.max(0, (vw - rw) / 2 - 0.04 * vw);
   lead = clamp(lead, -slack, slack);
   const rcx = (R[0] + R[2]) / 2;
@@ -234,11 +240,18 @@ function frameFlat(subs, size, { W, H, angle = 'eye', zoomK = 1, offset = null, 
   // cuts the bottom, never the heads), a little air at the sides (centred when too wide); free subjects take the
   // offset after this, as given
   const fit = (s, lo, hi, a, b, top) => (b - a > hi - lo ? s + (top ? lo - a : ((lo + hi) - (a + b)) / 2) : s + Math.max(0, lo - a) - Math.max(0, b - hi));
+  // a move in through depth along the camera's axis (grow: { D, z0, z1 }) grows the picture about the frame centre, a
+  // subject at depth z by (D + z − z0)/(D + z − z1) by its end: the region stays inside the frame as the end shows it
+  // (the frame's bounds drawn in about its centre by the most any subject grows; past the lens, all the way), and
+  // subjects without a face that can't all fit are centred on it (the vanishing point), not hung from the top
+  let g = 1;
+  if (grow) for (const s of subs) { const z = s.zw || 0, d1 = grow.D + z - grow.z1; g = Math.max(g, d1 > 0 ? (grow.D + z - grow.z0) / d1 : Infinity); }
+  const inner = (lo, hi, c) => (g > 1 ? [c - (c - lo) / g, c + (hi - c) / g] : [lo, hi]);
   const ox = px ? px[0] : 0, oy = px ? px[1] : 0, V = K || R, fx = free ? 0 : ox, fy = free ? 0 : oy;
-  sx = fit(sx, 0.02 * W, 0.98 * W, sx + (R[0] - rcx - fx) * zoom, sx + (R[2] - rcx - fx) * zoom);
+  sx = fit(sx, ...inner(0.02 * W, 0.98 * W, W / 2), sx + (R[0] - rcx - fx) * zoom, sx + (R[2] - rcx - fx) * zoom);
   // (whole bodies keep a little ground under their feet)
   const lo = (K ? 0.07 : head ? 0.02 : 0.05) * H;
-  sy = fit(sy, lo, (K ? 0.98 : spec.region === 'body' ? 0.94 : 1) * H, sy + (V[1] - wy - fy) * zoom, sy + (V[3] - wy - fy) * zoom, true);
+  sy = fit(sy, ...inner(lo, (K ? 0.98 : spec.region === 'body' ? 0.94 : 1) * H, H / 2), sy + (V[1] - wy - fy) * zoom, sy + (V[3] - wy - fy) * zoom, !free || g === 1);
   // (and the heads above the caption band, as far as the headroom allows)
   if (HB !== null) sy -= Math.min(Math.max(0, sy + (HB - wy - oy) * zoom - CAPTION_BAND * H), Math.max(0, sy + (V[1] - wy - oy) * zoom - lo));
   if (frac && free) { sx += frac[0] * W; sy += frac[1] * H; }
@@ -450,10 +463,13 @@ export function buildCamera(args) {
   // (the subjects as compile gives them, remembered across the passes; seen: some have a depth)
   const raw = new Map(); let seen = false;
   const subjectsAt = (t, list) => { const k = `${t}|${list.join(',')}`; if (!raw.has(k)) { const r = args.subjectsAt(t, list); seen ||= r.some(s => s.z); raw.set(k, r); } return raw.get(k); };
-  let flat = buildFlat({ ...args, subjectsAt });
+  // (a move in through depth composed at z grows the picture about the frame centre: its framings keep the subjects in
+  // frame as its end shows them)
+  const sized = (spec.move === 'push-in' || spec.move === 'pull-out') && !!(spec.to || spec.toOn), grow = !sized && z1 > z0 ? { D, z0, z1 } : null;
+  let flat = buildFlat({ ...args, subjectsAt, grow });
   if (!seen && !z0 && !z1 && !args.depth) return flat;
   // subjects off the stage: each framing solved about its own centre
-  if (seen) flat = buildFlat({ ...args, subjectsAt, deep: { D, z0, z1 } });
+  if (seen) flat = buildFlat({ ...args, subjectsAt, deep: { D, z0, z1 }, grow });
   if (!z0 && !z1) {
     const on = c => ({ ...c, z: 0, lens: D });
     return { ...flat, cameraAt: t => on(flat.cameraAt(t)), frames: { from: flat.frames.from && on(flat.frames.from), to: flat.frames.to && on(flat.frames.to) } };
@@ -463,13 +479,13 @@ export function buildCamera(args) {
   const dur = Math.max(1e-3, t1 - t0), windowed = spec.moveAt !== undefined || spec.moveDur !== undefined;
   const mAt = clamp(spec.moveAt ?? 0, 0, dur), mDur = Math.max(1e-3, spec.moveDur ?? dur - mAt);
   const zAt = t => (z0 === z1 ? z0 : lerp(z0, z1, windowed ? easeIO((t - t0 - mAt) / mDur) : easeIO((t - t0) / dur)));
-  const sized = (spec.move === 'push-in' || spec.move === 'pull-out') && !!(spec.to || spec.toOn);
   const deep = (c, z) => clampDeep(S, { cx: c.cx, cy: c.cy, zoom: c.zoom * (sized ? 1 : (D - z0) / (D - z)), z, lens: D }, W, H);
   return { ...flat, cameraAt: t => deep(flat.cameraAt(t), zAt(t)), frames: { from: deep(flat.frames.from, z0), to: deep(flat.frames.to || flat.frames.from, z1) } };
 }
 // A shot's camera on the stage (deep: { D, z0, z1 }: subjects with a depth framed onto the stage as a camera at depth z0
-// shows them, or at z1 for the end of a push-in / pull-out to a size, about the centre of each framing: solveDeep).
-function buildFlat({ spec = {}, size, ids, subjectsAt: subjectsAt0, othersAt = null, t0, t1, S, W, H, seed = 1, deep = null }) {
+// shows them, or at z1 for the end of a push-in / pull-out to a size, about the centre of each framing: solveDeep;
+// grow: { D, z0, z1 }, a move in through depth that travels along its axis: frameFlat's grow).
+function buildFlat({ spec = {}, size, ids, subjectsAt: subjectsAt0, othersAt = null, t0, t1, S, W, H, seed = 1, deep = null, grow = null }) {
   const move = spec.move || 'static', angle = spec.angle || 'eye', zoomK = spec.zoom || 1, zA = deep?.z0 ?? 0, zB = deep?.z1 ?? 0;
   // (subjects with a depth: what a camera at depth zc centred on c shows of them, left out at or behind the lens; c
   // [0, 0] where only their sizes count)
@@ -477,7 +493,7 @@ function buildFlat({ spec = {}, size, ids, subjectsAt: subjectsAt0, othersAt = n
   // the subjects are sampled at the same times again and again (framings over windows of the shot): remember them
   const memo = new Map(), rawAt = (t, list) => { const k = `${t}|${list.join(',')}`; if (!memo.has(k)) memo.set(k, subjectsAt0(t, list)); return memo.get(k); };
   const subjectsAt = (t, list, zc = zA, c = null) => staged(rawAt(t, list), zc, c);
-  const opts = { W, H, angle, zoomK, S, offset: Array.isArray(spec.offset) ? spec.offset : null, focus: spec.focus ?? null };
+  const opts = { W, H, angle, zoomK, S, offset: Array.isArray(spec.offset) ? spec.offset : null, focus: spec.focus ?? null, grow };
   const clampCam = c => clampFrame(S, c, W, H);
   const dur = Math.max(1e-3, t1 - t0);
   const N = Math.max(3, Math.min(72, Math.ceil(dur * 8) + 1));
