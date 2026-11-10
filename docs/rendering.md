@@ -181,7 +181,8 @@ The steps, each printed as it finishes:
 | `--keep` | keep the per-worker segment files | off |
 
 Work in progress lives in a hidden `.<name>.mp4.parts/` folder next to the output and is removed at the end (kept with
-`--keep`). The burned-in captions follow `format.captions` (`dialogue` by default); the `.srt` and the subtitle track
+`--keep`). One render at a time writes to an output: a hidden `.<name>.mp4.lock` holds the render's process id, and a
+second render of the same file is refused while that process runs (a lock left by a crashed render is taken over). The burned-in captions follow `format.captions` (`dialogue` by default); the `.srt` and the subtitle track
 always hold all of them.
 
 ### cast-sheet and set-sheet

@@ -159,6 +159,11 @@ async function cmdSetup(opts, ctx) {
   row(ff || null, 'ffmpeg', ff ? 'ffmpeg and ffprobe found' : 'ffmpeg/ffprobe not on the PATH: check, plan, sheet and lint work; mix, animatic and render need them (macOS: brew install ffmpeg; Debian/Ubuntu: sudo apt install ffmpeg)');
   row(ctx.env.GEMINI_API_KEY ? true : null, 'voices', ctx.env.GEMINI_API_KEY ? 'GEMINI_API_KEY is set' : 'GEMINI_API_KEY is not set: only `voice` (and rendering unvoiced lines) needs it. Get a key at https://aistudio.google.com/apikey, export it in your shell profile and restart; never paste it into a chat');
   row(null, 'films', `films live in films/<slug>/ under the folder you work in (cinecode new <slug>); rigs, kits and effects several films share go in cinecode/{rigs,kits,effects}/ at the project root`);
+  // Claude Code sets CLAUDE_CODE_ENTRYPOINT: "cli" with a person at the keyboard; "sdk-cli" for `claude -p`, "sdk-ts" /
+  // "sdk-py" for the SDKs, where no one can answer a question. The skill's checkpoint reads this row.
+  const entry = ctx.env.CLAUDE_CODE_ENTRYPOINT;
+  if (entry === 'cli') row(null, 'session', 'interactive: a person can answer the checkpoint');
+  else if (entry) row(null, 'session', `nobody can answer questions in this run (Claude Code entry point "${entry}": claude -p or the SDK). Skip the checkpoint: decide yourself, work to the end, and list your choices in the report`);
   if (fails.length) throw new CliError(`setup: ${fails.join(' and ')} not ready`);
   say(ctx, 'setup', 'ready');
 }

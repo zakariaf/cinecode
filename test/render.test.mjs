@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadImage } from '@napi-rs/canvas';
 import { srtTime, wrapText, toSrt, subtitleCues } from '../engine/render/srt.mjs';
-import { splitRanges, frameCount, renderVideo, verifyVideo } from '../engine/render/video.mjs';
+import { splitRanges, frameCount, renderVideo, verifyVideo, lockOutput } from '../engine/render/video.mjs';
 import { ffmpeg, hasFfmpeg, probe, run, FFPROBE } from '../engine/render/ffmpeg.mjs';
 import { frameGrabber, pixelOrder } from '../engine/render/encode.mjs';
 import { createSource, decodeFrameNumber } from '../engine/render/testcard.mjs';
@@ -440,4 +440,42 @@ test('cli end to end: voice → plan → render (2 jobs) → sheet → lint → 
   writeFileSync(join(root, 'films', 'demo', 'film.json'), JSON.stringify({ title: 'Broken', format: { width: 64, height: 36, fps: 24 }, scenes: [] }));
   const bad = cmd(['check', 'films/demo']);
   assert.equal(bad.status, 1); assert.match(bad.stderr, /1 problem:\n  - scenes: at least one scene is required/);
+});
+
+// ───────────── one render per output, and the session row ─────────────
+test('a second render of the same output is refused while the first runs; a lock left by a dead process is taken over', () => {
+  const dir = join(ROOT, 'out', 'test-lock'); rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
+  const out = join(dir, 'film.mp4'), lock = join(dir, '.film.mp4.lock');
+  const release = lockOutput(out);
+  assert.equal(readFileSync(lock, 'utf8'), String(process.pid));
+  assert.throws(() => lockOutput(out), /another render of film\.mp4 is already running \(pid \d+\)/);
+  assert.doesNotThrow(() => lockOutput(join(dir, 'animatic.mp4'))(), 'another output is not blocked');
+  release();
+  assert.ok(!existsSync(lock), 'released');
+  // a crashed render leaves its lock behind: its pid is no longer running
+  const gone = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }).stdout;
+  writeFileSync(lock, gone);
+  const again = lockOutput(out);
+  assert.equal(readFileSync(lock, 'utf8'), String(process.pid));
+  again();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('renderVideo refuses to start while another render holds the output, and leaves its parts alone', async () => {
+  const dir = join(ROOT, 'out', 'test-lock2'); rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
+  const out = join(dir, 'clip.mp4'), parts = join(dir, '.clip.mp4.parts');
+  mkdirSync(parts); writeFileSync(join(parts, 'seg-000.mp4'), 'in progress');
+  const release = lockOutput(out);
+  await assert.rejects(renderVideo({ plan: { W: 64, H: 36, fps: 12, duration: 1 }, drawFrame: () => {}, outPath: out, verify: false }), /already running/);
+  assert.equal(readFileSync(join(parts, 'seg-000.mp4'), 'utf8'), 'in progress', 'the running render\'s segments are untouched');
+  release(); rmSync(dir, { recursive: true, force: true });
+});
+
+test('setup says whether anyone can answer: headless runs (claude -p, the SDK) are told to skip the checkpoint', () => {
+  const headless = cli(['setup', '--check'], ROOT, { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' });
+  assert.match(headless.stdout, /session\s+nobody can answer questions in this run .*sdk-cli.*Skip the checkpoint/);
+  const person = cli(['setup', '--check'], ROOT, { CLAUDE_CODE_ENTRYPOINT: 'cli' });
+  assert.match(person.stdout, /session\s+interactive: a person can answer the checkpoint/);
+  const plain = cli(['setup', '--check'], ROOT, { CLAUDE_CODE_ENTRYPOINT: '' });
+  assert.doesNotMatch(plain.stdout, /session/, 'outside Claude Code there is no session row');
 });

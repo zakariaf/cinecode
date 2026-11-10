@@ -2,7 +2,7 @@
 // → mux master audio (AAC) and soft subtitles (mov_text) → verify with ffprobe.
 import { fork } from 'node:child_process';
 import { availableParallelism } from 'node:os';
-import { mkdirSync, rmSync, writeFileSync, renameSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, renameSync, existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { dirname, join, basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ffmpeg, probe } from './ffmpeg.mjs';
@@ -62,8 +62,8 @@ export async function renderVideo(opts) {
 
   const out = resolve(outPath), dir = dirname(out);
   mkdirSync(dir, { recursive: true });
+  const release = lockOutput(out);
   const tmp = join(dir, `.${basename(out)}.parts`);
-  rmSync(tmp, { recursive: true, force: true }); mkdirSync(tmp, { recursive: true });
   const segs = ranges.map((_, i) => join(tmp, `seg-${String(i).padStart(3, '0')}.mp4`));
 
   // progress
@@ -76,6 +76,7 @@ export async function renderVideo(opts) {
   const update = (i, m) => { if (m.drawn != null) drawn[i] = m.drawn; if (m.encoded != null) encoded[i] = Math.min(m.encoded, drawn[i] || m.encoded); report(); };
 
   try {
+    rmSync(tmp, { recursive: true, force: true }); mkdirSync(tmp, { recursive: true });
     if (ranges.length === 1 && typeof drawFrame === 'function') {
       await encodeRange({ plan, drawFrame, range: ranges[0], width, height, fps, outPath: segs[0], encoder, signal,
         onFrame: d => update(0, { drawn: d }), onEncoded: e => update(0, { encoded: e }) });
@@ -117,8 +118,30 @@ export async function renderVideo(opts) {
     return { path: out, frames: n, duration: dur, segments: ranges.length, probe: info, ms: performance.now() - start };
   } finally {
     if (!keep) rmSync(tmp, { recursive: true, force: true });
+    release();
   }
 }
+
+// One render at a time per output file: a second render of the same film would clear the first one's segment folder
+// mid-encode and both would fail. The lock holds the owner's pid; a lock whose process is gone (a crash, a kill) is
+// stale and taken over. → release()
+export function lockOutput(out) {
+  const lock = join(dirname(out), `.${basename(out)}.lock`), me = String(process.pid);
+  for (let tries = 0; tries < 3; tries++) {
+    try {
+      writeFileSync(lock, me, { flag: 'wx' });
+      return () => { try { if (readFileSync(lock, 'utf8') === me) unlinkSync(lock); } catch { /* already gone */ } };
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      let pid = 0;
+      try { pid = Number(readFileSync(lock, 'utf8')); } catch { continue; }   // removed meanwhile: try again
+      if (pid > 0 && isAlive(pid)) throw new Error(`another render of ${basename(out)} is already running (pid ${pid}). Wait for it to finish (run renders in the background and wait for them), or stop that process, before starting another`);
+      rmSync(lock, { force: true });   // stale
+    }
+  }
+  throw new Error(`could not lock ${basename(out)} for rendering (${lock})`);
+}
+const isAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 /** ffprobe the result: exact frame count, duration within ±1 frame, size, audio/subtitle streams. Throws on mismatch. */
 export async function verifyVideo(path, { frames, fps, width, height, audio = false, subtitles = false }) {

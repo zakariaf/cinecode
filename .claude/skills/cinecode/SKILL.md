@@ -25,7 +25,7 @@ Ground rules:
 - **Never stop at "not available".** A character, place, prop or effect the engine lacks is reused, adapted or built (step 1, "What isn't there"), never cut or refused for that reason alone.
 - Deterministic: no `Math.random()` or `Date.now()` in film code; use `rng(seed)` from `cinecode/lib` with `api.seed`.
 - **Look at every image you render** with the Read tool. A film is done when the frames are good, not when the commands pass.
-- One checkpoint: after step 1, show the person the logline, cast (rig + voice), sets and length in a few lines and ask for a go-ahead or changes. Skip it when they said "just make it" or when nobody can answer (a non-interactive or workflow run): decide yourself and list your choices in the report. After the checkpoint, work to the end without asking.
+- One checkpoint: after step 1, show the person the logline, cast (rig + voice), sets and length in a few lines and ask for a go-ahead or changes. **First check that someone can answer:** run `cinecode setup --check` and read its `session` row. If it says nobody can answer (`claude -p` or the SDK), or you are a subagent or part of a workflow, or they said "just make it", skip the checkpoint: decide yourself, work to the end, and list your choices in the report. Never end a run on a question nobody will read. After the checkpoint, work to the end without asking.
 
 ## 1. The story
 
@@ -224,11 +224,11 @@ ffmpeg -v error -y -i films/<slug>/out/animatic.mp4 -vf "fps=32/$d,scale=320:-1,
 Read the overview (32 frames spread over the film, whatever its length): the journey, the light and the screen direction should read at a glance. Ask the person to watch the animatic: they can hear it, and it's the cheapest moment for notes. Then render:
 
 ```bash
-cinecode render films/<slug>                       # → out/<slug>.mp4 + out/<slug>.srt (run in the background)
+cinecode render films/<slug>                       # → out/<slug>.mp4 + out/<slug>.srt (in the background: see below)
 cinecode render films/<slug> --from=1:20 --to=1:40  # a full-quality sequence → out/<slug>-80s.mp4
 ```
 
-`render` voices any missing lines first (with the key) and stops without it. It takes tens of minutes for a few minutes of film (every core works). Its last line (`verify`) is an ffprobe check: size, codec, frame count, fps, duration, audio, subtitles. Grab a few frames from the final file with `ffmpeg -ss <t>` and look at them.
+`render` voices any missing lines first (with the key) and stops without it. It takes tens of minutes for a few minutes of film (every core works). **Run it once, in the background, and wait for it:** use your shell tool's background option (Claude Code's Bash `run_in_background`) and wait for the notice that it finished; don't detach it with `nohup … &` (the shell returns at once and the render looks done while it is still running), and don't poll with long `sleep`s. Never start a second render of the same film while one runs: cinecode refuses it (`another render of … is already running`); wait for the first, or stop it. Its last line (`verify`) is an ffprobe check: size, codec, frame count, fps, duration, audio, subtitles. Grab a few frames from the final file with `ffmpeg -ss <t>` and look at them.
 
 ## 8. The report to the person
 
