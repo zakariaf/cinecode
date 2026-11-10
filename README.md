@@ -143,10 +143,15 @@ The repository is a Claude Code plugin and its own marketplace. In Claude Code:
 ```
 
 (or, on Claude Code 2.1.275 or later, in one step: `/plugin install cinecode --marketplace zakariaf/cinecode`).
+Then open Claude Code in any folder and ask for a film in plain words, or call the skill by name:
+
+```
+/cinecode:cinecode make a two-minute animated film about a fox who is afraid of the dark
+```
+
 Installing copies the plugin and its one npm dependency, `@napi-rs/canvas`. It brings four skills (`cinecode`: idea or
 screenplay → film; `build-rig`, `build-kit`, `build-effect`: a character, place or effect the engine doesn't have,
-each through its gate) and puts the `cinecode` command on Claude's PATH. Open Claude Code in any folder and ask for a
-film; the first run checks Node 20+, ffmpeg and the drawing library (`cinecode setup` installs it if it is missing).
+each through its gate) and puts the `cinecode` command on Claude's PATH. The first run checks Node 20+, ffmpeg and the drawing library (`cinecode setup` installs it if it is missing).
 Films go in `films/<slug>/` of that folder, and rigs, kits and effects shared by its films in `cinecode/`. Voicing
 needs `GEMINI_API_KEY`; everything else runs offline.
 
