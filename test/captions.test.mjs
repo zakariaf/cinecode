@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { loadFilm } from '../engine/film/load.mjs';
 import { compile } from '../engine/film/compile.mjs';
 import { frameInfo, captionLayouts } from '../engine/film/frame.mjs';
-import { layoutCaption } from '../engine/film/text.mjs';
+import { layoutCaption, titleBlock } from '../engine/film/text.mjs';
 
 const FPS = 24;
 const frames = (t0, t1) => { const out = []; for (let k = Math.ceil(t0 * FPS); k / FPS < t1; k++) out.push(k / FPS); return out; };
@@ -212,4 +212,13 @@ test('when both bands are held, a sound caption waits for one and is still up lo
     for (const c of caps) up.set(c.text, (up.get(c.text) || 0) + 1 / FPS);
   }
   for (const s of ['[a dog barks]', '[thunder]', '[a bell rings]']) assert.ok((up.get(s) || 0) >= 0.55, `"${s}" is up only ${(up.get(s) || 0).toFixed(2)} s`);
+});
+
+// A title's sub may hold several lines ("\n"): each adds a line below, and the block is as wide as the longest.
+test('a multi-line title sub grows the title block down and to its longest line', () => {
+  const one = titleBlock({ text: 'TITLE', sub: 'a short line' }, 1920, 1080);
+  const two = titleBlock({ text: 'TITLE', sub: 'a short line\na much longer second line under it' }, 1920, 1080);
+  assert.ok(two.below > one.below, 'a second sub line adds nothing below the title');
+  assert.ok(two.w > one.w, 'the block is not as wide as the longer sub line');
+  assert.equal(two.above, one.above);
 });

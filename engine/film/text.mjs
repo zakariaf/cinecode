@@ -96,13 +96,20 @@ export function drawCaption(ctx, L, alpha, W, H) {
 // Where a title beat may go: "place" names (or a fraction of the frame height) for the title line's centre.
 export const TITLE_PLACES = { top: 0.16, upper: 0.3, center: 0.45, middle: 0.45, lower: 0.66, bottom: 0.8 };
 // The title's lettering: the title line's size and the block it covers around its centre line y (above / below).
+// A sub with line breaks ("\n") draws one line under another, SUB_LH (× the frame unit) apart.
+const SUB_LH = 46;
 export function titleBlock(cap, W, H) {
   const u = U(W, H), ctx = measurer();
   let size = Math.round(96 * u);
   ctx.font = `italic ${size}px ${SERIF}`;
   while (ctx.measureText(cap.text).width > W * 0.86 && size > 20) { size -= 4; ctx.font = `italic ${size}px ${SERIF}`; }
   let w = ctx.measureText(cap.text).width, below = size * 0.5;
-  if (cap.sub) { ctx.font = `italic ${Math.round(36 * u)}px ${SERIF}`; w = Math.max(w, ctx.measureText(cap.sub).width); below = size * 0.85 + 26 * u; }
+  if (cap.sub) {
+    const subs = String(cap.sub).split('\n');
+    ctx.font = `italic ${Math.round(36 * u)}px ${SERIF}`;
+    for (const l of subs) w = Math.max(w, ctx.measureText(l).width);
+    below = size * 0.85 + 26 * u + (subs.length - 1) * SUB_LH * u;
+  }
   return { size, w, above: size * 0.55, below };
 }
 
@@ -115,7 +122,10 @@ export function drawTitle(ctx, cap, t, W, H, y = H * 0.38, x = W / 2) {
   ctx.font = `italic ${size}px ${SERIF}`;
   ctx.shadowColor = 'rgba(15,10,8,.85)'; ctx.shadowBlur = 22 * u; ctx.fillStyle = '#fff8e8'; ctx.fillText(cap.text, x, y);
   ctx.shadowBlur = 6 * u; ctx.fillText(cap.text, x, y);
-  if (cap.sub) { ctx.font = `italic ${Math.round(36 * u)}px ${SERIF}`; ctx.shadowBlur = 14 * u; ctx.fillStyle = '#fff0d4'; ctx.fillText(cap.sub, x, y + size * 0.85); }
+  if (cap.sub) {
+    ctx.font = `italic ${Math.round(36 * u)}px ${SERIF}`; ctx.shadowBlur = 14 * u; ctx.fillStyle = '#fff0d4';
+    String(cap.sub).split('\n').forEach((l, i) => ctx.fillText(l, x, y + size * 0.85 + i * SUB_LH * u));
+  }
   ctx.restore();
 }
 

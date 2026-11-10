@@ -386,10 +386,10 @@ test('the cast looks: Pebble\'s lids, Fidget\'s tail', () => {
   for (const b of sets) assert.ok(b.params.tail <= 1.3, `tail ${b.params.tail}`);
 });
 
-test('the cut runs 3:30-3:45 on the measured takes; the protected beats keep their length', async () => {
+test('the cut runs 3:30-3:48 on the measured takes (3:47 with the closing credit); the protected beats keep their length', async () => {
   const p = await voiced(), L = [...p.lines].sort((a, b) => a.t0 - b.t0);
   assert.equal(L.filter(l => l.estimated).length, 0, 'every line is voiced');
-  assert.ok(p.duration >= 210 && p.duration <= 225, `${p.duration.toFixed(1)} s`);
+  assert.ok(p.duration >= 210 && p.duration <= 228, `${p.duration.toFixed(1)} s`);
   for (let i = 1; i < L.length; i++) assert.ok(L[i].t0 >= L[i - 1].t1 - 1e-6, `${L[i - 1].shot} / ${L[i].shot}: two lines at once`);
   const hello = L.find(l => l.speak === 'Hello, Pebble.'), here = L.find(l => l.speak === "I'm here.");
   assert.ok(here.t0 - hello.t1 >= 1.4 - 1 / 24, 'the silence before "I\'m here."');
@@ -548,7 +548,8 @@ test('the walk to the stone, then the crane from PROMISE WIDE into the sky, with
   assert.ok(Math.abs(s104.t1 - p.duration) < 1e-6);
   const title = p.captions.find(c => c.style === 'title' && c.t0 >= s104.t0);
   assert.ok(title && title.t0 >= line.t1 && title.t1 <= s104.t1 + 1e-6, 'the title after the line, inside the shot');
-  assert.ok(title.t0 > s104.t0 + 0.6 * (s104.t1 - s104.t0) - 1, 'as the crane settles');
+  const cy = t => s104.cameraAt(t).cy, risen = (cy(s104.t0) - cy(title.t0)) / (cy(s104.t0) - cy(s104.t1 - 1e-6));
+  assert.ok(risen > 0.6, `as the crane settles (${(risen * 100).toFixed(0)}% of the rise done)`);
 });
 
 test('the restaged meadow and summit: 2.2 a medium two-shot, 2.4 on the speaker, 9.1 she passes in front of him, 9.6 heads apart, 10.3 headroom', async () => {
