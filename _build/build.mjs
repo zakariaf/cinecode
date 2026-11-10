@@ -16,7 +16,11 @@ const DOCS = [
   ['sound', 'Voices, music and sound'], ['lint', 'Lint'], ['rendering', 'Rendering'],
 ];
 const FILMS = [
-  { slug: 'seventy-six-summers', title: 'Seventy-Six Summers', len: '3:47',
+  { slug: 'solar-system', title: 'Our Solar System', len: '15:34', feature: true,
+    about: 'On a hill at night, Nell asks her grandmother about a bright star, and a narrator takes them past the Sun and every planet, out to Pluto and the Kuiper Belt, and home again for the sunrise. A family film, every fact checked against NASA.',
+    meta: '21 scenes · 68 shots · 168 voiced lines · 1080p · made by 36 Claude Code agents in about six hours',
+    extra: `<a href="${REPO}/releases/tag/our-solar-system">Download in 1080p</a> · ` },
+  { slug: 'seventy-six-summers', feature: true, title: 'Seventy-Six Summers', len: '3:47',
     about: 'A hundred-year-old tortoise has one day left to cross the valley and keep a promise he made to a six-year-old girl the last time the comet came, seventy-six years ago. A fast-talking squirrel rides along on his shell, sure that she has forgotten.',
     meta: '12 scenes · 56 shots · 56 voiced lines · 1080p' },
   { slug: 'glim', title: 'Glim', len: '0:27',
@@ -82,7 +86,7 @@ const page = ({ title, desc, root, body, here }) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title><meta name="description" content="${esc(desc)}">
 <meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}">
-<meta property="og:image" content="https://zakaria.dev/cinecode/films/seventy-six-summers.jpg">
+<meta property="og:image" content="https://zakaria.dev/cinecode/hero.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="${root}style.css"></head>
@@ -105,7 +109,7 @@ ${toc.length ? `<p class="label">On this page</p><ul class="toc">${toc.map(([id,
 // ── home ──
 const have = f => fs.existsSync(path.join(OUT, 'films', f));
 const video = f => `<video controls preload="none" playsinline poster="films/${f.slug}.jpg"><source src="films/${f.slug}.mp4" type="video/mp4">${have(`${f.slug}.vtt`) ? `<track kind="subtitles" srclang="en" label="English" src="films/${f.slug}.vtt">` : ''}</video>`;
-const [feat, ...shorts] = FILMS;
+const feats = FILMS.filter(f => f.feature), shorts = FILMS.filter(f => !f.feature);
 const STEPS = [
   ['Write', 'A screenplay: logline, characters, places, music, then scenes and shots with their lines.'],
   ['Storyboard', '<code>film.json</code>: the cast, the sets, and every shot\'s camera and beats, checked field by field.'],
@@ -122,14 +126,14 @@ const ENGINE = [
   ['Effects', 'Rain, fireflies, mist, sparkles, and custom effects for skies and space.', 'effects'],
   ['Builds what is missing', 'No rig for a whale? No set for a city? The plugin builds the character, place or effect, and a gate checks it.', 'effects'],
 ];
-const home = `<section class="hero"><img src="hero.jpg" alt="From Seventy-Six Summers: a tortoise, a squirrel and an old woman on a hill at night under a comet, fireflies in the grass">
+const home = `<section class="hero"><img src="hero.jpg" alt="From Our Solar System: nine Earths side by side across the face of Saturn">
 <div class="hero-text wrap"><h1>Animated films, made entirely by code.</h1>
 <p>cinecode is a Claude Code plugin. Describe a film, and Claude writes it, stages every shot, animates it, scores it, mixes it and renders it. No drawing tools, no video model, no image files: a program paints every frame.</p>
 <p class="cta"><a class="btn" href="#films">Watch the films</a><a class="btn ghost" href="#install">Install the plugin</a></p></div></section>
 <main>
 <section id="films" class="wrap films"><h2>Films</h2>
-<div class="feature">${video(feat)}<div><h3>${esc(feat.title)} <span class="len">${feat.len}</span></h3><p>${esc(feat.about)}</p><p class="meta">${feat.meta}</p>
-<p><a href="${REPO}/tree/main/films/${feat.slug}">Screenplay, storyboard and code</a></p></div></div>
+${feats.map(feat => `<div class="feature">${video(feat)}<div><h3>${esc(feat.title)} <span class="len">${feat.len}</span></h3><p>${esc(feat.about)}</p><p class="meta">${feat.meta}</p>
+<p>${feat.extra || ''}<a href="${REPO}/tree/main/films/${feat.slug}">Screenplay, storyboard and code</a></p></div></div>`).join('\n')}
 <h3 class="sub">Made from one sentence</h3><p class="lede">Each of these was made by a fresh Claude Code agent from a one-sentence idea, using the plugin's skill.</p>
 <div class="grid">${shorts.map(f => `<figure>${video(f)}<figcaption><strong>${esc(f.title)}</strong> <span class="len">${f.len}</span><br>${esc(f.about)} <a href="${REPO}/tree/main/films/${f.slug}">Source</a></figcaption></figure>`).join('')}</div></section>
 <section id="install" class="band"><div class="wrap two">

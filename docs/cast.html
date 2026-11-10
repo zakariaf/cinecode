@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cast and rigs · cinecode</title><meta name="description" content="cinecode docs: Cast and rigs">
 <meta property="og:title" content="Cast and rigs · cinecode"><meta property="og:description" content="cinecode docs: Cast and rigs">
-<meta property="og:image" content="https://zakaria.dev/cinecode/films/seventy-six-summers.jpg">
+<meta property="og:image" content="https://zakaria.dev/cinecode/hero.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../style.css"></head>
@@ -407,20 +407,27 @@ hops (slow: 300 world px take about 9 s); <code>run</code> is big leaps, the way
 <h3 id="planet"><a class="anchor" href="#planet" aria-hidden="true">#</a>planet</h3>
 <p>A planet, moon or star as an actor: the camera frames it (<code>on</code>), pushes in on it and lints it like a character. One
 rig with a <code>body</code> preset per world: <code>saturn</code> (default), <code>jupiter</code>, <code>earth</code>, <code>mars</code>, <code>venus</code>, <code>mercury</code>, <code>uranus</code>,
-<code>neptune</code>, <code>moon</code> (Earth&#39;s), <code>titan</code>, <code>sun</code>. Every globe is drawn 100 units across (Saturn is 226 with its rings, 91.5
-tall), so sizes come from the cast <code>scale</code>: for true relative sizes, multiply by the ratio of their radii (<code>radiusOf</code>
-in <code>cinecode/paint/planets</code>, true equatorial radii in km: Earth / Saturn = 0.1058, so an Earth beside a Saturn at
-<code>scale</code> 2.5 is 0.26). Saturn&#39;s rings are at their true radii (the C, B and A rings, the Cassini Division and the Encke
-Gap); the colours are a storybook&#39;s.</p>
+<code>neptune</code>, <code>moon</code> (Earth&#39;s), <code>titan</code>, <code>pluto</code>, <code>charon</code>, <code>sun</code>. Every globe is drawn 100 units across (Saturn is 226
+with its rings, 91.5 tall), so sizes come from the cast <code>scale</code>: for true relative sizes, multiply by the ratio of their
+radii (<code>radiusOf</code> in <code>cinecode/paint/planets</code>, true equatorial radii in km: Earth / Saturn = 0.1058, Pluto / Earth =
+0.186, Charon / Pluto = 0.51, so an Earth beside a Saturn at <code>scale</code> 2.5 is 0.26). Saturn&#39;s rings are at their true
+radii (the C, B and A rings, the Cassini Division and the Encke Gap), and the globe&#39;s shadow lies across them, away from
+the Sun, soft-edged. The near rings cross in front of the globe: the bright B and A rings hide its limb; through the
+faint C ring the globe and its outline show, as through a veil. The colours are a storybook&#39;s after NASA&#39;s pictures:
+Jupiter&#39;s pale Equatorial Zone between its two dark belts and the Great Red Spot at 22°S, Neptune&#39;s Great Dark Spot at
+20°S, Pluto&#39;s bright heart (Tombaugh Regio, about 60% of the disc across: two lobes narrowing to a point, the western
+one, Sputnik Planitia, the brighter) and dark red Cthulhu, Charon grey with its red north pole.</p>
 <ul>
 <li><strong>poses:</strong> <code>stand</code>, <code>perch</code>; it holds at a <code>perch</code> anchor (the <a href="sets.html#space"><code>space</code></a> kit&#39;s) or stands on the ground</li>
 <li><strong>expressions:</strong> <code>neutral</code> only: no face. It stays upright on a slope and throws no shadow.</li>
-<li><strong>params:</strong> <code>body</code>; <code>tilt</code> (the rings&#39; opening, radians: 0 edge-on, Saturn&#39;s default 0.38), <code>roll</code> (the whole body
+<li><strong>params:</strong> <code>body</code>; <code>tilt</code> (the rings&#39; opening, radians: 0 edge-on, Saturn&#39;s default 0.38; the rings are drawn
+from the north whatever its sign, a negative tilt only shows the globe&#39;s south), <code>roll</code> (the whole body
 turned in the picture), <code>axis</code> (how much of a ringless body&#39;s pole we see), <code>spin</code> (band and feature drift per
 second), <code>size</code></li>
 <li>Its <code>head</code> is the globe&#39;s centre, so a <code>close</code> shot frames the globe. A moon behind or in front of a planet is
 another planet actor with a <code>z</code> (<a href="storyboard.html#depth">depth</a>); the built-in space effects (<code>sizerow</code>, <code>moonlets</code>,
-<code>orbit</code>, <code>lightpulse</code>, <code>sunglow</code>: <a href="effects.html#built-in-effects">effects.md</a>) take a planet actor as <code>who</code>.</li>
+<code>orbit</code>, <code>ringfield</code>, <code>lightpulse</code>, <code>lightbeam</code>, <code>sunglow</code>: <a href="effects.html#built-in-effects">effects.md</a>) take a
+planet actor as <code>who</code> (or <code>to</code>).</li>
 </ul>
 <h3 id="telescope"><a class="anchor" href="#telescope" aria-hidden="true">#</a>telescope</h3>
 <p>A refractor on a wooden tripod, seen side-on, the tube pointing up the way it faces, a prop with no face. Height 192.3

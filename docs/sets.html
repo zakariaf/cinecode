@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sets · cinecode</title><meta name="description" content="cinecode docs: Sets">
 <meta property="og:title" content="Sets · cinecode"><meta property="og:description" content="cinecode docs: Sets">
-<meta property="og:image" content="https://zakaria.dev/cinecode/films/seventy-six-summers.jpg">
+<meta property="og:image" content="https://zakaria.dev/cinecode/hero.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../style.css"></head>
@@ -438,7 +438,13 @@ when the camera zooms, so a push-in on a planet reads as travelling toward it wh
 little smaller, near ones (y 1400) a little bigger</li>
 <li><strong>time:</strong> its own, <code>space</code> (the only one: no grade but the house vignette, no sun); no ground to shade, so nothing
 throws a shadow at all (<code>groundShadows: false</code>). <strong>ambience:</strong> scenes there use <code>&quot;ambience&quot;: &quot;none&quot;</code></li>
-<li><strong>params:</strong> <code>seed</code> (another starfield), <code>milky</code> and <code>nebula</code> (0..1, default 1), <code>tint</code> (<code>violet</code>, <code>blue</code>, <code>teal</code>)</li>
+<li><strong>params:</strong> <code>seed</code> (another starfield), <code>milky</code> and <code>nebula</code> (0..1, default 1), <code>tint</code> (<code>violet</code>, <code>blue</code>, <code>teal</code>),
+<code>dust</code> (the near field, a number ≥ 0, default 1; 0 or <code>false</code> none, 0.5 half as many specks, 2 twice as many)</li>
+<li><strong>near field:</strong> specks of dust and stars at every depth, out to 1.5 × the lens, so a camera moving through depth
+(<code>z</code> / <code>zTo</code>) reads as flight: they stream out from the frame&#39;s centre, the nearer the faster and bigger, streaking
+with the move, and pass the lens, while the painted sky stays fixed. They show only while the camera moves through
+depth (faded in and out with its speed): a still shot, a pan or a lens zoom shows none, so no speck sits on a planet
+like a star (<a href="storyboard.html#depth">storyboard.md</a>)</li>
 <li><strong>depth:</strong> with no painted ground, any actor may be off the stage: a scene actor&#39;s <code>&quot;z&quot;</code> of 2400 is about half size
 behind everything on the stage, −900 about 1.6× in front (<a href="storyboard.html#depth">storyboard.md</a>)</li>
 </ul>
@@ -1062,6 +1068,10 @@ export default () =&gt; makeSet({
 <tr>
 <td><code>lens</code></td>
 <td>world px from a camera at depth 0 to the stage (default 2304: about a 45° view across a 1920-px frame at zoom 1); it sets how depth scales things (<a href="storyboard.html#depth">storyboard.md</a>), and camera <code>z</code> / <code>zTo</code> must stay under 3/4 of it</td>
+</tr>
+<tr>
+<td><code>field</code></td>
+<td><code>{ density }</code>: a near field of specks at every depth that a camera moving through depth streams past (density 1 the usual count, 0 none; default none), seen only while it moves through depth. The frame draws it in the depth sort, each shot&#39;s laid out for its first camera</td>
 </tr>
 <tr>
 <td><code>ambience</code></td>
