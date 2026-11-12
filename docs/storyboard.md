@@ -23,7 +23,7 @@ A complete small example is `templates/film.json` (what `cinecode new` gives you
 |---|---|---|
 | `title` | no (warning if missing) | the film's title: opening card, contact sheets, the video's metadata |
 | `logline` | no | one sentence for people reading the file; the engine does not use it |
-| `format` | no | `{ width, height, fps, captions }`, see below |
+| `format` | no | `{ width, height, fps, captions, style }`, see below |
 | `titles` | no | opening and end cards, see below |
 | `score` | no | the film's key and melodic motif, see [score](#score) |
 | `voices` | for any line | voice id → `{ voice, tone }` |
@@ -49,6 +49,7 @@ reported as warnings (see [checking](#checking-a-storyboard)).
 |---|---|---|
 | `format.width`, `format.height` | 1920, 1080 | even integers, 16–8192 |
 | `format.fps` | 24 | integer, 1–120 |
+| `format.style` | `"painted"` | `painted` (the full painting: colour, light, shadows, grade) or `lineart`: a colouring-book page, black ink on white with no colour, fill or shade. See [line art](#line-art). |
 | `format.captions` | `"dialogue"` | which captions are burned into the picture: `dialogue` (cast lines only), `all` (also narration and sound captions), `none`. The `.srt` file and the soft subtitles in the MP4 always carry every caption. |
 | `titles.open` | none | a parchment title card before the first scene: `title` (default: the film's `title`), `subtitle`, `dur` (seconds, default 5). It dissolves into the first shot over its last second. |
 | `titles.end` | none | an end card after the last scene: `lines` (default `["The End"]`), `dur` (default 5). It dissolves in from the last shot and fades to black over its last 1.2 s. |
@@ -63,6 +64,28 @@ How long a card is readable: the opening card fades in from black over 0.8 s, it
 is at full strength for `dur − 2.4` s. The end card dissolves in over 1 s, its first line inks in from 0.4 s to 1.3 s
 (a second line by 1.8 s) and it fades to black over its last 1.2 s: full strength for `dur − 2.5` s. A 2 s card never
 reaches full strength; 3 s is the shortest that reads (a short film), 4 s is comfortable.
+
+### Line art
+
+`"format": { "style": "lineart" }` draws the whole film as a colouring book: every character, prop and set in black
+outlines on white paper, title lettering outlined to colour in, the cards in black and white. Nothing else in the
+storyboard changes. Every line is drawn by one pen: whatever the painting inked (a tapered brush outline, a filled
+mark) is thinned to its centre and drawn again at an even width, so faces stay readable in a wide shot. How each part
+becomes lines:
+
+- **Characters** keep their own ink (outlines, eyes, brows, buttons, folds) and are white inside, so a figure hides
+  the lines of whatever is behind it.
+- **Sets** keep their ink and gain an outline wherever two painted shapes meet without one (a hill against the sky);
+  grass dabs, flower dots and texture are dropped. The sky is blank paper, at every time of day.
+- **Close framings:** a set layer drawn much larger than it was painted fades out (1.6× to 2.4× its painted size), so
+  a close-up is the figures on a white page; props are redrawn for the close framing instead.
+- **Light is off:** no time-of-day grade, story grade (memory, dream), cast shadows, shade, rim light, haze or depth
+  of field. `time` still sets the sounds and the ambience.
+- **Effects** (overlays, custom beats, rain, dust, fireflies) are painted on a sheet of their own and turned into
+  lines too: what is painted solid is white with an outline, a wash or a glow leaves only its edges. An effect whose
+  point is a colour or a darkening (a night wash, a sunset glow) has no line-art form: leave it out.
+
+Line art renders about twice as slowly as the painted film.
 
 ## Voices and cast
 

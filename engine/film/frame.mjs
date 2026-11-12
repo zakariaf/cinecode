@@ -36,6 +36,8 @@ import { viewRect, toScreen, depthScale, depthFade } from './camera.mjs';
 import { clamp, ease, probe, rigSizes, hash32 } from './util.mjs';
 import { canvas, rng } from '../core/lib.mjs';
 import { wadeSpans, wadeCut, wadeRing } from '../paint/water.mjs';
+import { lineart, mono } from '../paint/lineart.mjs';
+import { lineScaleFor } from '../core/style.mjs';
 
 export const DISSOLVE = 0.8, DISSOLVE_SHARE = 0.4;
 const SCENE_FADE = 0.35, START_FADE = 0.8, END_FADE = 1.2, CARD_DISSOLVE = 1.0;
@@ -141,12 +143,12 @@ function underwater(c, a, P, S, cam, W, H, ring) {
   x.globalCompositeOperation = 'destination-in'; x.fillStyle = g; x.fillRect(0, 0, W, H);
   c.save(); clipWater(c, S, cam, W, H); if (ring) { wadeCut(c, ring, W, H); c.clip(); } c.drawImage(cv, 0, 0); c.restore();
 }
-function drawActor(ctx, a, t, cam, W, H, drawn, S, shade = 0) {
+function drawActor(ctx, a, t, cam, W, H, drawn, S, shade = 0, ink = false) {
   const P = onScreen(a, cam, W, H);
   reset(ctx);
   if (a.alpha <= 0.001) return null;
   const wet = (c, fn) => { c.save(); clipWater(c, S, cam, W, H); fn(c); c.restore(); };
-  const bare = S?.def?.groundShadows === false;
+  const bare = ink || S?.def?.groundShadows === false;
   const paint = c => {
     if (P.wl == null) return paintActor(c, a, P, bare);
     // wading: the body drawn whole aside, its waterline measured on it; the back of the waterline, the body hidden below
@@ -157,21 +159,28 @@ function drawActor(ctx, a, t, cam, W, H, drawn, S, shade = 0) {
     if (ring) wet(c, y => wadeRing(y, { ...ring, half: 'back' }));
     x.save(); clipWater(x, S, cam, W, H); x.globalCompositeOperation = 'destination-out'; wadeCut(x, ring ?? { x: P.sx, y: P.wl, rx: 0 }, W, H); x.fill(); x.restore();
     c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(cv, 0, 0); c.restore();
-    underwater(c, a, P, S, cam, W, H, ring);
+    if (!ink) underwater(c, a, P, S, cam, W, H, ring);
     if (ring) wet(c, y => wadeRing(y, { ...ring, half: 'front' }));
     return r;
   };
   let r;
-  // fading, or standing in a prop's shade (drawn darker and a little cooler): painted aside, then laid in at once
-  if (a.alpha < 0.999 || shade > 0.01) {
+  // fading, standing in a prop's shade (drawn darker and a little cooler) or in line art (turned into ink on white, its
+  // own white hiding what is behind it, the ink's radii scaled with the drawing): painted aside, then laid in at once
+  if (a.alpha < 0.999 || shade > 0.01 || ink) {
     const [cv, x] = scratch(W, H, 'actor');
     r = paint(x);
     ctx.save(); ctx.globalAlpha = a.alpha;
-    if (shade > 0.01) ctx.filter = `brightness(${(1 - 0.75 * shade).toFixed(3)}) saturate(${(1 - 0.3 * shade).toFixed(3)})`;
+    if (shade > 0.01 && !ink) ctx.filter = `brightness(${(1 - 0.75 * shade).toFixed(3)}) saturate(${(1 - 0.3 * shade).toFixed(3)})`;
     // (only the drawing's own region: a full-frame pass per figure is slow)
     const b = r?.bounds, m = b ? 0.3 * (b[3] - b[1]) + 8 : 0;
     const [x0, y0, x1, y1] = b ? [clamp(Math.floor(b[0] - m), 0, W), clamp(Math.floor(b[1] - m), 0, H), clamp(Math.ceil(b[2] + m), 0, W), clamp(Math.ceil(b[3] + m), 0, H)] : [0, 0, W, H];
-    if (x1 > x0 && y1 > y0) ctx.drawImage(cv, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+    if (x1 > x0 && y1 > y0) {
+      if (ink) {
+        const [pc, px] = canvas(x1 - x0, y1 - y0); px.drawImage(cv, x0, y0, x1 - x0, y1 - y0, 0, 0, x1 - x0, y1 - y0);
+        const la = lineart(pc, { res: (W / 1920) * Math.max(1, P.ss * lineScaleFor(P.ss) / 1.4), colour: false });
+        if (la) ctx.drawImage(la, x0, y0);
+      } else ctx.drawImage(cv, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+    }
     ctx.restore();
   } else r = paint(ctx);
   if (a.asleep && r?.head) zzz(ctx, r.head, t, Math.min(P.ss * 0.9, 2.6));
@@ -435,7 +444,7 @@ function dofRadius(shot, z, H) {
 // The picture of a shot at time t (no captions, no fades).
 // The actors are those of the shot's own scene (so the outgoing scene of a dissolve keeps its cast).
 function picture(ctx, plan, shot, t, titles = true) {
-  const W = plan.W, H = plan.H, S = shot.set, cam = shot.cameraAt(t), sky = shot.skyAt(t), z = cam.zoom;
+  const W = plan.W, H = plan.H, S = shot.set, cam = shot.cameraAt(t), sky = shot.skyAt(t), z = cam.zoom, ink = plan.style === 'lineart';
   S.build();
   // the live dust's colours first: working one out paints the set's back, in the light of its own moment
   for (const e of plan.fx) if (e.name === 'dust' && e.scene === shot.scene && t >= e.t0 && t < e.t1) dustTone(plan, e);
@@ -443,11 +452,22 @@ function picture(ctx, plan, shot, t, titles = true) {
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   // (the sky is at infinity: a camera's depth brings it no nearer, so it takes the lens zoom; DESIGN §10)
   S.drawSky(ctx, cam.z ? { ...cam, zoom: z * (cam.lens - cam.z) / cam.lens } : cam, sky, t);
-  const world = () => ctx.setTransform(z, 0, 0, z, W / 2 - cam.cx * z, H / 2 - cam.cy * z), screen = () => reset(ctx);
+  // line art: effects (overlays, custom beats, fields, one-shot fx) are painted on a sheet of their own (X) and turned
+  // into lines when it is laid on the picture (flush): once before the stage (what is behind the figures stays behind
+  // them), once at the end
+  const [fxc, X] = ink ? scratch(W, H, 'fx') : [null, ctx];
+  const world = () => { ctx.setTransform(z, 0, 0, z, W / 2 - cam.cx * z, H / 2 - cam.cy * z); if (ink) X.setTransform(ctx.getTransform()); };
+  const screen = () => { reset(ctx); if (ink) reset(X); };
+  const flush = () => {
+    if (!ink) return;
+    const la = lineart(fxc, { res: W / 1920, fill: 'opaque' });
+    if (la) { reset(ctx); ctx.drawImage(la, 0, 0); }
+    reset(X); X.clearRect(0, 0, W, H);
+  };
   const actors = plan.actorsAt(t, shot.scene).filter(a => a.visible && a.mode !== 'off');
-  const deep = [], layer = layerRunner(ctx, plan, shot, t, cam, actors, deep);
+  const deep = [], layer = layerRunner(X, plan, shot, t, cam, actors, deep);
   layer('sky', screen);
-  const dofPx = dofRadius(shot, z, H);
+  const dofPx = ink ? 0 : dofRadius(shot, z, H);
   // (the depth layer's pieces, sorted with the props and actors below: handed over before the set is drawn, so its
   // layers know what lies beyond or nearer than them)
   layer('depth', world);
@@ -464,17 +484,18 @@ function picture(ctx, plan, shot, t, titles = true) {
   world();
   S.drawBack(ctx, cam, { ...backOpts, ...only });
   if (!backIn) layer('back', world);
+  flush();
   const drawn = new Map();
   const scene = shot.scene, rect = viewRect(cam, W, H);
   const live = plan.fx.filter(e => e.scene === scene && t >= e.t0 && t < e.t1);
-  const sun = sunFor(S, sky);
+  const sun = ink ? null : sunFor(S, sky);   // (line art: no cast shadows)
   const items = S.propsSorted().map(p => ({ key: p.y, ord: 0, draw: () => { world(); propShadow(ctx, S, p.id, sun); world(); p.draw(ctx); } }));
   for (const a of actors) {
     // (depth: an actor the lens has come too near is left out, or fades; one off the stage throws no ground shadow)
     const f = depthFade(cam, a.z), b = f < 1 ? { ...a, alpha: a.alpha * f } : a;
-    if (f > 0) items.push({ key: a.key, z: a.z || 0, ord: 1, actor: a, draw: () => { if (!a.z) castShadow(ctx, b, onScreen(b, cam, W, H), sun, cam, W, H); drawActor(ctx, b, t, cam, W, H, drawn, S, shadeAt(S, b, sun)); } });
+    if (f > 0) items.push({ key: a.key, z: a.z || 0, ord: 1, actor: a, draw: () => { if (!a.z) castShadow(ctx, b, onScreen(b, cam, W, H), sun, cam, W, H); drawActor(ctx, b, t, cam, W, H, drawn, S, shadeAt(S, b, sun), ink); } });
   }
-  for (const e of live) if (ONE_SHOT.has(e.name)) items.push({ key: (e.key ?? e.y ?? 0) + 0.5, ord: 2, draw: () => { world(); drawEvent(ctx, e, t, { rect, zoom: z, W, H, S, tone: e.name === 'dust' ? dustTone(plan, e) : undefined }); } });
+  for (const e of live) if (ONE_SHOT.has(e.name)) items.push({ key: (e.key ?? e.y ?? 0) + 0.5, ord: 2, draw: () => { world(); drawEvent(X, e, t, { rect, zoom: z, W, H, S, tone: e.name === 'dust' ? dustTone(plan, e) : undefined }); } });
   items.push(...deep);
   for (const L of mid) items.push({ key: L.front ? 1e9 : -1e9, z: L.z, ord: L.front ? 9 : -1, draw: () => { world(); (L.front ? S.drawFront : S.drawBack)(ctx, cam, { ...(L.front ? frontOpts : backOpts), layers: ly => ly === L.ly }); } });
   if (backIn) items.push({ key: -1e9, z: 0, ord: -0.5, draw: () => layer('back', world) });
@@ -484,7 +505,7 @@ function picture(ctx, plan, shot, t, titles = true) {
     for (let i = 0, j = 0; j <= cuts.length; j++) {
       const run = [];
       while (i < specks.length && (j === cuts.length || specks[i].z > cuts[j])) run.push(specks[i++]);
-      if (run.length) items.push({ key: 0, z: run[0].z, ord: 4, draw: () => { reset(ctx); ctx.save(); for (const q of run) q.draw(ctx); ctx.restore(); } });
+      if (run.length) items.push({ key: 0, z: run[0].z, ord: 4, draw: () => { screen(); X.save(); for (const q of run) q.draw(X); X.restore(); } });
     }
   }
   // farther first: by depth (DESIGN §10), then by key (ground y), then props, actors, one-shot fx, depth pieces (a back
@@ -520,25 +541,28 @@ function picture(ctx, plan, shot, t, titles = true) {
   world();
   let screenFx = null;
   const field = e => ({ ...e, t0: e.fade === false ? -1e9 : e.t0, t1: e.fade === false ? 1e9 : e.t1 });
-  for (const e of live) if (!ONE_SHOT.has(e.name) && !GLOW.has(e.name)) { world(); if (drawEvent(ctx, field(e), t, { rect, zoom: z, W, H, S }) === 'screen') screenFx = e; }
+  for (const e of live) if (!ONE_SHOT.has(e.name) && !GLOW.has(e.name)) { world(); if (drawEvent(X, field(e), t, { rect, zoom: z, W, H, S }) === 'screen') screenFx = e; }
   // overlays and custom beats on the world layer, then the front layers
   layer('world', world);
   world();
   S.drawFront(ctx, cam, { ...frontOpts, ...only });
   layer('front', world);
-  reset(ctx);
+  screen();
   // (a rain kept to some shots fades only at its scene's edges, so it is fully on from a cut inside the scene)
-  if (screenFx) { const [e0, e1] = screenFx.edges ?? [screenFx.t0, screenFx.t1]; rain(ctx, t, W, H, { a: clamp(Math.min((t - e0) / 1.2, (e1 - t) / 1.2)), seed: screenFx.seed }); }
+  if (screenFx) { const [e0, e1] = screenFx.edges ?? [screenFx.t0, screenFx.t1]; rain(X, t, W, H, { a: clamp(Math.min((t - e0) / 1.2, (e1 - t) / 1.2)), seed: screenFx.seed }); }
   const g = shot.gradeAt(t);
-  grade(ctx, g, t, W, H, g.story, gradeFocus(shot, actors, drawn, z, cam));
-  rimLight(ctx, sceneRecOf(plan, shot)?.rim, actors, t, cam, W, H, drawn);
+  if (!ink) {                                       // (line art: the page has no light, colour or grain)
+    grade(ctx, g, t, W, H, g.story, gradeFocus(shot, actors, drawn, z, cam));
+    rimLight(ctx, sceneRecOf(plan, shot)?.rim, actors, t, cam, W, H, drawn);
+  }
   layer('grade', screen);
   // lights (fireflies) glow over the grade instead of being darkened by it
-  for (const e of live) if (GLOW.has(e.name)) { world(); drawEvent(ctx, field(e), t, { rect, zoom: z, W, H, S }); }
+  for (const e of live) if (GLOW.has(e.name)) { world(); drawEvent(X, field(e), t, { rect, zoom: z, W, H, S }); }
   layer('screen', screen);
-  deckle(ctx, g.story?.deckle, W, H);
   reset(ctx);
-  if (titles) for (const c of plan.captions) if (c.style === 'title' && c.burn && t >= c.t0 && t < c.t1 && plan.shotAt(c.t0)?.scene === scene) drawTitle(ctx, c, t, W, H, titleY(plan, c), titleX(plan, c));
+  if (ink) { flush(); mono(ctx, W, H); } else deckle(ctx, g.story?.deckle, W, H);
+  reset(ctx);
+  if (titles) for (const c of plan.captions) if (c.style === 'title' && c.burn && t >= c.t0 && t < c.t1 && plan.shotAt(c.t0)?.scene === scene) drawTitle(ctx, c, t, W, H, titleY(plan, c), titleX(plan, c), ink);
 }
 
 // What a close or medium shot is about, for the grade: the centre of its subjects' heads in the picture and a radius
@@ -779,7 +803,7 @@ export function drawFrame(ctx, plan, t) {
   reset(ctx);
   try {
     const card = plan.cards.find(c => tt >= c.t0 && tt < c.t1);
-    if (card) { drawCardFrame(ctx, plan, card, tt); return; }
+    if (card) { drawCardFrame(ctx, plan, card, tt); if (plan.style === 'lineart') { reset(ctx); mono(ctx, W, H); } return; }
     const shot = plan.shotAt(tt) ?? plan.shots[plan.shots.length - 1];
     if (!shot) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); return; }
     sceneFrame(ctx, plan, shot, tt);
