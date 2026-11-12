@@ -114,12 +114,20 @@ export function titleBlock(cap, W, H) {
 }
 
 // A title over the picture (title beats): large glowing italic, its line centred at (x, y) (default: the upper middle).
-export function drawTitle(ctx, cap, t, W, H, y = H * 0.38, x = W / 2) {
+// ink (line art): outlined white letters with no glow, to colour in like the rest of the page.
+export function drawTitle(ctx, cap, t, W, H, y = H * 0.38, x = W / 2, ink = false) {
   const u = U(W, H), a = Math.min(ease((t - cap.t0) / 0.7), 1 - ease((t - (cap.t1 - 0.7)) / 0.7));
   if (a <= 0) return;
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const { size } = titleBlock(cap, W, H);
   ctx.font = `italic ${size}px ${SERIF}`;
+  if (ink) {
+    const lettering = (text, x, y, lw) => { ctx.lineWidth = lw; ctx.strokeText(text, x, y); ctx.fillText(text, x, y); };
+    ctx.lineJoin = 'round'; ctx.strokeStyle = '#000'; ctx.fillStyle = '#fff';
+    lettering(cap.text, x, y, 4 * u);
+    if (cap.sub) { ctx.font = `italic ${Math.round(36 * u)}px ${SERIF}`; String(cap.sub).split('\n').forEach((l, i) => lettering(l, x, y + size * 0.85 + i * SUB_LH * u, 2.5 * u)); }
+    ctx.restore(); return;
+  }
   ctx.shadowColor = 'rgba(15,10,8,.85)'; ctx.shadowBlur = 22 * u; ctx.fillStyle = '#fff8e8'; ctx.fillText(cap.text, x, y);
   ctx.shadowBlur = 6 * u; ctx.fillText(cap.text, x, y);
   if (cap.sub) {

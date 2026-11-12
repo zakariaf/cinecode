@@ -7,6 +7,7 @@
 import { rng, clamp, lerp, canvas } from '../core/lib.mjs';
 import { branchTop } from '../paint/nature.mjs';
 import { inkSilhouette } from '../paint/brush.mjs';
+import { lineart } from '../paint/lineart.mjs';
 import { SKY_TIMES, SKY_W, SKY_H, skyCanvases, skyHaze } from '../paint/sky.mjs';
 import { declaredTime, declareTime, timeClash } from '../film/grade.mjs';
 
@@ -372,7 +373,7 @@ export function makeSet(def) {
           cc = t; E.x0 += tx0 / res; E.y0 += ty0 / res; E.x1 = E.x0 + t.width / res; E.y1 = E.y0 + t.height / res;
         }
       }
-      S.L.push({ ...ly, c: cc, E, res, blur: new Map() });
+      S.L.push({ ...ly, c: S.lineart ? lineart(cc, { res }) ?? cc : cc, E, res, blur: new Map() });
     }
     for (const [j, p] of props.entries()) {
       // paint into a generous canvas around the bounds hint, then trim to what was actually painted
@@ -397,7 +398,10 @@ export function makeSet(def) {
   // over the INK_FADE units above it (grass at a trunk's foot).
   const inked = (p, c, res) => {
     const fade = p.inkFloor != null ? [(p.inkFloor - INK_FADE - p.sy) * res, (p.inkFloor - p.sy) * res] : null;
-    return p.inkW === 0 ? c : inkSilhouette(c, (p.inkW ?? 2.2) * res, { light, fade });
+    // (line art: a sprite redrawn for a close framing keeps a finer outline, as a close-up's figures do)
+    const iw = (p.inkW ?? 2.2) * (S.lineart && p.res ? Math.sqrt(res * p.res) : res);
+    const s = p.inkW === 0 ? c : inkSilhouette(c, iw, { light, fade });
+    return S.lineart ? lineart(s, { res }) ?? s : s;
   };
   // Props that may be framed close (closeRes: the sharpest sprite resolution they may need) get sharper sprites for
   // close framings, painted the first time one is drawn at such a scale (resTier) into the base sprite's box only
@@ -406,7 +410,9 @@ export function makeSet(def) {
   S.propSprite = (p, scale = 1) => {
     if (!S.built) S.build();
     if (typeof p === 'string') p = propById[p];
-    const max = Math.min(p.closeRes ?? 0, Math.sqrt(CLOSE_PX / (p.sw * p.sh))), res = resTier(p.res, max, scale);
+    // (line art: every prop is redrawn for a close framing, its lines then as fine as a wide shot's, within a smaller
+    // budget: turning a sprite into line art holds several copies of it)
+    const max = S.lineart ? Math.min(p.closeRes ?? 3, Math.sqrt(CLOSE_PX / 4 / (p.sw * p.sh))) : Math.min(p.closeRes ?? 0, Math.sqrt(CLOSE_PX / (p.sw * p.sh))), res = resTier(p.res, max, scale);
     if (res === p.res) return { c: p.sprite, x: p.sx, y: p.sy, w: p.sw, h: p.sh };
     const tiers = p.tiers ??= new Map();
     if (!tiers.has(res)) {
@@ -465,13 +471,19 @@ export function makeSet(def) {
       // frame centre by (D − z)/(D − k·z), the p of its depth, fading it out as the camera comes near it
       const kd = cam.z ? layerDepth(ly.k, cam.z, cam.lens ?? S.lens) : null;
       if (kd && kd.a <= 0) continue;
+      // (line art: a layer drawn much larger than it was painted would show fat, soft lines; it fades out instead, from
+      // 1.6× to 2.4×, leaving a close-up's figures on the white page as a colouring book draws them)
+      const fadeLA = S.lineart ? 1 - clamp((scaleOf(ctx) * (kd?.r ?? 1) / ly.res - 1.6) / 0.8) : 1;
+      if (fadeLA <= 0) continue;
       if (kd) { ctx.save(); ctx.translate(cam.cx, cam.cy); ctx.scale(kd.r, kd.r); ctx.translate(-cam.cx, -cam.cy); ctx.globalAlpha *= kd.a; }
-      const dx = (cam.cx - refX) * (1 - ly.k), dy = (cam.cy - refY) * (1 - ly.k) * 0.4, b = dofPx(ly, opts.dof);
+      const alpha0 = ctx.globalAlpha; ctx.globalAlpha *= fadeLA;
+      // (line art: no depth-of-field blur, haze or shade: the page has no atmosphere)
+      const dx = (cam.cx - refX) * (1 - ly.k), dy = (cam.cy - refY) * (1 - ly.k) * 0.4, b = S.lineart ? 0 : dofPx(ly, opts.dof);
       const img = b ? blurred(ly, b) : ly.c, w = ly.c.width / ly.res, h = ly.c.height / ly.res;
-      const hm = !front && ly.k < 1 && haze.length ? mixHaze(haze) : null, hz = hm && hm[3] > 0 ? hm : null;
+      const hm = !front && ly.k < 1 && haze.length && !S.lineart ? mixHaze(haze) : null, hz = hm && hm[3] > 0 ? hm : null;
       // a shade (ly.shade(S) → { rgb, a } | null: a far range by night): the layer's own paint times rgb, crossfaded in
       // by a, so it never darkens what lies behind the layer and a blurred edge takes it like the rest
-      const sh = ly.shade?.(S), sa = sh ? clamp(sh.a ?? 0) : 0;
+      const sh = S.lineart ? null : ly.shade?.(S), sa = sh ? clamp(sh.a ?? 0) : 0;
       if (hz || sa > 0.004) {
         const cw = ctx.canvas.width, ch = ctx.canvas.height;
         if (!scratch.c || scratch.c.width !== cw || scratch.c.height !== ch) [scratch.c, scratch.x] = canvas(cw, ch);
@@ -486,7 +498,8 @@ export function makeSet(def) {
         }
         ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(scratch.c, 0, 0); ctx.restore();
       } else ctx.drawImage(img, ly.E.x0 + dx, ly.E.y0 + dy, w, h);
-      if (ly.anim) { ctx.save(); ctx.translate(dx, dy); ly.anim(ctx, t, S, opts); ctx.restore(); }
+      ctx.globalAlpha = alpha0;
+      if (ly.anim && !S.lineart) { ctx.save(); ctx.translate(dx, dy); ly.anim(ctx, t, S, opts); ctx.restore(); }   // (line art: no shimmer)
       if (kd) ctx.restore();
     }
   };
@@ -571,7 +584,9 @@ export function makeSet(def) {
   };
   S.drawSky = (ctx, cam, sky, t = 0) => {
     const list = !sky ? [[S.defaultSky, 1]] : typeof sky === 'string' ? [[sky, 1]] : sky;
-    const cw = ctx.canvas.width, ch = ctx.canvas.height, zoom = cam.zoom ?? cam.s ?? 1;
+    const cw = ctx.canvas.width, ch = ctx.canvas.height;
+    if (S.lineart) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch); ctx.restore(); return; }   // (line art: the sky is the paper)
+    const zoom = cam.zoom ?? cam.s ?? 1;
     const s = Math.max(cw / 1920, ch / 1080) * (1 + clamp(zoom - 1, -0.4, 3) * 0.04), w = SKY_W * s, h = SKY_H * s;
     const mx = (w - cw) / 2, my = (h - ch) / 2;
     const ox = clamp((cam.cx - refX) * 0.05 * s, -mx, mx), oy = clamp((cam.cy - refY) * 0.06 * s, -my, my);

@@ -176,7 +176,7 @@ export async function loadFilm(src, opts = {}) {
   if (json && typeof json.sets === 'object' && json.sets) {
     for (const [id, s] of Object.entries(json.sets)) {
       if (!s || typeof s.kit !== 'string' || !kits.has(s.kit)) continue;
-      try { sets[id] = getKit(s.kit)({ ...(s.params || {}) }); }
+      try { sets[id] = getKit(s.kit)({ ...(s.params || {}) }); sets[id].lineart = json.format?.style === 'lineart'; }
       catch (e) { problems.push({ path: `sets.${id}`, message: `sets.${id}: kit "${s.kit}" failed: ${e.message}` }); }
     }
   }

@@ -65,7 +65,7 @@ export function compile(film, { voices } = {}) {
 class Compiler {
   constructor(film, voices) {
     const fmt = film.format || {};
-    Object.assign(this, { film, voices, R: film.resolved, W: fmt.width || 1920, H: fmt.height || 1080, fps: fmt.fps || 24, captionMode: fmt.captions || 'dialogue' });
+    Object.assign(this, { film, voices, R: film.resolved, W: fmt.width || 1920, H: fmt.height || 1080, fps: fmt.fps || 24, captionMode: fmt.captions || 'dialogue', style: fmt.style || 'painted' });
     this.lines = []; this.rawSfx = []; this.fx = []; this.captions = []; this.shots = []; this.scenes = []; this.cards = []; this.custom = []; this.warnings = [];
     this.marks = {};
     this.zs = new Map();        // actor → its depth changes [{ t0, t1, z0, z1 }] (DESIGN §10)
@@ -1167,7 +1167,7 @@ class Compiler {
     const sceneAt = t => scenes.find(s => t >= s.t0 && t < s.t1) ?? null;
     const shotAt = t => { let lo = 0, hi = shots.length - 1, r = null; while (lo <= hi) { const m = (lo + hi) >> 1; if (shots[m].t0 <= t) { r = shots[m]; lo = m + 1; } else hi = m - 1; } return r && t < r.t1 ? r : null; };
     const plan = {
-      W: this.W, H: this.H, fps, duration: this.duration, title: this.film.title ?? '', captionMode: this.captionMode,
+      W: this.W, H: this.H, fps, duration: this.duration, title: this.film.title ?? '', captionMode: this.captionMode, style: this.style,
       scenes: scenes.map(s => ({ id: s.id, t0: s.t0, t1: s.t1, set: s.sc.set, time: s.time, grade: s.gradeName ?? null, transition: s.transition, rim: s.rim ?? null })),
       shots, lines: this.lines.sort((a, b) => a.t0 - b.t0), sfx: [], ambience: this.ambienceBeds(), music: this.musicCues(),
       captions: this.captions, cards: this.cards, fx: fx.sort((a, b) => a.t0 - b.t0), custom: this.custom, overlays, warnings: this.warnings,

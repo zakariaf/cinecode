@@ -75,6 +75,8 @@ PEBBLE (slow): "The standing stone. Tonight."
 
 Decide at the checkpoint what you will build: a rig or a kit costs real time, an adaptation that reads is better spent effort. Never tell the person a thing isn't available; say what you reused, adapted or built.
 
+**A colouring-book look** (line art, black outlines on white, no colour) is built in: `"format": { "style": "lineart" }` draws every character, prop, set, effect and title card as ink on white paper (CINECODE/docs/storyboard.md, "Line art"). Don't post-process the rendered video into lines.
+
 **Places: start from the existing kits** (anchors in `references/sets.md`; drawn with anchors: `cinecode set-sheet <kit> -o out/set-<kit>.jpg`); a place none of them can be is built (`build-kit`). Times: Earth's eight (dawn, morning, noon, afternoon, golden, sunset, twilight, night) on every kit but `space`, which has one of its own, `space`; a time a kit doesn't have is a `check` error.
 
 - `meadow`: forest edge; the owl's hollow tree with a low branch (perches), an old stump (`stump_top`), rocks, a lily pond.

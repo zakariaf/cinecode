@@ -42,6 +42,7 @@ const LOOK_SPECIAL = ['none', 'left', 'right', 'camera', 'sky', 'up', 'down'];
 export const AMBIENCES = ['meadow-day', 'meadow-night', 'forest-day', 'forest-night', 'stream', 'village-day', 'village-night', 'wind-hill'];
 export const GRADES = ['memory', 'dream', 'none'];
 export const CAPTION_MODES = ['dialogue', 'all', 'none'];
+export const STYLES = ['painted', 'lineart'];
 export const MOVE_DO = ['walk', 'run', 'hop', 'fly'];
 export const POSTURE_DO = ['sit', 'stand', 'lie', 'sleep', 'wake'];
 // the actions whose "z" (or an anchor's) changes an actor's depth (DESIGN §10)
@@ -89,11 +90,12 @@ export function validateFilm(film, ctx) {
   // ── top level ──
   if (!isStr(film.title)) Wn('title', 'missing title (used on the opening card and sheets)');
   const fmt = film.format ?? {};
-  if (film.format !== undefined && !isObj(film.format)) P('format', 'must be an object { width, height, fps, captions }');
+  if (film.format !== undefined && !isObj(film.format)) P('format', 'must be an object { width, height, fps, captions, style }');
   else {
     for (const k of ['width', 'height']) if (fmt[k] !== undefined && !(Number.isInteger(fmt[k]) && fmt[k] >= 16 && fmt[k] <= 8192 && fmt[k] % 2 === 0)) P(`format.${k}`, `must be an even integer between 16 and 8192 (got ${JSON.stringify(fmt[k])})`);
     if (fmt.fps !== undefined && !(Number.isInteger(fmt.fps) && fmt.fps >= 1 && fmt.fps <= 120)) P('format.fps', `must be an integer 1..120 (got ${JSON.stringify(fmt.fps)})`);
     if (fmt.captions !== undefined && !CAPTION_MODES.includes(fmt.captions)) P('format.captions', `must be one of ${CAPTION_MODES.join(' | ')} (got ${JSON.stringify(fmt.captions)})`);
+    if (fmt.style !== undefined && !STYLES.includes(fmt.style)) P('format.style', `must be one of ${STYLES.join(' | ')} (got ${JSON.stringify(fmt.style)})`);
   }
   if (film.titles !== undefined) {
     if (!isObj(film.titles)) P('titles', 'must be an object { open, end }');
