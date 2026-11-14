@@ -1,6 +1,6 @@
 {
   "name": "cinecode",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Make animated films from an idea or a screenplay: a storyboard becomes a painted, animated, scored and mixed MP4, all by code (only the voices come from Gemini TTS). Skills to write, stage, review and render a film, and to build any character, place or effect the engine doesn't have.",
   "author": { "name": "Zakaria Fatahi" },
   "homepage": "https://github.com/zakariaf/cinecode",

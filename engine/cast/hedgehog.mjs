@@ -61,15 +61,16 @@ function face(T, p, F, P, o) {
   T.restore();
 }
 function paint(T, p0, F, o) {
-  const p = clamp(p0.ball) > 0.55 ? p0 : pitchPose(p0, F.pitch, { hr: -0.45, hy: -1.5 }, { hr: 0.3 * clamp((-p0.hy - 5) / 3.5), hy: 0.6 * clamp((-p0.hy - 5) / 3.5) });   // st.tilt (not when curled; a low snout can't dip)
+  const show = 1 - ease(clamp((clamp(p0.ball) - 0.35) / 0.4)), tucked = show <= 0;   // the face fades into the spines over ball 0.35–0.75
+  const p = pitchPose(p0, F.pitch * show, { hr: -0.45, hy: -1.5 }, { hr: 0.3 * clamp((-p0.hy - 5) / 3.5), hy: 0.6 * clamp((-p0.hy - 5) / 3.5) });   // st.tilt (fading out as it curls; a low snout can't dip)
   const { P } = o, R = roots(p), b = clamp(p.ball);
   const LG = (near, k, root) => ({ l1: 2.6 * (1 - b * 0.5), l2: 2.4 * (1 - b * 0.5), meta: 0, bend: k[0] === 'f' ? -1 : 1, w: [2.2, 1.7, 1.4], col: near ? P.skin : darken(P.skin, 0.8), paw: [1.7, 0.95], pawCol: near ? darken(P.skin, 0.6) : darken(P.skin, 0.5), sh: SH * 0.5, seed: 240 + k.length, curl: p[k + 'u'], curlA: k[0] === 'f' ? -1 : 0.8, ink: 0.7 });
-  if (b < 0.98) { leg(T, R.h2, [p.h2x, p.h2y], LG(false, 'h2')); leg(T, R.f2, [p.f2x, p.f2y], LG(false, 'f2')); leg(T, R.h1, [p.h1x, p.h1y], LG(true, 'h1')); leg(T, R.f1, [p.f1x, p.f1y], LG(true, 'f1')); }
-  const tucked = b > 0.55;
+  const legA = 1 - ease(clamp((b - 0.75) / 0.23));                     // the legs fade as they tuck in (gone at 0.98)
+  if (legA > 0) { T.save(); T.globalAlpha = legA; leg(T, R.h2, [p.h2x, p.h2y], LG(false, 'h2')); leg(T, R.f2, [p.f2x, p.f2y], LG(false, 'f2')); leg(T, R.h1, [p.h1x, p.h1y], LG(true, 'h1')); leg(T, R.f1, [p.f1x, p.f1y], LG(true, 'f1')); T.restore(); }
   if (tucked) { T.save(); T.translate(p.hx, p.hy); o.out.head = T.map(0, 0); o.out.mouth = T.map(4, 2); T.restore(); }
   // belly fringe under the skirt
   const c = bodyC(p);
-  if (b < 0.6) cel(T, ell(c[0] + 1, Math.min(c[1] + 6, -4.2), 14, 3.4, 239, 0.4, p.br), P.belly, SH * 0.5, 0, 239);
+  if (b < 0.6) { T.save(); T.globalAlpha = 1 - ease(clamp((b - 0.4) / 0.2)); cel(T, ell(c[0] + 1, Math.min(c[1] + 6, -4.2), 14, 3.4, 239, 0.4, p.br), P.belly, SH * 0.5, 0, 239); T.restore(); }   // fades out by 0.6
   const Dm = rpoly(dome(p, true), 0.8, { seed: 200, jit: 0.3, step: 4 });
   cel(T, Dm, P.spine, SH, 0, 200);
   T.save(); T.beginPath(); Dm.forEach((q, i) => (i ? T.lineTo(q[0], q[1]) : T.moveTo(q[0], q[1]))); T.closePath(); T.clip();
@@ -81,7 +82,7 @@ function paint(T, p0, F, o) {
   }
   T.restore();
   line(T, [...Dm, Dm[0]], 1.05, { seed: 200, taper: false });
-  if (!tucked) face(T, p, F, P, o);
+  if (!tucked) { T.save(); T.globalAlpha = show; face(T, p, F, P, o); T.restore(); }
 }
 
 const base = POSES.stand;

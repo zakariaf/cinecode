@@ -3,6 +3,11 @@
 //   RULES: { rule: { severity, catches, fix } }
 //   allowProblems(film) → [{ path, message }]: what is wrong with each shot's "lint": { "allow", "note" } block
 
+// The flip rule (below) is written but off: the shipped films fail it until the motion seams are fixed (PLAN-2D item
+// 1.1, package P1). true: lint runs it on every film and lists it in the rule table; off, it runs only when named
+// (lintPlan(plan, { rules: ['flip'] })).
+export const FLIP_RULE = false;
+
 // Each rule: its severity, what it catches and how to fix it (the report's rule table; lint.json "fixes").
 export const RULES = {
   floating: { severity: 'error', catches: 'contact point not on the ground, an anchor surface or a perch, and not airborne by action',
@@ -31,12 +36,16 @@ export const RULES = {
     fix: 'let the change happen on screen (a walk, a pose with a "dur") before or after the cut, start the shot where the last one left them, or cut away first' },
   axis: { severity: 'warning', catches: 'the left/right order of two talking actors flips across a cut',
     fix: 'keep each talker on their side for the whole conversation, or show the crossing inside a shot' },
-  teleport: { severity: 'error', catches: 'an actor moves more than 40 px (rig units) between two frames inside a shot',
+  teleport: { severity: 'error', catches: 'an actor jumps between two frames inside a shot: more than half its own height (at most 40 rig units), its speed changing as much',
     fix: 'walk there instead of placing, or place while the actor is off screen' },
+  ...(FLIP_RULE ? { flip: { severity: 'error', catches: 'an actor\'s drawing mirrors from one frame to the next inside a shot with no turn squash on either side (a snap, not a turn)',
+    fix: 'give the change of facing a "turn" (or a look) before the move, or cut on it' } } : {}),
   scale: { severity: 'warning', catches: 'actor scale differs from set.scaleAt by more than 15% (perched actors use the anchor depth)',
     fix: 'usually an engine bug or a custom kit\'s anchor with a wrong depth: check the anchor on the set sheet' },
   timing: { severity: 'warning', catches: 'overlapping dialogue, shots seen on their own (after a dissolve or fade) for under 1.2 s, captions faster than 20 characters per second',
     fix: 'hold the shot longer ("hold", "dur") so it plays 1.2 s on its own after a dissolve or fade, space the lines ("after"), or shorten the caption' },
+  plan: { severity: 'warning', catches: 'a warning check or the compiler gives the storyboard (a misspelt field, a camera subject not in the scene, a custom beat drawn on past its shot, a two-shot staged too far apart, …)',
+    fix: 'follow the message; one that is intended can be kept in its shot\'s "lint" block' },
 };
 
 // The rules a shot may keep (warnings; a collision is one while a beat brings the two together).

@@ -71,9 +71,13 @@ export async function loadPlan(filmDir) {
   return { film, plan, voices, missing, paths };
 }
 
-/** Worker entry: { filmDir } → { plan, drawFrame }. */
-export async function createSource({ filmDir }) {
-  const { plan } = await loadPlan(filmDir);
+/** A film that asks for the 3D engine ("format": { "engine": "3d" }). */
+export const is3d = film => film?.format?.engine === '3d';
+
+/** Worker entry: { filmDir } → { plan, drawFrame }; a 3D film → { plan, pixels(t) } at `size` (engine/scene3d/source.mjs). */
+export async function createSource({ filmDir }, size) {
+  const { film, plan } = await loadPlan(filmDir);
+  if (is3d(film)) return (await need('engine/scene3d/source.mjs', 'the 3D frame source')).createSource(plan, size);
   const { drawFrame } = await need('engine/film/frame.mjs', 'the frame renderer');
   return { plan, drawFrame };
 }

@@ -77,12 +77,16 @@ function run(ph) {
 // tw wraps it round the front. Where the spine would go below the ground it lies along it.
 function tail(T, p, P, t) {
   const R = roots(p), n = 18, L = 58 + 26 * p.tw, pts = [], ws = [];
+  const th = u => p.ta + 0.07 * Math.sin(t * 1.7) * (1 - p.tw) + (p.tc + p.tw * -1.6) * u + 0.05 * Math.sin(t * 2.3 + u * 3) * (1 - p.tw);
+  let k = 0; for (let i = 0; i < n; i++) k -= Math.cos(th(i / n)) / n;
+  k = Math.min(0, k);                                      // how much the free tail runs back (-1 straight back, 0 not back)
   let x = R.Tb[0], y = R.Tb[1];
   for (let i = 0; i <= n; i++) {
     const u = i / n, w = (4.6 + 6 * Math.sin(Math.PI * Math.min(1, u * 0.82 + 0.1))) * (u > 0.9 ? 1 - (u - 0.9) * 3 : 1);
-    pts.push([x, Math.min(y, -w - 0.6)]); ws.push(w);
-    const th = p.ta + 0.07 * Math.sin(t * 1.7) * (1 - p.tw) + (p.tc + p.tw * -1.6) * u + 0.05 * Math.sin(t * 2.3 + u * 3) * (1 - p.tw);
-    x += -Math.cos(th) * (L / n); y += -Math.sin(th) * (L / n);
+    const under = Math.max(0, y + w + 0.6);                // how far the spine would go below the ground: it lies on the
+    pts.push([x + under * k, Math.min(y, -w - 0.6)]); ws.push(w);   // ground instead, carried back along it as far as the tail runs back
+    const a = th(u);
+    x += -Math.cos(a) * (L / n); y += -Math.sin(a) * (L / n);
   }
   const Lf = [], Rt = [];
   for (let i = 0; i <= n; i++) {

@@ -69,6 +69,8 @@ class Compiler {
     this.lines = []; this.rawSfx = []; this.fx = []; this.captions = []; this.shots = []; this.scenes = []; this.cards = []; this.custom = []; this.warnings = [];
     this.marks = {};
     this.zs = new Map();        // actor → its depth changes [{ t0, t1, z0, z1 }] (DESIGN §10)
+    // a 3D film: its actions are timed on the 3D motion system (engine/scene3d/compile.mjs createTiming)
+    this.T3 = film.resolved.timing?.(film) ?? null;
   }
   q(t) { return Math.round(t * this.fps) / this.fps; }
   warn(msg) { this.warnings.push(msg); }
@@ -139,7 +141,7 @@ class Compiler {
     this.scenes.push(rec);
     this.glances(rec);
     for (const s of rec.shots) this.camera(rec, s);
-    this.finishExits(rec);
+    if (!this.T3) this.finishExits(rec);   // (a 3D exit ends where the 3D kit's side is)
     this.groundDepth(rec);
     this.moveSounds(rec);
     return t;
@@ -204,16 +206,20 @@ class Compiler {
   shot(rec, sh, index, T) {
     const beats = sh.beats || [];
     let gStart = 0, gEnd = 0, maxEnd = 0;
-    const byId = {}, srec = { def: sh, id: sh.id, index, t0: T, beats: [], refs: new Set() };
+    const byId = {}, srec = { def: sh, id: sh.id, index, t0: T, beats: [], refs: new Set() }, ends = [];
     rec.shots.push(srec); this.srec = srec;
     if (sh.music !== undefined) { const m = normMusic(sh.music); if (m) rec.musicEv.push({ t: T, m }); }
     for (const b of beats) {
       const pinned = timeAt(b);
       const base = pinned != null ? pinned : b.with === 'prev' ? gStart : b.with ? (byId[b.with]?.start ?? gStart) : gEnd;
-      const start = base + (b.after ?? 0);
+      let start = base + (b.after ?? 0);
+      // (3D: an action waits for its actor to finish the one before)
+      if (this.T3) { const s = this.T3.free(rec, b, T + start) - T; if (s > start + 1e-6) this.warn(`shot ${sh.id}: ${b.who}'s ${b.do} (beats[${srec.beats.length}]) waits ${(s - start).toFixed(2)} s, until ${b.who} has finished the action before it`); start = s; }
       let dur = 0;
+      this.made = null;
       try { dur = this.beat(rec, srec, b, T + start); }
       catch (e) { throw new Error(`shot ${sh.id}: ${b.do ?? Object.keys(b)[0]} beat: ${e.message}`, { cause: e }); }
+      if (this.T3) dur = this.act3d(rec, sh, srec.beats.length, b, T + start, dur, T);
       dur = Math.max(0, dur || 0);
       if (b.do !== undefined) dur = Math.max(dur, this.depthBeat(rec, b, T + start, dur));
       const end = start + dur;
@@ -223,13 +229,41 @@ class Compiler {
       if (b.with) gEnd = Math.max(gEnd, held); else { gStart = start; gEnd = held; }
       if (b.id) byId[b.id] = { start, end };
       srec.beats.push({ beat: b, t0: T + start, t1: T + end });
+      ends.push({ held, mv: this.made, i: srec.beats.length - 1 });
       maxEnd = Math.max(maxEnd, held);
+    }
+    // a move cut by one that starts during it (in this shot) ends at its cut: the shot doesn't wait for the rest; a cut
+    // that throws away most of the move is warned about
+    if (ends.some(e => e.mv?.cut !== undefined)) {
+      maxEnd = 0;
+      for (const { held, mv, i } of ends) {
+        if (mv?.cut === undefined) { maxEnd = Math.max(maxEnd, held); continue; }
+        maxEnd = Math.max(maxEnd, Math.min(held, mv.cut - T));
+        if (mv.cut - mv.t0 < (mv.t1 - mv.t0) / 2) this.warn(`shot ${sh.id}: ${srec.beats[i].beat.who}'s ${mv.kind} (beats[${i}]) is cut ${(mv.cut - mv.t0).toFixed(2)} s into its ${(mv.t1 - mv.t0).toFixed(2)} s by ${srec.beats[i].beat.who}'s next move, which starts then; the rest of it is dropped`);
+      }
     }
     const len = sh.dur ?? (maxEnd + (sh.hold ?? DEFAULT_HOLD));
     srec.t1 = Math.max(T + 1 / this.fps, this.q(T + len));
     // a line's reaction still on at the cut ends there (the cut hides the change)
     for (const e of srec.reactions || []) if (e.until > srec.t1) Object.assign(e, { until: srec.t1, untilCut: true });
     return srec.t1;
+  }
+
+  // A 3D film: the beat at t acted out on the 3D motion system → its duration there (the flat stand-in's move it started
+  // is slowed or hurried to take as long). A storyboard mistake names its shot and beat; an engine fault reads as one.
+  act3d(rec, sh, i, b, t, dur, shotT0) {
+    let d;
+    try { d = this.T3.act(rec, b, t, shotT0); }
+    catch (e) { throw e?.name === 'StoryError' ? new Error(`shot ${sh.id}, beats[${i}] (${b.do} ${b.who}): ${e.message}`, { cause: e }) : e; }
+    if (d === undefined) return dur;
+    const A = rec.actors.get(b.who), mv = A.moves.find(m => m.t0 === t && m.legs.length);
+    if (mv) {
+      const k = Math.max(d, 1e-3) / (mv.t1 - mv.t0), was = mv.t1;
+      mv.legs = mv.legs.map(L => Object.assign(Object.create(L), { T: L.T * k, at: τ => L.at(τ / k), pose: (τ, rig) => L.pose(τ / k, rig), airborne: τ => L.airborne(τ / k), phaseAt: τ => L.phaseAt?.(τ / k), timeOfPhase: p => L.timeOfPhase(p) * k }));
+      mv.t1 = t + Math.max(d, 1e-3);
+      for (const list of [A.visEv, A.faceEv, A.poseEv]) for (const e of list) if (e.src === mv && Math.abs(e.t - was) < 1e-6) e.t = mv.t1;
+    }
+    return d;
   }
 
   beat(rec, srec, b, t) {
@@ -293,6 +327,8 @@ class Compiler {
       return dur;
     }
     if (d === 'enter') return this.enter(rec, srec, b, t);
+    // (3D only: a door that swings by itself, timed by the 3D side)
+    if (d === 'open' || d === 'close') return 0;
     const A = rec.actors.get(b.who);
     if (!A || !A.place0) throw new Error(`"${b.who}" is not in scene ${rec.id}`);
     srec.refs.add(b.who);
@@ -303,7 +339,8 @@ class Compiler {
       case 'pose': {
         // an explicit dur is how long the change takes (an old woman rising over 2 s); otherwise a quick 0.35 s blend
         const dur = b.dur ?? 1;
-        A.setPose(t, b.pose, b.dur !== undefined ? Math.max(0.12, dur) : 0.35, 'beat');
+        const [tp, src] = this.poseTime(A, srec, b, t);
+        A.setPose(tp, b.pose, b.dur !== undefined ? Math.max(0.12, dur) : 0.35, src);
         if (b.expr) this.emote(A, srec, t, b.expr);
         if (b.pose !== 'sleep') A.sleepEv.push({ t, asleep: false });
         return dur;
@@ -311,6 +348,9 @@ class Compiler {
       case 'gesture': {
         const g = rig.gestures[b.name], dur = g.dur;
         A.gest.push({ t0: t, t1: t + dur, name: b.name }); A.gest.sort((a, c) => a.t0 - c.t0);
+        // (over a walk or run the gait keeps its feet, lift and body height: a gesture that leaves the ground doesn't)
+        const mv = A.moves.find(m => m.legs?.some(L => L.type === 'route' && !L.hops) && m.t0 < t + dur && t < A.end(m)), st = rig.poses.stand;
+        if (mv && [0.25, 0.5, 0.75].some(u => (g.at(u, st).lift || 0) - (st.lift || 0) > 0.5)) this.warn(`shot ${srec.id}: ${A.id}'s gesture "${b.name}" (beats[${srec.beats.length}]) leaves the ground, but it comes during ${A.id}'s ${mv.kind}, whose gait keeps the feet, lift and body height: the gesture's lift is left out (give it after the ${mv.kind})`);
         return dur;
       }
       case 'look': {
@@ -328,6 +368,14 @@ class Compiler {
         return 0.3;
       }
       case 'turn': {
+        // (during a move: the move's end facing, the way the actor faces once it is over)
+        const mv = this.during(A, t + 0.12), e = mv && A.faceEv.find(x => x.src === mv && x.t === mv.t1);
+        if (e) {
+          const f1 = b.face === 'around' ? -e.face : faceVal(b.face);
+          this.warn(`shot ${srec.id}: ${A.id}'s turn (beats[${srec.beats.length}]) comes during ${A.id}'s ${mv.kind}, which ends ${(mv.t1 - srec.t0).toFixed(2)} s into the shot: it becomes the ${mv.kind}'s end facing${mv.beat.face ? ` (over its own "face")` : ''}`);
+          if (f1) Object.assign(e, { face: f1, flip: f1 !== A.faceAt(mv.t1 - 1e-4) });
+          return 0.25;
+        }
         const f0 = A.faceAt(t), f1 = b.face === 'around' ? -f0 : faceVal(b.face);
         if (f1 && f1 !== f0) { A.faceEv.push({ t: t + 0.12, face: f1, flip: true }); A.faceEv.sort((a, c) => a.t - c.t); }
         return 0.25;
@@ -335,8 +383,9 @@ class Compiler {
       case 'emote': this.emote(A, srec, t, b.expr); return 0;
       case 'sit': case 'stand': case 'lie': case 'sleep': {
         if (d !== 'sleep') A.sleepEv.push({ t, asleep: false });
-        if (d === 'sleep') { A.preSleep = A.basePoseName(t); A.sleepEv.push({ t: t + 0.3, asleep: true }); }
-        A.setPose(t, d, 0.6, 'beat');
+        const [tp, src] = this.poseTime(A, srec, b, t);
+        if (d === 'sleep') { A.preSleep = A.basePoseName(tp); A.sleepEv.push({ t: tp + 0.3, asleep: true }); }
+        A.setPose(tp, d, 0.6, src);
         A.sleepEv.sort((a, c) => a.t - c.t);
         return 0.6;
       }
@@ -365,12 +414,17 @@ class Compiler {
         return dur;
       }
       case 'set': {
-        if (b.params) A.paramEv.push({ t, params: b.params });
+        // ("dur": numbers and hex colours ease to the new values over it, and the beat takes that long; else at once)
+        const ease = b.params && b.dur > 0;
+        if (b.params) A.paramEv.push({ t, params: b.params, ...(ease ? { t1: t + b.dur } : {}) });
         if (b.pose) A.setPose(t, b.pose, 0, 'beat');
         if (b.expr) this.emote(A, srec, t, b.expr);
-        return 0;
+        return ease ? b.dur : 0;
       }
       case 'blink': A.blinks.push(t); return 0.2;
+      // (3D only: a car's drive and stop, a ball's roll; the stand-in goes as a walk, or hops off the hands it is in)
+      case 'drive': case 'roll': return this.move(rec, srec, A, b, t, d === 'roll' && A.posAt(t).mode === 'mount' ? 'hop' : 'walk');
+      case 'stop': return 0;
       default: throw new Error(`unknown action "${d}"`);
     }
   }
@@ -382,6 +436,17 @@ class Compiler {
     const cut = t - srec.t0 < 0.1, e = { t: cut ? srec.t0 : t, expr, cut };
     if (until != null) { e.until = until; (srec.reactions ??= []).push(e); }
     A.exprEv.push(e); A.exprEv.sort((a, c) => a.t - c.t);
+  }
+  // The move A is making at t (one not cut short), or null.
+  during(A, t) { const mv = A.moveAt(t); return mv && !mv.place && mv.legs.length && t < mv.t1 && mv.cut === undefined ? mv : null; }
+  // When a pose beat at t takes effect → [time, src]: at t; or, during a move (whose drawing is the gait's), at the
+  // move's end, in place of the move's own end pose (dropped with the move if a later one cuts it).
+  poseTime(A, srec, b, t) {
+    const mv = this.during(A, t); if (!mv) return [t, 'beat'];
+    const own = mv.beat.pose ?? mv.beat.end;
+    this.warn(`shot ${srec.id}: ${A.id}'s ${b.do === 'pose' ? `pose "${b.pose}"` : b.do} (beats[${srec.beats.length}]) comes during ${A.id}'s ${mv.kind}, which ends ${(mv.t1 - srec.t0).toFixed(2)} s into the shot: it is taken when the ${mv.kind} ends${own ? ` (over its own "pose": "${own}")` : ''}`);
+    A.poseEv = A.poseEv.filter(e => !(e.src === mv && e.t === mv.t1));
+    return [mv.t1, mv];
   }
 
   lookTarget(rec, tgt) {
@@ -537,7 +602,7 @@ class Compiler {
       if (sIdx.has(i) || sIdx.has(i + 1)) {
         flush(true);
         const a = sIdx.has(i) ? stonePos(i) : groundPos(S, P[i][0], P[i][1], A.k), b = sIdx.has(i + 1) ? stonePos(i + 1) : groundPos(S, P[i + 1][0], P[i + 1][1], A.k);
-        legs.push(new JumpLeg({ A: a, B: b, rig, sz: A.sz }));
+        legs.push(new JumpLeg({ A: a, B: b, rig, sz: A.sz, face0: legs.length ? legs[legs.length - 1].face1 : face0 }));
         run = [P[i + 1]];
       } else run.push(P[i + 1]);
     }
@@ -583,7 +648,7 @@ class Compiler {
     let cur = p0;
     if (cur.mode !== 'ground' && cur.mode !== 'off' && !(cur.mode === 'surface' && rec.S.onStone(cur.x, cur.y))) {
       const g = this.approach(rec, A, cur, dest, 0);
-      legs.push(new JumpLeg({ A: cur, B: g, rig, sz: A.sz })); cur = g;
+      legs.push(new JumpLeg({ A: cur, B: g, rig, sz: A.sz, face0: opts.face0 ?? (p0.face || 1) })); cur = g;
     }
     let target = dest, up = null;
     const stone = p => p.mode === 'surface' && rec.S.onStone(p.x, p.y);
@@ -591,27 +656,62 @@ class Compiler {
     const r = this.routeLegs(rec, A, cur, target, gait, mult, { face0: opts.face0 ?? (p0.face || 1), ...opts });
     legs.push(...r.legs);
     let end = up || { ...groundPos(rec.S, r.end[0], r.end[1], A.k), anchor: target.anchor ?? null, faceTo: dest.faceTo, face: dest.face };
-    if (up) legs.push(new JumpLeg({ A: { ...groundPos(rec.S, r.end[0], r.end[1], A.k) }, B: up, rig, sz: A.sz }));
+    if (up) legs.push(new JumpLeg({ A: { ...groundPos(rec.S, r.end[0], r.end[1], A.k) }, B: up, rig, sz: A.sz, face0: legs.length ? legs[legs.length - 1].face1 : opts.face0 ?? (p0.face || 1) }));
     return { legs, end };
   }
   addMove(A, t, legs, kind, end, b, extra = {}) {
     const total = legs.reduce((a, L) => a + L.T, 0);
+    this.made = null;
     // (into a hover the flapping goes straight on: no blend back to a resting pose)
-    const mv = { t0: t, t1: t + total, legs, kind, end, ...(end?.hover != null ? { noBlendOut: true } : {}), ...extra };
+    const mv = { t0: t, t1: t + total, legs, kind, end, beat: b, ...(end?.hover != null ? { noBlendOut: true } : {}), ...extra };
     if (!legs.length || total <= 1e-6) {
       if (b.face) { A.faceEv.push({ t, face: faceVal(b.face), flip: faceVal(b.face) !== A.faceAt(t) }); A.faceEv.sort((a, c) => a.t - c.t); }
       if (b.pose) A.setPose(t, b.pose, 0.3, 'beat');
       return 0;
     }
-    A.addMove(mv);
+    const face0 = A.faceAt(t - 1e-6);
+    if (!this.T3) this.carryStride(A, t, legs);   // (3D: the 3D actor moves and turns itself)
+    A.addMove(mv); this.made = mv;
+    if (!this.T3) this.legTurns(A, mv, face0);
+    A.sleepEv.push({ t, asleep: false }); A.sleepEv.sort((a, c) => a.t - c.t);
+    // (cut at once by a move laid earlier that starts during it: it has no end, and takes only until the cut)
+    if (mv.cut !== undefined) return mv.cut - t;
     const last = legs[legs.length - 1], moveFace = last.face1 ?? A.faceAt(mv.t1 - 1e-4);
     const endFace = faceVal(b.face) || end.faceTo || moveFace;
     A.faceEv.push({ t: mv.t1, face: endFace, src: mv, flip: endFace !== moveFace });
     A.faceEv.sort((a, c) => a.t - c.t);
     const endPose = b.pose ?? b.end ?? (end.mode === 'perch' ? (rigPose(A.rig, 'perch')?.name || 'stand') : end.mode === 'mount' ? (rigPose(A.rig, 'sit')?.name || 'stand') : 'stand');
     A.setPose(mv.t1, endPose, 0, mv);
-    A.sleepEv.push({ t, asleep: false }); A.sleepEv.sort((a, c) => a.t - c.t);
     return total;
+  }
+  // A move that starts as the one before it ends (within a frame) or cuts into it, on the same gait, goes on with its
+  // stride where it was, so the legs carry straight on instead of blending through a fresh step.
+  carryStride(A, t, legs) {
+    const prev = A.moveAt(t - 1e-6), L0 = legs[0];
+    if (!prev || prev.place || !prev.legs.length || t - A.end(prev) >= 1 / this.fps || L0.type !== 'route' || L0.hops) return;
+    const r = A.legAt(prev, Math.min(t, A.end(prev)));
+    if (r.L.type !== 'route' || r.L.hops || r.L.gait !== L0.gait) return;
+    const d = r.L.phaseAt(r.τ) - L0.phase0;
+    for (const L of legs) if (L.type === 'route') { L.phase0 += d; L.args.phase0 = L.phase0; }
+  }
+  // A move turns through the squash (a flip event, dropped with the rest of the move if a later one cuts it) where it
+  // sets off the other way from face0 (the way the actor faced), where a leg faces otherwise than the one before it,
+  // and where a route turns back.
+  legTurns(A, mv, face0) {
+    let f = face0, τ0 = 0;
+    const flip = (τ, face) => { if (face !== f && mv.t0 + τ < A.end(mv)) A.faceEv.push({ t: mv.t0 + τ, face, flip: true, src: mv }); f = face; };
+    for (const L of mv.legs) {
+      flip(τ0, L.at(0).face ?? 1);
+      if (L.type === 'route') for (let i = 1; i < L.F.length; i++) {
+        if (L.F[i] === L.F[i - 1]) continue;
+        // (the route's facing switches half way between the two samples)
+        const u = (L.U[i - 1] + L.U[i]) / 2; let a = 0, b = L.T;
+        for (let k = 0; k < 40; k++) { const m = (a + b) / 2; if (L.uAt(m) < u) a = m; else b = m; }
+        flip(τ0 + b, L.F[i]);
+      }
+      τ0 += L.T;
+    }
+    A.faceEv.sort((a, c) => a.t - c.t);
   }
   move(rec, srec, A, b, t, kind) {
     this.tNow = t;
@@ -643,9 +743,10 @@ class Compiler {
       legs.push(...r.legs); cur = groundPos(rec.S, r.end.x, r.end.y, A.k); tj = t + legs.reduce((a, L) => a + L.T, 0);
     }
     const Afn = cur.mode === 'mount' && cur.carrier ? (O => τ => O.mountAt(tj + τ, A))(rec.actors.get(cur.carrier)) : null;
-    let J = new JumpLeg({ A: cur, B: C.mountAt(tj + 0.6, A), rig: A.rig, sz: A.sz });
+    const face0 = legs.length ? legs[legs.length - 1].face1 : A.faceAt(t);
+    let J = new JumpLeg({ A: cur, B: C.mountAt(tj + 0.6, A), rig: A.rig, sz: A.sz, face0 });
     const B = C.mountAt(tj + J.T * 0.78, A);
-    J = new JumpLeg({ A: cur, B, rig: A.rig, sz: A.sz, Afn, Bfn: τ => C.mountAt(tj + τ, A) });
+    J = new JumpLeg({ A: cur, B, rig: A.rig, sz: A.sz, Afn, Bfn: τ => C.mountAt(tj + τ, A), face0 });
     legs.push(J);
     return this.addMove(A, t, legs, 'hop', { ...B, faceTo: C.faceAt(tj + J.T) }, b, { framing: 'all', from: p0, mount: C });
   }
@@ -660,7 +761,7 @@ class Compiler {
       const [x, y] = this.walkable(rec, A, cp.x + side * (Math.max(fc.front, fc.back) + fa.w * 0.7 + 8), cp.y, t);
       land = groundPos(S, x, y, A.k);
     }
-    const J = new JumpLeg({ A: p0, B: land, rig: A.rig, sz: A.sz, Afn: τ => C.mountAt(t + τ, A) }), legs = [J];
+    const J = new JumpLeg({ A: p0, B: land, rig: A.rig, sz: A.sz, Afn: τ => C.mountAt(t + τ, A), face0: A.faceAt(t) }), legs = [J];
     let end = land;
     if (land !== dest) { const r = this.path(rec, A, land, dest, 'hop', gait, mult, { face0: J.face1 }); legs.push(...r.legs); end = r.end; }
     return this.addMove(A, t, legs, 'hop', end, b, { framing: 'all', from: p0 });
@@ -801,7 +902,7 @@ class Compiler {
       }
     }
     const dur = this.addMove(A, t, legs, 'exit', end, b, { framing: 'start', from: p0, final: T.kind === 'side' ? { ...end, mode: 'off' } : null, side: T.kind === 'side' ? T.side : null });
-    if (T.kind === 'side') { const mv = A.moves[A.moves.length - 1]; A.visEv.push({ t: t + dur, visible: false, src: mv }); A.visEv.sort((a, c) => a.t - c.t); }
+    if (T.kind === 'side' && this.made?.cut === undefined) { const mv = A.moves[A.moves.length - 1]; A.visEv.push({ t: t + dur, visible: false, src: mv }); A.visEv.sort((a, c) => a.t - c.t); }
     return dur;
   }
 
@@ -1018,8 +1119,11 @@ class Compiler {
           if (deep < 0.6) out.push({ t, name: 'splash', gain: (0.18 + 0.25 * weight) * (1 - deep), params: { size: 0.2 + 0.2 * weight }, x, y, who: id });
           return;
         }
+        if (kind === 'paw') { out.push({ t, name: FOOT[surf] || 'footstep-grass', gain: 0.1, params: { weight: 0.1 }, x, y, who: id }); return; }     // (3D: a cat's pads, near silent)
         if (kind === 'step') {
           if (water) { out.push({ t, name: 'splash', gain: 0.35 + 0.4 * weight, params: { size: 0.3 + 0.4 * weight }, x, y, who: id }); this.fx.push({ name: 'splash', t0: t, t1: t + 1.2, x, y, s: s * 0.5, seed: hash32(`${id}${t}`), scene: rec.id }); return; }
+          // (3D: a rig in socks treads soft: half as loud and duller)
+          if (rig.feet === 'socks') { out.push({ t, name: FOOT[surf] || 'footstep-grass', gain: 0.5 * (0.3 + 0.45 * weight), params: { weight: 0.5 * weight }, x, y, who: id }); return; }
           out.push({ t, name: FOOT[surf] || 'footstep-grass', gain: 0.3 + 0.45 * weight, params: { weight }, x, y, who: id });
           if (gait === 'run' && (surf === 'dirt' || surf === 'path' || surf === 'sand') && weight > 0.3) this.fx.push({ name: 'dust', t0: t, t1: t + 1.3, x, y, s: s * 0.6, dir: A.faceAt(t), seed: hash32(`${id}${t}`), scene: rec.id, n: 6 });
         } else if (kind === 'land') {
@@ -1029,7 +1133,10 @@ class Compiler {
         } else if (kind === 'hop') out.push({ t, name: 'hop', gain: 0.35 + 0.4 * weight, params: { weight }, x, y, who: id });
         else if (kind === 'flap') out.push({ t, name: 'wing-flap', gain: 0.25 + 0.3 * weight, params: {}, x, y, who: id });
       };
-      for (const mv of A.moves) {
+      // (3D: the feet of the 3D actor, as the timing laid them)
+      const falls = this.T3?.footfalls(rec, id);
+      for (const f of falls ?? []) contact(f.t, f.x, f.y, 1, f.kind, 'walk');
+      for (const mv of falls ? [] : A.moves) {
         if (mv.place) continue;
         let t0 = mv.t0; const cut = A.end(mv);
         for (const L of mv.legs) {

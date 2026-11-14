@@ -38,7 +38,8 @@ function legDraw(T, p, k, col) {
   line(T, [h, knee], 0.75, { seed: 300 + i, color: col, taper: false });
   line(T, [knee, [f[0], f[1] - 0.2], [f[0] + (i === 2 ? -0.7 : 0.7), f[1]]], 0.55, { seed: 310 + i, color: col, taper: false });
 }
-function paint(T, p, F, o) {
+function paint(T, p0, F, o) {
+  const p = { ...p0, by: p0.by - F.breath * 0.12 };                  // breath lifts the body
   const { P, t } = o, op = clamp(F.open);
   for (const k of ['r1', 'r2', 'r3']) legDraw(T, p, k, darken(P.leg, 0.75));
   T.save(); T.translate(0, -2.8 + p.by); T.rotate(p.br);

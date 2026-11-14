@@ -89,7 +89,7 @@ function hopper(stride, h) {
     const p = { ...POSES.stand }, a = footAt(ph, 0, 0.5, stride, -1, 0), b = footAt(ph, 0, 0.5, stride, 1.5, 0);
     const air = a.down ? 0 : Math.sin(Math.PI * a.u);
     p.f1x = a.x; p.f2x = b.x; p.cf1 = +a.down; p.cf2 = +b.down; p.lift = h * air;
-    p.by = a.down ? 1.2 * Math.sin(Math.PI * a.u) : 0; p.br = a.down ? 0.05 : -0.1 * air; p.tf = a.down ? -0.25 * Math.sin(Math.PI * a.u) : 0.2 * air;
+    p.by = a.down ? 1.2 * Math.sin(Math.PI * a.u) : 0; p.br = a.down ? 0.05 * Math.sin(Math.PI * a.u) : -0.1 * air; p.tf = a.down ? -0.25 * Math.sin(Math.PI * a.u) : 0.2 * air;
     p.ws = 0.12 * air; p.wa = 0.5 * air;
     return p;
   };
@@ -98,8 +98,9 @@ const walk = hopper(G.walk.stride, 4), run = hopper(G.run.stride, 8);
 function fly(ph) {                                    // one flap, then a short folded glide (bounding flight)
   const p = { ...POSES.spread }, q = frac(ph), flap = q < 0.6;
   const v = q / 0.6;
-  p.ws = flap ? 1 : lerp(1, 0.1, ease(clamp((q - 0.6) / 0.12))) * (q > 0.9 ? lerp(0.1, 1, ease((q - 0.9) / 0.1)) / 0.1 * 0.1 : 1);
-  p.wa = flap ? Math.cos(Math.PI * 2 * v) : 0.6;
+  const open = ease(clamp((q - 0.9) / 0.1));          // the wings fold over [0.6, 0.72] and reopen over the last 0.1
+  p.ws = flap ? 1 : lerp(lerp(1, 0.1, ease(clamp((q - 0.6) / 0.12))), 1, open);
+  p.wa = flap ? Math.cos(Math.PI * 2 * v) : lerp(lerp(1, 0.6, ease(clamp((q - 0.6) / 0.12))), 1, open);
   p.lg = 0; p.br = -0.08; p.tf = 0.1; p.f1x = -2; p.f2x = -1; p.fy = 2;
   p.lift = 6 + (flap ? 2 * Math.sin(Math.PI * v) : -2 * Math.sin(Math.PI * (q - 0.6) / 0.4));
   return p;

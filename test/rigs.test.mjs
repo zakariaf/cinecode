@@ -842,3 +842,80 @@ test('squirrel: "sprawl" is the flop for flat ground — flat on the grass, the 
   assert.ok(b[0] < -40, `the tail lies out behind (${b[0].toFixed(1)})`);
   for (let u = 0.1; u < 1; u += 0.15) assert.ok(Q.bbox(Q.gestures.laugh.at(u, Q.poses.sprawl))[3] <= GROUND_TOL, `laughing while sprawled stays above the ground (u ${u.toFixed(2)})`);
 });
+
+// ───────────── continuity: no one-step pops in gaits and pose blends (P5) ─────────────
+// Each gait cycle and each blend from stand to every pose is swept in 200 steps and drawn on a fixed canvas (the rig's larger
+// side 60 px). The outline's change from one step to the next (the summed change of alpha, in px) may be at most 4× the median
+// change of the steps that move at all: a single step far above that is a pop (a wing that snaps open, a throat sac or a face
+// that appears). The lift of a hop is left out: it moves the whole drawing and is fastest at take-off by design.
+// Known failures, outside this package's fix (each named with what it is):
+const CONTINUITY_KNOWN = new Set([
+  'badger gait run',          // the near fore paw jumps from the ground into the swing in one step (a real pop)
+  'butterfly stand→open',     // the proboscis switches from straight to coiled at one step (a real pop)
+  'frog gait walk', 'frog gait hop', 'frog gait run',   // the hind knees flip mid-hop: ik2 picks the knee side by the sign of the limb's
+                                                        // vertical direction, and the trailing hind leg passes level with the hip (real)
+  'human stand→arms-crossed', 'human stand→carry',   // the hands switch shape halfway through the blend (real, small)
+  'mouse gait run',           // the body's fast phase stops dead (a hard stop in its motion, not a shape pop); near the limit
+  'squirrel stand→hold',      // the acorn appears at full size halfway through the blend (a real pop)
+]);
+function outlineSteps(rig, poses, PX = 60) {
+  const s = PX / Math.max(rig.height, rig.width);
+  let b = [Infinity, Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < poses.length; i += 10) { const r = rig.draw(null, 0, 0, s, 1, { pose: poses[i], shadow: false }).bounds; b = [Math.min(b[0], r[0]), Math.min(b[1], r[1]), Math.max(b[2], r[2]), Math.max(b[3], r[3])]; }
+  const m = PX * 0.3, W = Math.ceil(b[2] - b[0] + 2 * m), H = Math.ceil(b[3] - b[1] + 2 * m), cv = createCanvas(W, H), ctx = cv.getContext('2d'), d = [];
+  let prev = null;
+  for (const pose of poses) {
+    ctx.clearRect(0, 0, W, H); rig.draw(ctx, m - b[0], m - b[1], s, 1, { pose, shadow: false, t: 0.5 });
+    const a = ctx.getImageData(0, 0, W, H).data;
+    if (prev) { let n = 0; for (let i = 3; i < a.length; i += 4) n += Math.abs(a[i] - prev[i]); d.push(n / 255); }
+    prev = a;
+  }
+  return d;
+}
+for (const kind of listRigs().filter(k => !['planet', 'telescope'].includes(k))) {
+  test(`${kind}: gaits and pose blends change smoothly (no one-step pops)`, () => {
+    const rig = getRig(kind), bad = [], sweeps = Object.entries(rig.gaits).map(([g, f]) => [`gait ${g}`, f]);
+    const poses = Object.entries(rig.poses);
+    poses.forEach(([n, P], i) => { if (P !== rig.poses.stand && poses.findIndex(e => e[1] === P) === i) sweeps.push([`stand→${n}`, u => mixPose(rig.poses.stand, P, u)]); });
+    for (const [name, at] of sweeps) {
+      if (CONTINUITY_KNOWN.has(`${kind} ${name}`)) continue;
+      const d = outlineSteps(rig, Array.from({ length: 201 }, (_, i) => ({ ...at(i / 200), lift: 0 })));
+      const moving = d.filter(v => v > 0.5).sort((x, y) => x - y), med = moving[moving.length >> 1] || 0, max = Math.max(...d);
+      if (max > 4 * med) bad.push(`${name}: ${max.toFixed(1)} px at step ${d.indexOf(max)} (median ${med.toFixed(1)})`);
+    }
+    assert.deepEqual(bad, []);
+  });
+}
+
+test('songbird: the wings fold and reopen smoothly at the end of each flap cycle; a hop lands without a pitch snap', () => {
+  const B = getRig('songbird');
+  for (const g of ['fly', 'walk', 'run']) {
+    const end = B.gaits[g](1 - 1e-6), start = B.gaits[g](0);
+    for (const k of ['ws', 'wa', 'br']) assert.ok(Math.abs(end[k] - start[k]) < 0.01, `${g}: ${k} at the end of the cycle (${end[k].toFixed(3)}) meets the start (${start[k].toFixed(3)})`);
+  }
+  for (const q of [0.6, 0.72, 0.9]) for (const k of ['ws', 'wa']) assert.ok(Math.abs(B.gaits.fly(q - 1e-6)[k] - B.gaits.fly(q + 1e-6)[k]) < 0.01, `fly: no jump in ${k} at ${q}`);
+});
+
+test('frog and beetle breathe; the frog sways as it talks and its throat sac grows from nothing', () => {
+  for (const kind of ['frog', 'beetle']) {
+    const R = getRig(kind), top = st => R.draw(null, 0, 0, 10, 1, { pose: R.poses.stand, shadow: false, ...st }).bounds[1];
+    assert.ok(top({ breath: 0 }) - top({ breath: 1 }) > 1, `${kind}: a full breath lifts the top of the drawing (${(top({ breath: 0 }) - top({ breath: 1 })).toFixed(2)} px at scale 10)`);
+  }
+  const F = getRig('frog'), head = talk => F.draw(null, 0, 0, 10, 1, { pose: F.poses.stand, shadow: false, talk }).head;
+  assert.ok(Math.hypot(head(1)[0] - head(0)[0], head(1)[1] - head(0)[1]) > 1, 'talking tips the head');
+  // the sac: at 1% inflation almost nothing shows (it grows out from behind the jaw), at 10% a little, at 100% the full sac
+  const dim = { s: 10, W: 340, H: 240 }, base = render(F, { pose: F.poses.stand }, dim).data;
+  const shown = sac => pixelDiff(render(F, { pose: { ...F.poses.stand, sac } }, dim).data, base);
+  assert.ok(shown(0.06) < 30, `sac 0.06 shows only ${shown(0.06)} px`);
+  assert.ok(shown(0.06) < shown(0.3) && shown(0.3) < shown(1), 'and grows steadily');
+});
+
+test('fox: sitting down, the tail lies out along the ground behind it instead of crushing into a box', () => {
+  const X = getRig('fox');
+  for (let i = 0; i <= 10; i++) {                                         // the first half of the blend (the tail still runs back)
+    const u = i / 20, p = mixPose(X.poses.stand, X.poses.sit, u);
+    const rump = p.bx - 28 * p.bl * Math.cos(p.br) + 4 * Math.sin(p.br);   // the tail's root (fox.mjs roots().Tb)
+    const back = rump - X.draw(null, 0, 0, 1, 1, { pose: p, shadow: false, t: 0.5 }).bounds[0];
+    assert.ok(back > 50, `sit blend ${u.toFixed(2)}: the brush (58 long) reaches ${back.toFixed(1)} units behind the rump`);
+  }
+});

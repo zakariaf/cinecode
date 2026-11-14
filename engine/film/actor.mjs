@@ -46,6 +46,9 @@ export const PITCH = 0.8, PITCH_MAX = 0.9, SKY = 0.35;
 // move (in rig heights) that takes the longest, and the least move (rig heights) that counts as one
 export const GEST_MIN = 0.15, GEST_MAX = 0.3;
 const GEST_FAR = 0.3, GEST_STILL = 0.004;
+// the keys a gait keeps under a gesture besides its feet: the lift and the hip / body height (the human's lift in leg
+// lengths and hip height; the animals' body y)
+const GAIT_BODY = ['lift', 'liftL', 'gy', 'gyW', 'by'];
 // an expression change: the blink that hides it (s: closing before the change, shut either side of it, opening after)
 // and the time the mouth takes to ease to the new face's openness (talk carries it)
 const SWAP_CLOSE = 0.0625, SWAP_HOLD = 0.021, SWAP_OPEN = 0.1, SWAP_MOUTH = 0.125;
@@ -67,7 +70,21 @@ function lastAt(list, t) { let i = -1; for (let j = 0; j < list.length; j++) if 
 // a turn: the squash's half-width (s) and its depth (the drawing's width at the flip = 1 − TURN_DEPTH)
 export const TURN_HALF = 0.14, TURN_DEPTH = 0.7;
 const VERTICAL = new Set(['up', 'sky', 'down']);
+// the head's pitch asleep: a droop (a head already lower stays where it is)
+export const SLEEP_TILT = -0.35;
 const frac = x => x - Math.floor(x);
+// rig params u of the way from `from` to `to`: numbers and #rrggbb colours eased, other values as `to` has them
+const HEX = /^#[0-9a-f]{6}$/i;
+function easeParams(from, to, u) {
+  const out = {}, ch = (h, i) => parseInt(h.slice(1 + 2 * i, 3 + 2 * i), 16);
+  for (const [k, v] of Object.entries(to)) {
+    const a = from[k];
+    if (typeof v === 'number' && typeof a === 'number') out[k] = lerp(a, v, u);
+    else if (HEX.test(v) && HEX.test(a)) out[k] = '#' + [0, 1, 2].map(i => Math.round(lerp(ch(a, i), ch(v, i), u)).toString(16).padStart(2, '0')).join('');
+    else out[k] = v;
+  }
+  return out;
+}
 
 // ───────────── slopes ─────────────
 // the steepest a body is pitched (rad), the time (s) a change of pitch takes, and the rigs that stand upright on a slope
@@ -205,14 +222,16 @@ function wadeSink(S, X, Y, Sc, { depth = null, height = 40, sink0 = 0 }) {
 
 // A jump from one place to another (onto a stump, across stepping stones, down from a ledge). Afn / Bfn (τ → pos)
 // make an end move with something (a carrier's riding point); A / B are then their snapshots, used for the timing.
+// face0: the way the actor faces as it jumps, kept unless the jump goes sideways more than JUMP_TURN of its width.
+const JUMP_TURN = 0.25;
 export class JumpLeg {
-  constructor({ A, B, rig, sz, Afn = null, Bfn = null }) {
+  constructor({ A, B, rig, sz, Afn = null, Bfn = null, face0 = null }) {
     this.type = 'jump'; this.A = A; this.B = B; this.Afn = Afn; this.Bfn = Bfn;
     const g = rig.gestures?.jump, dist = Math.hypot(B.x - A.x, B.y - A.y), hpx = sz.height * Math.max(A.s, B.s);
     this.T = (g?.dur ?? 0.8) * clamp(Math.sqrt(dist / Math.max(1, hpx * 0.9)), 0.85, 1.7);
     this.rise = A.y - B.y;                                // > 0 when jumping up
     this.arc = Math.max(0, this.rise) * 0.3 + Math.max(0, -this.rise) * 0.08 + dist * 0.06;
-    this.face1 = Math.abs(B.x - A.x) > 2 ? Math.sign(B.x - A.x) : (A.face || 1);
+    this.face1 = Math.abs(B.x - A.x) > JUMP_TURN * sz.width * Math.max(A.s, B.s) ? Math.sign(B.x - A.x) : (face0 ?? (A.face || 1));
     this.g = g;
   }
   w(τ) { return ease(clamp((τ / this.T - 0.27) / 0.51)); }
@@ -446,6 +465,9 @@ export class Actor {
       const keep = e => !(e.src === m && e.t > mv.t0 - 1e-9);
       this.poseEv = this.poseEv.filter(keep); this.faceEv = this.faceEv.filter(keep); this.visEv = this.visEv.filter(keep);
     }
+    // and a move already laid that starts during the new one (a beat compiled earlier, timed later) cuts it there
+    const next = this.moves.find(m => m.t0 > mv.t0 && m.t0 < mv.t1);
+    if (next) mv.cut = next.t0;
     this.moves.push(mv); this.moves.sort((a, b) => a.t0 - b.t0);
   }
   // ── face ──
@@ -465,6 +487,12 @@ export class Actor {
     let k = 1;
     for (const e of this.faceEv) if (e.flip && Math.abs(t - e.t) < TURN_HALF) k = Math.min(k, 1 - TURN_DEPTH * Math.cos((Math.PI / 2) * ((t - e.t) / TURN_HALF)));
     return k;
+  }
+  // The facing as a number that eases from one side to the other across a turn's squash (−1..1): where the head is, for
+  // eyelines, so a look at an actor that turns, or by one, doesn't jump at the flip.
+  sideAt(t) {
+    for (const e of this.faceEv) if (e.flip && Math.abs(t - e.t) < TURN_HALF) return lerp(this.faceAt(e.t - 1e-6), this.faceAt(e.t), ease((t - e.t + TURN_HALF) / (2 * TURN_HALF)));
+    return this.faceAt(t);
   }
   // ── poses ──
   basePoseAt(t) {
@@ -498,8 +526,8 @@ export class Actor {
     const mv = this.moveAt(t);
     return hoverPose(this.rig, (t - (mv ? mv.t0 : 0)) * flapRate(this.rig, this.sz));
   }
-  // upto: the pose under that gesture (the gestures that start before it only)
-  poseAt(t, upto = null) {
+  // The pose drawn at t without gestures (at rest, on a move, or blending into or out of one) → { p, moving, gait }.
+  bodyPoseAt(t) {
     const mv = this.moveAt(t);
     let p = this.restPoseAt(t), moving = false, gait = null;
     if (mv && !mv.place && mv.legs.length) {
@@ -508,12 +536,24 @@ export class Actor {
         moving = true;
         p = this.legPose(mv, t);
         const r = this.legAt(mv, t); gait = r.L.type === 'route' && !r.L.hops ? r.L.gait : null;
-        if (t - mv.t0 < BLEND_IN) p = this.mix(this.hoverAt(mv.t0 - 1e-6) ? this.restPoseAt(mv.t0 - 1e-6) : this.basePoseAt(mv.t0), p, ease((t - mv.t0) / BLEND_IN));
+        if (t - mv.t0 < BLEND_IN) p = this.mix(this.blendFrom(mv), p, ease((t - mv.t0) / BLEND_IN));
       } else if (t - e < BLEND_OUT && !mv.noBlendOut) {
         const last = this.legPose(mv, e);
         p = this.mix(last, p, ease((t - e) / BLEND_OUT));
       }
     }
+    return { p, moving, gait };
+  }
+  // What a move blends in from: the pose drawn just before it starts when a move before it is still under way or
+  // blending out then (its stride, not a stand that was never drawn); else the pose at rest.
+  blendFrom(mv) {
+    const t = mv.t0 - 1e-6, prev = this.moveAt(t);
+    if (prev && !prev.place && prev.legs.length && (t < this.end(prev) || (t - this.end(prev) < BLEND_OUT && !prev.noBlendOut))) return this.bodyPoseAt(t).p;
+    return this.hoverAt(t) ? this.restPoseAt(t) : this.basePoseAt(mv.t0);
+  }
+  // upto: the pose under that gesture (the gestures that start before it only)
+  poseAt(t, upto = null) {
+    let { p, moving, gait } = this.bodyPoseAt(t);
     // gestures, in the order they start, each on the pose under it (so one that starts while another is on takes over
     // from that pose, and the first ending under it changes nothing), eased in and out where the rig's doesn't
     for (const g of this.gest) {
@@ -521,7 +561,8 @@ export class Actor {
       if (t < g.t0 || t >= g.t1) continue;
       const G = this.rig.gestures[g.name], u = (t - g.t0) / (g.t1 - g.t0);
       const q = G.at(clamp(u), p);
-      if (moving && gait) { const keep = contactKeys(this.rig, gait); for (const k of keep) if (k in p) q[k] = p[k]; }
+      // (over a gait: its feet, and its lift and body height, so a jump for joy doesn't float a walker)
+      if (moving && gait) { const keep = contactKeys(this.rig, gait); for (const k of keep) if (k in p) q[k] = p[k]; for (const k of GAIT_BODY) if (k in p || k in q) q[k] = p[k] ?? 0; }
       const b = this.gestBlend(g), w = Math.min(b.tin > 0 ? ease((t - g.t0) / b.tin) : 1, b.tout > 0 ? ease((g.t1 - t) / b.tout) : 1);
       p = w >= 1 ? q : this.mix(p, q, w);
     }
@@ -623,14 +664,24 @@ export class Actor {
     return 0;
   }
   speaking(t) { return this.talk.some(L => t >= L.t0 && t < L.t1); }
-  // The head's world position at t (base pose, facing, hop lift, wading sink and pitch on a slope): where eyelines
-  // start and end.
+  // The head's world position at t (base pose, facing (eased through a turn), hop lift, wading sink and pitch on a
+  // slope): where eyelines start and end.
   headAt(t) {
-    const pos = this.posAt(t), h = rigProfile(this.rig, this.basePoseName(t), this.paramsAt(t)).head, th = this.pitchAt(t);
-    const dx = this.faceAt(t) * h[0] * pos.s, dy = (h[1] - (pos.lift || 0)) * pos.s;
+    const pos = this.posAt(t), h = this.restHead(t, this.paramsAt(t)), th = this.pitchAt(t);
+    const dx = this.sideAt(t) * h[0] * pos.s, dy = (h[1] - (pos.lift || 0)) * pos.s;
     if (!th) return [pos.x + dx, pos.y + (pos.sink || 0) + dy];
     const c = Math.cos(th), sn = Math.sin(th);
     return [pos.x + dx * c - dy * sn, pos.y + (pos.sink || 0) + dx * sn + dy * c];
+  }
+  // The base pose's head (units, facing right) at t: across a pose blend, the two poses' heads eased as the blend is
+  // (a move's end pose, set at once, as the drawing blends out of the gait: over BLEND_OUT).
+  restHead(t, params) {
+    let i = 0; for (let j = 0; j < this.poseEv.length; j++) if (this.poseEv[j].t <= t) i = j;
+    const ev = this.poseEv[i], h = rigProfile(this.rig, ev.name, params).head;
+    const blend = ev.blend > 0 ? ev.blend : ev.src?.legs && !ev.src.noBlendOut ? BLEND_OUT : 0;
+    if (!(blend > 0 && t < ev.t + blend && i > 0)) return h;
+    const h0 = rigProfile(this.rig, this.basePoseName(ev.t - 1e-6), params).head, u = ease((t - ev.t) / blend);
+    return [lerp(h0[0], h[0], u), lerp(h0[1], h[1], u)];
   }
   // What a look target is at t: another actor's head, or a point ({ x, y }); null for keywords and unknown ids.
   lookPoint(target, t) {
@@ -711,18 +762,28 @@ export class Actor {
     return u >= 1 ? to : lerp(this.lookChain(list, i - 1, c.t, value, T), to, u);
   }
   // Head turn (lookValue of the horizontal target): an explicit look eases over rig.lookTime (default LOOK_BLEND), a
-  // glance and the way back from it over LOOK_BLEND.
+  // glance and the way back from it over LOOK_BLEND; asleep, ahead (0), eased in and out (sleepEase).
   lookAt(t, pos) {
-    if (this.asleep(t)) return 0;
     const list = this.lookChanges(), T = this.rig.lookTime ?? LOOK_BLEND;
-    return this.lookChain(list, lastAt(list, t), t, (c, tt) => this.lookValue(c.h, tt, tt === t ? pos : this.posAt(tt)), c => (c.glance ? LOOK_BLEND : T));
+    const awake = t1 => this.lookChain(list, lastAt(list, t1), t1, (c, tt) => this.lookValue(c.h, tt, tt === t ? pos : this.posAt(tt)), c => (c.glance ? LOOK_BLEND : T));
+    return this.sleepEase(t, T, awake, () => 0);
   }
   // Head pitch (the look's tilt, else pitchValue of its target), eased over rig.lookTime (default 0.3 s), glances
-  // included (glances = false: the explicit looks only).
+  // included (glances = false: the explicit looks only); asleep, drooped (SLEEP_TILT, or lower), eased in and out (sleepEase).
   tiltAt(t, glances = true) {
-    if (this.asleep(t)) return 0;
     const list = this.lookChanges(glances), T = this.rig.lookTime ?? 0.3;
-    return this.lookChain(list, lastAt(list, t), t, (c, tt) => c.tilt ?? this.pitchValue(c.p, tt), () => T);
+    return this.sleepEase(t, T, t1 => this.lookChain(list, lastAt(list, t1), t1, (c, tt) => c.tilt ?? this.pitchValue(c.p, tt), () => T), v => Math.min(v, SLEEP_TILT));
+  }
+  // A head channel across sleep: falling asleep, it eases from where the head is (awake(t)) to its value asleep
+  // (asleep(the value as it fell asleep)) over T s; waking (a wake beat, or a move), it eases from where it was then
+  // back to awake(t) over T s.
+  sleepEase(t, T, awake, asleep) {
+    let a = false, since = null;
+    for (const e of this.sleepEv) { if (e.t > t) continue; if (e.asleep !== a) { a = e.asleep; since = e.t; } }
+    if (since === null) return awake(t);
+    if (a) return lerp(awake(t), asleep(awake(since)), ease((t - since) / T));
+    const u = ease((t - since) / T);
+    return u >= 1 ? awake(t) : lerp(this.sleepEase(since - 1e-6, T, awake, asleep), awake(t), u);
   }
   // A rider is seen only while its carrier is (it leaves with a carrier that exits, and comes back with it).
   visibleAt(t) {
@@ -737,7 +798,9 @@ export class Actor {
     const C = this.carrierAt(t);
     return C ? a * C.alphaAt(t) : a;
   }
-  paramsAt(t) { let p = this.params0; for (const e of this.paramEv) if (e.t <= t) p = { ...p, ...e.params }; return p; }
+  // A set with a dur (t1) eases numbers and hex colours from the values in force (else the rig's own) to its own;
+  // anything else changes at once.
+  paramsAt(t) { let p = this.params0; for (const e of this.paramEv) if (e.t <= t) p = { ...p, ...(e.t1 > t ? easeParams({ ...this.rig.params, ...p }, e.params, ease((t - e.t) / (e.t1 - e.t))) : e.params) }; return p; }
   // idle blinks, blink beats, and the quick blink an expression change happens behind
   blinkAt(t, idleBlink) {
     let b = idleBlink;
@@ -776,6 +839,11 @@ export class Actor {
     this._switches = { ver, list };
     return list;
   }
+  // the BLEND_OUT window after a gait move ends, while the drawing settles out of its last stride
+  settlingAt(t) {
+    const mv = this.moveAt(t);
+    return !!(mv && !mv.place && mv.legs?.length && !mv.noBlendOut && t >= this.end(mv) && t - this.end(mv) < BLEND_OUT);
+  }
   actionAt(t) {
     const mv = this.moveAt(t);
     if (mv && !mv.place && t < this.end(mv)) return mv.kind;
@@ -800,7 +868,7 @@ export class Actor {
     return {
       id: this.id, rig: this.rig.kind, R: this.rig, x: pos.x, y: pos.y, s: pos.s, face, st, visible, key: pos.key,
       perch: pos.mode === 'perch' || pos.mode === 'hollow' ? pos.anchor : null, mode: pos.mode, anchor: pos.anchor, clip: pos.clip,
-      airborne, action: this.actionAt(t), asleep, alpha: this.alphaAt(t), squash: this.squashAt(t), ground: pos.ground ?? null,
+      airborne, action: this.actionAt(t), settling: this.settlingAt(t), asleep, alpha: this.alphaAt(t), squash: this.squashAt(t), ground: pos.ground ?? null,
       scale: this.k, speaking: this.speaking(t), sink, waterY: pos.waterY ?? null, wade: !!pos.wade, carrier: pos.carrier ?? null,
       pitch: this.pitchAt(t), slope: this.slopeOf(pos),
     };

@@ -40,7 +40,7 @@ import { lineart, mono } from '../paint/lineart.mjs';
 import { lineScaleFor } from '../core/style.mjs';
 
 export const DISSOLVE = 0.8, DISSOLVE_SHARE = 0.4;
-const SCENE_FADE = 0.35, START_FADE = 0.8, END_FADE = 1.2, CARD_DISSOLVE = 1.0;
+export const SCENE_FADE = 0.35, START_FADE = 0.8, END_FADE = 1.2, CARD_DISSOLVE = 1.0;
 // How long the dissolve into scene i (plan.scenes index) lasts: DISSOLVE, but never more than DISSOLVE_SHARE of the
 // shot it opens or of the shot it leaves, so a short shot is never mostly a double exposure.
 export function dissolveLen(plan, i) {
@@ -60,6 +60,9 @@ function scratch(W, H, i) {
   return [c, x];
 }
 const reset = ctx => { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none'; };
+// A filtered draw costs the area of the canvas it is drawn into, not of the image: clip it to the box it changes
+// (a blur of σ px spreads at most 3σ + 2 px past it), in the current transform.
+const clipTo = (c, x0, y0, w, h, sigma = 0) => { const p = sigma ? Math.ceil(3 * sigma) + 2 : 0; c.beginPath(); c.rect(x0 - p, y0 - p, w + 2 * p, h + 2 * p); c.clip(); };
 const sceneRecOf = (plan, shot) => plan._scenes?.find(s => s.id === shot.scene);
 const HH = new WeakMap();
 function headHeight(a) {
@@ -179,7 +182,7 @@ function drawActor(ctx, a, t, cam, W, H, drawn, S, shade = 0, ink = false) {
         const [pc, px] = canvas(x1 - x0, y1 - y0); px.drawImage(cv, x0, y0, x1 - x0, y1 - y0, 0, 0, x1 - x0, y1 - y0);
         const la = lineart(pc, { res: (W / 1920) * Math.max(1, P.ss * lineScaleFor(P.ss) / 1.4), colour: false });
         if (la) ctx.drawImage(la, x0, y0);
-      } else ctx.drawImage(cv, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+      } else { if (shade > 0.01) clipTo(ctx, x0, y0, x1 - x0, y1 - y0); ctx.drawImage(cv, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0); }
     }
     ctx.restore();
   } else r = paint(ctx);
@@ -319,9 +322,10 @@ function rimLight(ctx, rim, actors, t, cam, W, H, drawn) {
     // painted, not shifted as an image, so a body cut by the frame edge gets no false rim along that edge.
     xb.clearRect(x0, y0, bw, bh); paintActor(xb, a, P, true);
     xs.clearRect(x0, y0, bw, bh); paintActor(xs, a, { ...P, sx: P.sx - d[0] * w, sy: P.sy - d[1] * w, wl: P.wl == null ? null : P.wl - d[1] * w }, true);
-    xb.globalCompositeOperation = 'destination-out'; xb.filter = `blur(${(w * 0.45).toFixed(2)}px)`;
+    xb.globalCompositeOperation = 'destination-out';
+    xb.save(); clipTo(xb, x0, y0, bw, bh, w * 0.45); xb.filter = `blur(${(w * 0.45).toFixed(2)}px)`;
     xb.drawImage(cvS, x0, y0, bw, bh, x0, y0, bw, bh);
-    xb.filter = 'none';
+    xb.restore();
     // actors in front hide this one's rim (their silhouettes are drawn normally, then erase: rigs shade with
     // 'multiply', which would paint instead of erase if drawn straight into the band)
     for (let j = i + 1; j < actors.length; j++) {
@@ -332,7 +336,7 @@ function rimLight(ctx, rim, actors, t, cam, W, H, drawn) {
     }
     xb.globalCompositeOperation = 'source-in'; xb.fillStyle = rim.color || '#fff1d6'; xb.fillRect(x0, y0, bw, bh);
     xb.globalCompositeOperation = 'source-over';
-    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'screen';
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); clipTo(ctx, x0, y0, bw, bh, w * 1.5); ctx.globalCompositeOperation = 'screen';
     ctx.globalAlpha = clamp(k * a.alpha); ctx.drawImage(cvB, x0, y0, bw, bh, x0, y0, bw, bh);
     ctx.globalAlpha = clamp(k * a.alpha * 0.4); ctx.filter = `blur(${(w * 1.5).toFixed(2)}px)`; ctx.drawImage(cvB, x0, y0, bw, bh, x0, y0, bw, bh);
     ctx.restore();
@@ -344,7 +348,9 @@ function rimLight(ctx, rim, actors, t, cam, W, H, drawn) {
 // world head / mouth / box; toScreen / toWorld map points between the world and the screen. Depth (DESIGN §10):
 // project([x, y, z]) → [sx, sy, s, a] (s: screen px per world px at that depth; a: its near fade, 0: don't draw it), and
 // on the 'depth' layer item([x, y, z], draw) hands the frame a piece to draw among the actors (into `deep`; depthItem).
-function layerRunner(ctx, plan, shot, t, cam, actors, deep = null) {
+// dof: the frame's depth-of-field blur (screen px) of what lies behind the subjects, 0 when it has none, so light drawn
+// over the picture can be as soft as what it sits among.
+function layerRunner(ctx, plan, shot, t, cam, actors, deep = null, dof = 0) {
   const scene = plan.scenes.find(s => s.id === shot.scene), W = plan.W, H = plan.H, z = cam.zoom, S = shot.set;
   // an overlay with "shots" draws only in those; a custom beat with "scope": "shot" only in its own shot, until its cut
   // (not in the fading picture of a dissolve into the next scene)
@@ -363,7 +369,7 @@ function layerRunner(ctx, plan, shot, t, cam, actors, deep = null) {
   };
   const base = {
     t, st: t - scene.t0, su: clamp((t - scene.t0) / ((scene.t1 - scene.t0) || 1)), lt: t - shot.t0, scene, shot, set: S, cam, W, H, plan,
-    marks: plan.marks || {}, actor, anchor: n => S.anchor(n),
+    marks: plan.marks || {}, actor, anchor: n => S.anchor(n), dof,
     // an actor (id or a plan.actorsAt state) drawn exactly as the frame draws it (slope pitch, turn squash, wading cut),
     // without shadows, in screen space on c: for masks and silhouettes, so overlays never re-derive the placement
     silhouette: (c, a) => { a = typeof a === 'string' ? actors.find(x => x.id === a) : a; if (a) paintActor(c, a, onScreen(a, cam, W, H), true); },
@@ -433,6 +439,10 @@ export function focusIds(plan, shot) {
 
 // Depth of field radius (screen px) for a shot at zoom z: explicit, or automatic once the painted set is
 // enlarged enough to look soft.
+// DOF_SCALE: what lies behind the subjects is blurred at this share of the frame's width and height, then laid in
+// enlarged (a full-size blur is the dearest pass of a close shot); 1 blurs it at full size. Kept at 1: at 0.5 a heavy
+// blur looks the same, but a light one (under about 4 px) turns visibly softer (fine stars dim, fence edges blur).
+export const DOF_SCALE = 1;
 function dofRadius(shot, z, H) {
   const k = H / 1080;
   if (shot.dof === false || shot.dof === 0) return 0;
@@ -465,9 +475,13 @@ function picture(ctx, plan, shot, t, titles = true) {
     reset(X); X.clearRect(0, 0, W, H);
   };
   const actors = plan.actorsAt(t, shot.scene).filter(a => a.visible && a.mode !== 'off');
-  const deep = [], layer = layerRunner(X, plan, shot, t, cam, actors, deep);
-  layer('sky', screen);
   const dofPx = ink ? 0 : dofRadius(shot, z, H);
+  // depth of field: what lies behind the subjects is blurred by dof px (0: no pass), when a figure the camera is on is on
+  // stage. The subjects are every one the camera names (focusIds), the places among them (anchors) too.
+  const ids = focusIds(plan, shot), subj = actors.filter(a => ids.includes(a.id));
+  const dof = dofPx > 0.5 && subj.some(a => shot.on.includes(a.id)) ? dofPx : 0;
+  const deep = [], layer = layerRunner(X, plan, shot, t, cam, actors, deep, dof);
+  layer('sky', screen);
   // (the depth layer's pieces, sorted with the props and actors below: handed over before the set is drawn, so its
   // layers know what lies beyond or nearer than them)
   layer('depth', world);
@@ -511,31 +525,31 @@ function picture(ctx, plan, shot, t, titles = true) {
   // farther first: by depth (DESIGN §10), then by key (ground y), then props, actors, one-shot fx, depth pieces (a back
   // layer before everything at its depth, a front one after)
   items.sort((a, b) => (b.z || 0) - (a.z || 0) || a.key - b.key || a.ord - b.ord);
-  // depth of field: blur everything behind the subjects (fading out below their feet), when a figure the camera is on
-  // is on stage. The subjects are every one the camera names (focusIds), the places among them (anchors) too.
+  // depth of field: blur everything behind the subjects (fading out below their feet)
   let i0 = 0;
-  if (dofPx > 0.5) {
-    const ids = focusIds(plan, shot), subj = actors.filter(a => ids.includes(a.id));
-    if (subj.some(a => shot.on.includes(a.id))) {
-      const places = ids.filter(id => !subj.some(a => a.id === id) && S.anchorNames?.includes(id)).map(id => S.anchor(id).depth);
-      const focus = Math.min(...subj.map(a => a.key), ...places) - 2, fz = Math.min(...subj.map(a => a.z || 0));
-      const feet = Math.max(...subj.map(a => onScreen(a, cam, W, H).sy), ...places.map(y => (y - cam.cy) * z + H / 2));
-      // (behind: farther than the nearest subject, or at its depth behind its key)
-      const behind = it => (it.z || 0) > fz || ((it.z || 0) === fz && it.key < focus);
-      while (i0 < items.length && behind(items[i0])) items[i0++].draw();
-      const [cv, x] = scratch(W, H, 'dof');
-      x.filter = `blur(${dofPx.toFixed(1)}px)`; x.drawImage(ctx.canvas, 0, 0); x.filter = 'none';
-      // at night what lies behind the subjects falls off into the dark (the moon lights the figure, not the soft
-      // world behind it), so a close shot of a figure on enlarged ground doesn't turn into a flat mid-tone
-      const night = clamp(((shot.gradeAt(t).con ?? 1) - 1) / 0.6) * clamp(dofPx / (6 * H / 1080));
-      if (night > 0.01) { x.globalCompositeOperation = 'multiply'; x.fillStyle = `rgba(0,0,0,${(0.38 * night).toFixed(3)})`; x.fillRect(0, 0, W, H); x.globalCompositeOperation = 'source-over'; }
-      if (feet < H * 1.05) {
-        const g = x.createLinearGradient(0, feet - H * 0.16, 0, feet + H * 0.02);
-        g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-        x.globalCompositeOperation = 'destination-in'; x.fillStyle = g; x.fillRect(0, 0, W, H); x.globalCompositeOperation = 'source-over';
-      }
-      reset(ctx); ctx.drawImage(cv, 0, 0);
+  if (dof) {
+    const places = ids.filter(id => !subj.some(a => a.id === id) && S.anchorNames?.includes(id)).map(id => S.anchor(id).depth);
+    const focus = Math.min(...subj.map(a => a.key), ...places) - 2, fz = Math.min(...subj.map(a => a.z || 0));
+    const feet = Math.max(...subj.map(a => onScreen(a, cam, W, H).sy), ...places.map(y => (y - cam.cy) * z + H / 2));
+    // (behind: farther than the nearest subject, or at its depth behind its key)
+    const behind = it => (it.z || 0) > fz || ((it.z || 0) === fz && it.key < focus);
+    while (i0 < items.length && behind(items[i0])) items[i0++].draw();
+    const [cv, x] = scratch(W, H, 'dof');
+    if (DOF_SCALE < 1) {
+      const [sc, sx] = scratch(Math.ceil(W * DOF_SCALE), Math.ceil(H * DOF_SCALE), 'dof-small');
+      sx.filter = `blur(${(dofPx * DOF_SCALE).toFixed(1)}px)`; sx.drawImage(ctx.canvas, 0, 0, sc.width, sc.height); sx.filter = 'none';
+      x.drawImage(sc, 0, 0, W, H);
+    } else { x.filter = `blur(${dofPx.toFixed(1)}px)`; x.drawImage(ctx.canvas, 0, 0); x.filter = 'none'; }
+    // at night what lies behind the subjects falls off into the dark (the moon lights the figure, not the soft
+    // world behind it), so a close shot of a figure on enlarged ground doesn't turn into a flat mid-tone
+    const night = clamp(((shot.gradeAt(t).con ?? 1) - 1) / 0.6) * clamp(dofPx / (6 * H / 1080));
+    if (night > 0.01) { x.globalCompositeOperation = 'multiply'; x.fillStyle = `rgba(0,0,0,${(0.38 * night).toFixed(3)})`; x.fillRect(0, 0, W, H); x.globalCompositeOperation = 'source-over'; }
+    if (feet < H * 1.05) {
+      const g = x.createLinearGradient(0, feet - H * 0.16, 0, feet + H * 0.02);
+      g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      x.globalCompositeOperation = 'destination-in'; x.fillStyle = g; x.fillRect(0, 0, W, H); x.globalCompositeOperation = 'source-over';
     }
+    reset(ctx); ctx.drawImage(cv, 0, 0);
   }
   for (let i = i0; i < items.length; i++) items[i].draw();
   world();
@@ -706,7 +720,8 @@ function captionSchedule(plan) {
     if (placed.has(c)) return placed.get(c);
     const h = hold(c), x = changes.find(x => x.t > c.t0 + 1e-6 && x.t < c.t1 && x.t >= h - 1e-6), t1 = x?.t ?? c.t1;
     const n = Math.max(1, Math.ceil((t1 - c.t0) / CAP_STEP)), avoid = [];
-    for (let i = 0; i < n; i++) for (const hd of headsAt(plan, c.t0 + ((i + 0.5) * (t1 - c.t0)) / n)) avoid.push({ box: hd.box, w: c.who && hd.id !== c.who ? 1 / 3 : 1 });
+    // (a 3D film gives the boxes of the faces and hands its camera shows: engine/scene3d/overlay.mjs)
+    for (let i = 0; i < n; i++) for (const hd of (plan.facesAt ?? headsAt)(plan, c.t0 + ((i + 0.5) * (t1 - c.t0)) / n)) avoid.push({ box: hd.box, w: c.who && hd.id !== c.who ? 1 / 3 : 1 });
     let L = layoutCaption(c, plan.W, plan.H, avoid), shows = c.t0;
     if (!isLine(c)) {
       // a sound's room in a band: from when the captions before it let go of the band until a line takes it
@@ -765,7 +780,7 @@ export function captionLayouts(plan, t) {
   return out;
 }
 
-function fadeAmount(plan, shot, t) {
+export function fadeAmount(plan, shot, t) {
   const scenes = plan._scenes || [], i = scenes.findIndex(s => s.id === shot.scene), rec = scenes[i];
   let a = 0;
   const open = plan.cards.find(c => c.kind === 'open'), end = plan.cards.find(c => c.kind === 'end');

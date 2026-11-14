@@ -1,9 +1,9 @@
 // The cinecode command line: argument parsing (no dependencies), help, and every command.
 // Engine modules are imported lazily inside each command, so `--help`, `new` and the render core work on their own.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync, statSync } from 'node:fs';
-import { join, resolve, relative, basename } from 'node:path';
+import { join, resolve, relative, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { need, MissingModuleError, resolveFilmDir, filmPaths, loadPlan, loadVoiceCache } from './film-source.mjs';
+import { need, MissingModuleError, resolveFilmDir, filmPaths, loadPlan, loadVoiceCache, is3d } from './film-source.mjs';
 import { fmtDur, progressLine, parseTime, clock } from './progress.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -108,6 +108,26 @@ async function voiceFilm(film, plan, paths, ctx) {
   return voices;
 }
 
+// Does the 3D engine find a GPU adapter? Asked in a fresh process, so its WebGPU library is never loaded into this one.
+// → true, false (no adapter), null (the optional packages three / webgpu are not installed), or the error the GPU
+// library stopped with (a string)
+async function gpuAdapter() {
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', "let h; try { import.meta.resolve('three'); h = await import('./engine/scene3d/host-node.mjs'); } catch (e) { if (e?.code === 'ERR_MODULE_NOT_FOUND' && /'(three|webgpu)'/.test(e.message)) process.exit(4); throw e; } process.exit((await h.hasAdapter()) ? 0 : 3);"], { cwd: ROOT, stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' });
+  if (r.status === 0 || r.status === 3) return r.status === 0;
+  if (r.status === 4) return null;
+  return (r.stderr || '').split('\n').find(l => /^\w*Error\b.*:/.test(l))?.trim() || `the GPU check stopped (exit ${r.status ?? r.signal})`;
+}
+/** A 3D film can only be drawn with a GPU: say so plainly before anything is rendered. */
+async function need3d(film, what) {
+  if (!is3d(film)) return false;
+  const gpu = await gpuAdapter();
+  if (gpu === null) throw new CliError(`this film uses the 3D engine ("format": { "engine": "3d" }), which needs the optional packages three and webgpu: run \`npm install\` in ${ROOT}`);
+  if (typeof gpu === 'string') throw new CliError(`this film uses the 3D engine ("format": { "engine": "3d" }), and the GPU could not be started: ${gpu}`);
+  if (!gpu) throw new CliError(`this film uses the 3D engine ("format": { "engine": "3d" }), and no GPU was found on this machine to draw it with (${what} needs one; check, plan and lint do not)`);
+  return true;
+}
+
 // ───────────── commands ─────────────
 
 function starterFilm(title) {
@@ -158,6 +178,9 @@ async function cmdSetup(opts, ctx) {
   const ff = hasFfmpeg();
   row(ff || null, 'ffmpeg', ff ? 'ffmpeg and ffprobe found' : 'ffmpeg/ffprobe not on the PATH: check, plan, sheet and lint work; mix, animatic and render need them (macOS: brew install ffmpeg; Debian/Ubuntu: sudo apt install ffmpeg)');
   row(ctx.env.GEMINI_API_KEY ? true : null, 'voices', ctx.env.GEMINI_API_KEY ? 'GEMINI_API_KEY is set' : 'GEMINI_API_KEY is not set: only `voice` (and rendering unvoiced lines) needs it. Get a key at https://aistudio.google.com/apikey, export it in your shell profile and restart; never paste it into a chat');
+  // 3D films ("format": { "engine": "3d" }) are drawn on the GPU by the Node host (engine/scene3d/host-node.mjs)
+  const gpu = await gpuAdapter();
+  row(gpu === true || null, '3d', gpu === true ? 'a GPU adapter was found: 3D films render on it (host: node)' : typeof gpu === 'string' ? `the GPU could not be started, so 3D films cannot be rendered: ${gpu}` : gpu === false ? 'no GPU adapter found: 3D films cannot be rendered on this machine (check, plan and lint of a 3D film still work; 2D films are not affected)' : `the optional packages three and webgpu are not installed: only 3D films need them (npm install in ${ROOT})`);
   row(null, 'films', `films live in films/<slug>/ under the folder you work in (cinecode new <slug>); rigs, kits and effects several films share go in cinecode/{rigs,kits,effects}/ at the project root`);
   // Claude Code sets CLAUDE_CODE_ENTRYPOINT: "cli" with a person at the keyboard; "sdk-cli" for `claude -p`, "sdk-ts" /
   // "sdk-py" for the SDKs, where no one can answer a question. The skill's checkpoint reads this row.
@@ -197,16 +220,29 @@ async function cmdNew(opts, ctx) {
 
 async function cmdCheck(opts, ctx) {
   const dir = filmDir(opts, ctx);
-  const { loadFilm } = await need('engine/film/load.mjs', 'the film loader');
-  const film = await loadFilm(dir);
+  // the film is compiled too, for the warnings only the plan finds (a 3D film's actions are acted out as it is laid
+  // out: one that cannot be played stops check here, with its shot and beat)
+  const { film, plan } = await loadPlan(dir);
   const n = o => Object.keys(o || {}).length, shots = (film.scenes || []).reduce((s, sc) => s + (sc.shots?.length || 0), 0);
   say(ctx, 'check', `${film.title ?? basename(dir)}: valid`);
   say(ctx, '', `${plural(film.scenes?.length ?? 0, 'scene')}, ${plural(shots, 'shot')}, ${n(film.cast)} cast, ${plural(n(film.sets), 'set')}${(film.custom.files || []).map(f => `, ${f}`).join('')}`);
+  const all = warnings(ctx, film, plan);
+  if (opts.strict && all.length) throw new CliError(`${plural(all.length, 'warning')} (--strict makes them errors)`);
+}
+
+/** The film's warnings (fields it ignores, things that are probably mistakes) and the plan's, one a line; with `max`,
+ *  their count and the first `max` of them. → the warnings */
+function warnings(ctx, film, plan, max = Infinity) {
+  const all = [...(film.warnings ?? []), ...(plan.warnings ?? [])].map(w => (typeof w === 'string' ? w : w.message));
+  if (all.length > max) say(ctx, 'warnings', `${all.length}, the first ${max} below (cinecode check prints them all)`);
+  for (const w of all.slice(0, max)) say(ctx, 'warning', w);
+  return all;
 }
 
 async function cmdPlan(opts, ctx) {
   const dir = filmDir(opts, ctx);
-  const { plan, missing } = await planWithNote(dir, ctx);
+  const { film, plan, missing } = await planWithNote(dir, ctx);
+  warnings(ctx, film, plan);
   const est = new Set(missing.map(l => l.id)), sceneSet = Object.fromEntries((plan.scenes || []).map(s => [s.id, s.set]));
   ctx.out.write(`\n${plan.title ?? ''} — ${clock(plan.duration)} · ${plural(plan.shots.length, 'shot')} · ${plural(plan.scenes?.length ?? 0, 'scene')} · ${plan.W}×${plan.H} @ ${plan.fps} fps\n\n`);
   ctx.out.write(`${'shot'.padEnd(10)}${'set'.padEnd(10)}${'size'.padEnd(14)}${'start'.padStart(8)}${'dur'.padStart(7)}   lines\n`);
@@ -243,7 +279,10 @@ async function cmdVoice(opts, ctx) {
 
 async function cmdSheet(opts, ctx) {
   const dir = filmDir(opts, ctx);
-  const { plan, paths } = await planWithNote(dir, ctx);
+  const { film, plan, paths } = await planWithNote(dir, ctx);
+  // (a 3D film's stills, plain or with its debug drawing, come from its own frame source)
+  const src3d = (await need3d(film, 'a contact sheet')) ? await (await need('engine/scene3d/source.mjs', 'the 3D frame source')).createSource(plan) : null;
+  const still3d = async (t, file) => { const c = await src3d.canvas(t, !!opts.debug); mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, await c.encode(file.endsWith('.png') ? 'png' : 'jpeg', 90)); return file; };
   const { drawFrame, frameInfo } = await need('engine/film/frame.mjs', 'the frame renderer');
   const F = opts.shots || opts.frame || opts.debug ? await need('engine/film/sheet.mjs', 'the film sheet') : null;   // only these options use it
   const { contactSheet } = await import('./sheet.mjs');
@@ -254,15 +293,21 @@ async function cmdSheet(opts, ctx) {
     const ts = times || [plan.duration / 2];
     await step(ctx, 'frame', async () => {
       const files = [];
-      for (const [i, t] of ts.entries()) files.push(await F.renderStill(plan, t, ts.length > 1 ? outPath.replace(/(\.\w+)$/, `-${i}$1`) : outPath, { debug: !!opts.debug }));
+      for (const [i, t] of ts.entries()) {
+        const file = ts.length > 1 ? outPath.replace(/(\.\w+)$/, `-${i}$1`) : outPath;
+        files.push(await (src3d ? still3d(t, file) : F.renderStill(plan, t, file, { debug: !!opts.debug })));
+        await new Promise(setImmediate);   // (lets the frame's canvases be freed, as contactSheet does)
+      }
+      src3d?.close();
       return files.map(f => rel(ctx, f)).join(', ');
     });
     return;
   }
   const draw = opts.debug ? (c, p, t) => { drawFrame(c, p, t); F.drawOverlay(c, frameInfo(p, t), p.W, p.H); } : drawFrame;
   await step(ctx, 'sheet', async () => {
-    const r = await contactSheet({ plan, drawFrame: draw, outPath, times, cols: opts.cols ?? 4, tileW: opts.tile ?? 480, ...(opts.debug ? { title: `${plan.title} (debug)` } : {}),
+    const r = await contactSheet({ plan, drawFrame: draw, ...(src3d && { canvasAt: t => src3d.canvas(t, !!opts.debug) }), outPath, times, cols: opts.cols ?? 4, tileW: opts.tile ?? 480, ...(opts.debug ? { title: `${plan.title} (debug)` } : {}),
       onProgress: (i, n) => ctx.err.isTTY && ctx.err.write(`\r\x1b[2Ksheet    ${i}/${n}`) });
+    src3d?.close();
     if (ctx.err.isTTY) ctx.err.write('\r\x1b[2K');
     return `${rel(ctx, r.path)} (${r.items.length} stills, ${r.width}×${r.height})`;
   });
@@ -270,9 +315,15 @@ async function cmdSheet(opts, ctx) {
 
 async function cmdLint(opts, ctx) {
   const dir = filmDir(opts, ctx);
-  const { plan, paths } = await planWithNote(dir, ctx);
+  const { film, plan, paths } = await planWithNote(dir, ctx);
   const { lintPlan, writeLintReport } = await need('engine/lint/lint.mjs', 'the lint module');
   const result = await step(ctx, 'lint', async () => {
+    if (is3d(film)) {   // the 3D engine's own checks, on the film built and posed with no GPU (no picture: lint.json only)
+      const r = await (await need('engine/scene3d/lint.mjs', 'the 3D lint')).lintFilm(plan);
+      mkdirSync(paths.out, { recursive: true });
+      writeFileSync(join(paths.out, 'lint.json'), `${JSON.stringify({ film: plan.title, engine: '3d', errors: r.errors, warnings: r.warnings }, null, 2)}\n`);
+      return { ...r, msg: `${plural(r.errors.length, 'error')}, ${plural(r.warnings.length, 'warning')} → ${rel(ctx, paths.out)}/lint.json` };
+    }
     const r = lintPlan(plan, opts.step ? { step: opts.step } : {});
     mkdirSync(paths.out, { recursive: true });
     await writeLintReport(plan, r, paths.out);
@@ -316,8 +367,10 @@ async function cmdMix(opts, ctx) {
   const dir = filmDir(opts, ctx);
   const { film, plan, voices, missing, paths } = await planWithNote(dir, ctx);
   if (missing.length) say(ctx, 'mix', `warning: mixing without ${missing.length} unvoiced line${missing.length > 1 ? 's' : ''}`);
+  const stamp = filmStamp(dir, paths);
   const { music } = await score(film, plan, paths, ctx);
   await mixdown(plan, voices, music, paths, ctx, film);
+  writeFileSync(join(paths.out, SOUND_STAMP), stamp);   // (the same bytes render makes: render keeps them)
 }
 
 /** True when out/mix.wav exists and is newer than every file of the film (film.json, custom.mjs, fx/, voices/, …). */
@@ -332,13 +385,21 @@ function mixFresh(dir, paths) {
   return !newer(dir);
 }
 
-function frameRange(opts, fps, ctx) {
+// --from / --to, widened to whole segments of the render (4 s, counted from the start), so a part rendered again is the
+// very segments of the whole film's render and can be spliced into it
+async function frameRange(opts, fps, ctx) {
   if (opts.from == null && opts.to == null) return null;
-  const a = Math.round((opts.from ?? 0) * fps), b = opts.to == null ? Infinity : Math.round(opts.to * fps);
+  const { segmentFrames } = await import('./video.mjs'), g = segmentFrames(fps);
+  let a = Math.round((opts.from ?? 0) * fps), b = opts.to == null ? Infinity : Math.round(opts.to * fps);
   if (b <= a) throw new UsageError('--to must be after --from');
+  a = Math.floor(a / g) * g; b = Math.ceil(b / g) * g;
   say(ctx, 'range', `${clock(a / fps)} → ${b === Infinity ? 'end' : clock(b / fps)}`);
   return [a, b];
 }
+
+// Render processes: as asked, or CPUs − 1; a 3D film is drawn by one GPU, one frame at a time, so it takes 1 (2 at
+// most), each in a worker of its own (never in this process: the GPU's memory goes when the worker does).
+const jobsFor = (three, opts) => (three ? Math.min(opts.jobs ?? 1, 2) : opts.jobs);
 
 async function video(ctx, label, args) {
   const { renderVideo } = await import('./video.mjs');
@@ -349,7 +410,7 @@ async function video(ctx, label, args) {
     bar.done();
     const v = r.probe?.video, a = r.probe?.audio;
     const mb = statSync(r.path).size / 1048576;
-    say(ctx, label, `${rel(ctx, r.path)}  ${r.frames} frames, ${plural(r.segments, 'job')}, ${mb.toFixed(1)} MB`, elapsed(t0));
+    say(ctx, label, `${rel(ctx, r.path)}  ${r.frames} frames, ${plural(r.jobs, 'job')}, ${mb.toFixed(1)} MB`, elapsed(t0));
     if (r.probe) say(ctx, 'verify', `${v.width}×${v.height} ${v.codec} ${v.frames} frames @ ${v.fps} fps, ${r.probe.duration.toFixed(3)} s${a ? `, ${a.codec} ${a.sampleRate / 1000} kHz` : ', no audio'}${r.probe.subtitles ? ', subtitles' : ''}`);
     return r;
   } catch (e) { bar.done(); throw e; }
@@ -358,7 +419,9 @@ async function video(ctx, label, args) {
 async function cmdAnimatic(opts, ctx) {
   const dir = filmDir(opts, ctx);
   const { film, plan, voices, missing, paths } = await planWithNote(dir, ctx);
-  const { drawFrame } = await need('engine/film/frame.mjs', 'the frame renderer');
+  warnings(ctx, film, plan, 3);
+  const three = await need3d(film, 'an animatic');
+  const { drawFrame } = three ? {} : await need('engine/film/frame.mjs', 'the frame renderer');
   const fps = 12, audio = paths.mix;
   if (mixFresh(dir, paths)) say(ctx, 'mix', `${rel(ctx, paths.mix)} is up to date`);
   else { // the preview always has sound: mix first (unvoiced lines are left out)
@@ -367,8 +430,8 @@ async function cmdAnimatic(opts, ctx) {
     await mixdown(plan, voices, music, paths, ctx, film);
   }
   await video(ctx, 'animatic', {
-    plan, drawFrame, workerModule: FILM_SOURCE, workerArgs: { filmDir: dir }, jobs: opts.jobs,
-    outPath: opts.out ? resolve(ctx.cwd, opts.out) : paths.animatic, range: frameRange(opts, fps, ctx),
+    plan, drawFrame, workerModule: FILM_SOURCE, workerArgs: { filmDir: dir }, jobs: jobsFor(three, opts),
+    outPath: opts.out ? resolve(ctx.cwd, opts.out) : paths.animatic, range: await frameRange(opts, fps, ctx),
     width: Math.round(plan.W / 4) * 2, height: Math.round(plan.H / 4) * 2, fps,
     encoder: { crf: 23, preset: 'veryfast' }, audio,
   });
@@ -377,6 +440,8 @@ async function cmdAnimatic(opts, ctx) {
 async function cmdRender(opts, ctx) {
   const dir = filmDir(opts, ctx);
   let { film, plan, voices, missing, paths } = await planWithNote(dir, ctx, 'load');
+  warnings(ctx, film, plan, 3);
+  const three = await need3d(film, 'a render');
   if (missing.length) {
     if (!ctx.env.GEMINI_API_KEY) {
       const why = l => (l.reason && !/not in the cache/.test(l.reason) ? `  (${l.reason})` : '');
@@ -387,20 +452,55 @@ async function cmdRender(opts, ctx) {
     ({ film, plan, voices, missing, paths } = await planWithNote(dir, ctx));
     if (missing.length) throw new CliError(`${missing.length} lines still have no voice after generation`);
   } else say(ctx, 'voices', `${voices.size} cached`);
-  const { music } = await score(film, plan, paths, ctx);
-  await mixdown(plan, voices, music, paths, ctx);
   const { subtitleCues, toSrt } = await import('./srt.mjs');
   const cues = subtitleCues(plan);
-  writeFileSync(paths.srt, toSrt(cues));
-  say(ctx, 'srt', `${rel(ctx, paths.srt)} (${cues.length} cues)`);
-  const { drawFrame } = await need('engine/film/frame.mjs', 'the frame renderer');
-  const range = frameRange(opts, plan.fps, ctx);
-  const outPath = opts.out ? resolve(ctx.cwd, opts.out) : range ? paths.video.replace(/\.mp4$/, `-${Math.round(range[0] / plan.fps)}s.mp4`) : paths.video;
-  await video(ctx, 'render', {
-    plan, drawFrame, workerModule: FILM_SOURCE, workerArgs: { filmDir: dir }, jobs: opts.jobs, outPath, range,
-    encoder: { ...(opts.crf != null && { crf: opts.crf }), ...(opts.preset && { preset: opts.preset }) },
-    audio: paths.mix, captions: cues, title: plan.title, keep: opts.keep,
-  });
+  mkdirSync(paths.out, { recursive: true });
+  const { drawFrame } = three ? {} : await need('engine/film/frame.mjs', 'the frame renderer');
+  // The music and the mix are made in a process of their own (sound.mjs: they hold the whole film's sound). A 3D film
+  // draws its picture meanwhile (one GPU process leaves the CPU free) and waits for them only to mux; a 2D film's
+  // workers take every core, so it waits for them first. A failed mix stops the picture, and the other way round.
+  const { soundJob } = await import('./sound.mjs');
+  const sound = new AbortController(), stop = () => sound.abort(ctx.signal.reason);
+  ctx.signal?.addEventListener('abort', stop, { once: true });
+  let failed = null;
+  // (a film whose music and mix were made for these very files, its own and the engine's, keeps them: a range of a
+  // 30-minute film took 6 minutes, nearly all of it the score and the mix again)
+  const stamp = filmStamp(dir, paths), stampFile = join(paths.out, SOUND_STAMP);
+  const fresh = existsSync(paths.mix) && existsSync(paths.music) && existsSync(stampFile) && readFileSync(stampFile, 'utf8') === stamp;
+  if (fresh) say(ctx, 'mix', `${rel(ctx, paths.mix)} and ${rel(ctx, paths.music)} are up to date`);
+  const audio = fresh ? Promise.resolve(paths.mix) : soundJob(dir, m => {
+    if (three && ctx.err.isTTY) ctx.err.write('\r\x1b[2K');   // (over the progress line)
+    say(ctx, m.label, m.label === 'music' ? `${rel(ctx, m.path)} (${clock(m.dur)})` : `${rel(ctx, m.path)} (master${Number.isFinite(m.lufs) ? `, ${m.lufs.toFixed(1)} LUFS` : ''})`, m.secs);
+  }, sound.signal).then(p => { writeFileSync(stampFile, stamp); return p; });
+  audio.catch(e => { failed = e; sound.abort(e); });
+  try {
+    if (!three) await audio;
+    writeFileSync(paths.srt, toSrt(cues));
+    say(ctx, 'srt', `${rel(ctx, paths.srt)} (${cues.length} cues)`);
+    const range = await frameRange(opts, plan.fps, ctx);
+    const outPath = opts.out ? resolve(ctx.cwd, opts.out) : range ? paths.video.replace(/\.mp4$/, `-${Math.round(range[0] / plan.fps)}s.mp4`) : paths.video;
+    await video({ ...ctx, signal: sound.signal }, 'render', {
+      plan, drawFrame, workerModule: FILM_SOURCE, workerArgs: { filmDir: dir }, jobs: jobsFor(three, opts), outPath, range,
+      // a part of the film is a check: x264 "medium" (a third less encoding, the same quality); the whole film "slow".
+      // A 3D film's one GPU process draws faster than x264 "slow" on 2 threads encodes, so it gets more.
+      encoder: { ...(opts.crf != null && { crf: opts.crf }), preset: opts.preset ?? (range ? 'medium' : 'slow'), ...(three && { threads: 8 }) },
+      audio, captions: cues, title: plan.title, keep: opts.keep,
+      // a render stopped part way picks up where it stopped (the film's and the engine's files name what it drew)
+      resume: stamp,
+    });
+  } catch (e) { sound.abort(e); throw failed ?? e; }   // (the mix's own error, if it was the mix that failed)
+  finally { ctx.signal?.removeEventListener('abort', stop); }
+}
+
+const SOUND_STAMP = '.sound.stamp';   // in out/: the filmStamp that out/music.wav and out/mix.wav were made for
+
+/** Every file that changes what a film renders (its film.json, custom.mjs, fx/, voices/, …: not out/; and the engine's
+ *  code), by name, size and time: a resumed render goes on only while this is unchanged. */
+function filmStamp(dir, paths) {
+  const files = [];
+  const walk = d => { for (const e of readdirSync(d, { withFileTypes: true })) { const p = join(d, e.name); if (e.isDirectory()) { if (p !== paths.out && !e.name.startsWith('.')) walk(p); } else if (e.isFile()) { const s = statSync(p); files.push([p, s.size, s.mtimeMs]); } } };
+  walk(dir); walk(join(ROOT, 'engine'));
+  return JSON.stringify(files.sort());
 }
 
 /** cast-sheet / set-sheet: an optional film first (to register its own rigs and kits), then names. Without a film,
@@ -492,25 +592,40 @@ async function cmdVerifyEffect(opts, ctx) {
   const V = await need('engine/render/verify.mjs', 'the verify module');
   const { film, plan } = await planWithNote(dir, ctx);
   const checks = await step(ctx, 'verify', async () => Object.assign(await V.verifyEffects(film, plan, wanted), { msg: `${wanted.join(', ') || 'every custom effect'}` }));
+  // a film-made sound (as verifyEffects made it) whose level below 20 Hz is near its whole band's: a rumble no speaker
+  // plays, which still takes the master's headroom
+  const { filt } = await need('engine/audio/sfx.mjs', 'the sound effects');
+  for (const e of V.filmEffects(film, plan, wanted)) {
+    const c = checks.find(k => k.name === `sound ${e.name}`);
+    if (e.kind !== 'sound' || !c?.ok) continue;
+    const x = e.def({ seed: 7, dur: 1.5, params: {} }), low = filt(filt(Float32Array.from(x), 'lp', 20, Math.SQRT1_2), 'lp', 20, Math.SQRT1_2);
+    const energy = a => a.reduce((s, v) => s + v * v, 0), all = energy(x);
+    if (!all) { Object.assign(c, { ok: false, detail: 'it is silent: every sample is 0' }); continue; }
+    const db = 10 * Math.log10(energy(low) / all);
+    if (db > -6) Object.assign(c, { ok: false, detail: `below 20 Hz it is only ${(-db).toFixed(1)} dB under its whole band: a rumble no speaker plays that takes the master's headroom; high-pass it at 20–25 Hz` });
+    else c.detail += `, below 20 Hz ${(-db).toFixed(0)} dB under`;
+  }
   const out = opts.out ? resolve(ctx.cwd, opts.out) : join(filmPaths(dir).out, 'verify', `effects${wanted.length ? `-${wanted.join('-')}` : ''}.jpg`);
   await gate(ctx, `effects of ${basename(dir)}`, checks, async () => [await V.effectReview(film, plan, wanted, out)]);
 }
 
 // ───────────── command table and help ─────────────
 
-const JOBS = { type: 'int', alias: 'j', arg: 'N', desc: 'worker processes (default: CPUs − 1)' };
+const JOBS = { type: 'int', alias: 'j', arg: 'N', desc: 'worker processes (default: CPUs − 1; a 3D film: 1, at most 2)' };
 const OUT = { type: 'string', alias: 'o', arg: 'PATH', desc: 'output file instead of the default' };
-const FROM = { type: 'time', arg: 'T', desc: 'start time (seconds or m:ss), for a partial render' };
-const TO = { type: 'time', arg: 'T', desc: 'end time (seconds or m:ss), for a partial render' };
+const FROM = { type: 'time', arg: 'T', desc: 'start time (seconds or m:ss), for a partial render (down to a whole 4 s)' };
+const TO = { type: 'time', arg: 'T', desc: 'end time (seconds or m:ss), for a partial render (up to a whole 4 s)' };
 
 export const COMMANDS = {
   setup: { args: '', summary: 'first run: check Node, install the canvas library, check ffmpeg and the Gemini key', run: cmdSetup,
-    detail: 'Checks Node.js (20 or newer), installs @napi-rs/canvas into cinecode\'s own folder when it is missing (npm install --omit=dev), and reports whether ffmpeg/ffprobe are on the PATH and GEMINI_API_KEY is set (never printing it). Exit 1 when drawing cannot work.',
+    detail: 'Checks Node.js (20 or newer), installs @napi-rs/canvas into cinecode\'s own folder when it is missing (npm install --omit=dev), and reports whether ffmpeg/ffprobe are on the PATH, GEMINI_API_KEY is set (never printing it) and a GPU adapter is there for 3D films. Exit 1 when drawing cannot work.',
     options: { check: { type: 'bool', desc: 'only report, install nothing' } } },
   new: { args: '<slug>', summary: 'scaffold a film from templates/', run: cmdNew,
     detail: 'Creates films/<slug>/ (or the given path) from templates/: a starter film.json, screenplay.md and custom.mjs, with {{title}} filled in. Without templates/film.json, writes a minimal valid starter.',
     options: { title: { type: 'string', arg: 'TEXT', desc: 'film title (default: from the slug)' }, force: { type: 'bool', desc: 'overwrite existing files' } } },
-  check: { args: '<film>', summary: 'validate film.json (and custom.mjs)', run: cmdCheck, options: {} },
+  check: { args: '<film>', summary: 'validate film.json (and custom.mjs), and print its warnings', run: cmdCheck,
+    detail: 'Validates film.json and custom.mjs, compiles the film, and prints the warnings of both (an unknown field, a perch the rig cannot use, a beat drawn on past its shot…). Exit 1 on a problem; with --strict on a warning too.',
+    options: { strict: { type: 'bool', desc: 'warnings are errors too (exit 1)' } } },
   plan: { args: '<film>', summary: 'compile and print the shot list with times and durations', run: cmdPlan, options: {},
     detail: 'Uses cached voices for line timing; unvoiced lines use an estimate (marked ~).' },
   voice: { args: '<film>', summary: 'generate/cache voices with QA (needs GEMINI_API_KEY)', run: cmdVoice, options: {},
@@ -523,6 +638,7 @@ export const COMMANDS = {
       frame: { type: 'bool', desc: 'full-size stills instead of a contact sheet' },
       cols: { type: 'int', arg: 'N', desc: 'columns (default 4)' }, tile: { type: 'int', arg: 'PX', desc: 'tile width in pixels (default 480)' }, out: OUT } },
   lint: { args: '<film>', summary: 'staging/editing checks → out/lint.json + out/lint.jpg; exit 1 on errors', run: cmdLint,
+    detail: 'A 3D film ("format": { "engine": "3d" }) is checked by the 3D engine instead (slides, collisions, turns, pops, holds, reach, words over faces: docs/scene3d.md), with no GPU, and writes out/lint.json only; --step does not apply.',
     options: { step: { type: 'number', arg: 'S', desc: 'sampling step in seconds (default 1/6)' } } },
   music: { args: '<film>', summary: 'compose the score → out/music.wav', run: cmdMusic, options: {} },
   mix: { args: '<film>', summary: 'mix dialogue, music, sfx, ambience → out/mix.wav', run: cmdMix, options: {},
@@ -531,10 +647,10 @@ export const COMMANDS = {
     detail: 'Half resolution, 12 fps, with sound: out/mix.wav, mixed first when it is missing or older than the film\'s files.',
     options: { jobs: JOBS, from: FROM, to: TO, out: OUT } },
   render: { args: '<film>', summary: 'final film → out/<slug>.mp4 + out/<slug>.srt', run: cmdRender,
-    detail: 'voices (from cache) → compile → music → mix → master → parallel video (x264 crf 17, slow) → mux AAC 192k + soft subtitles → ffprobe check.',
+    detail: 'voices (from cache) → compile → music → mix → master (all kept while the film\'s and the engine\'s files are unchanged) → parallel video in 4 s segments (x264 crf 17, slow; medium for a part) → mux AAC 192k + soft subtitles → ffprobe check. A render stopped part way keeps its whole segments and goes on from them. --from/--to are widened to whole 4 s segments, so a part can be spliced into the whole film.',
     options: { jobs: JOBS, from: FROM, to: TO, out: OUT,
-      crf: { type: 'int', arg: 'N', desc: 'x264 quality (default 17)' }, preset: { type: 'string', arg: 'NAME', desc: 'x264 preset (default slow)' },
-      keep: { type: 'bool', desc: 'keep the per-worker segment files' } } },
+      crf: { type: 'int', arg: 'N', desc: 'x264 quality (default 17)' }, preset: { type: 'string', arg: 'NAME', desc: 'x264 preset (default slow; medium for a part, --from/--to)' },
+      keep: { type: 'bool', desc: 'keep the segment files' } } },
   'cast-sheet': { args: '[film] [kinds…]', summary: 'every rig in every pose/expression → out/cast-sheet.jpg', run: cmdCastSheet,
     detail: 'With a film first, its custom rigs are included and the sheet goes to its out/. Kinds may be comma-separated.', options: { out: OUT } },
   'set-sheet': { args: '[film] [kits…]', summary: 'every kit with anchors, colliders and walk regions drawn → out/set-sheet.jpg', run: cmdSetSheet,
@@ -546,7 +662,7 @@ export const COMMANDS = {
     detail: 'Checks the kit file (or a registered kit): at least 4 anchors with sane scales, ground anchors on walkable ground, every route between them clear, skies and ambience, area and parallax cover every camera, the ground line, every time of day painted (the eight, or the times the kit declares), each with a light, deterministic builds. Writes <folder>/out/verify/<name>.jpg (anchors, walk region, colliders) and <name>-times.jpg (its times of day: the eight, or its own).',
     options: { out: { ...OUT, arg: 'DIR', desc: 'folder for the review images' } } },
   'verify-effect': { args: '<film> [names…]', summary: 'the gate for a film\'s own effects: checks + a review strip; exit 1 on a failure', run: cmdVerifyEffect,
-    detail: 'For each custom overlay and beat the film uses (or the names given): a known layer, frames identical in any drawing order, and it draws something; for each custom sound: finite, deterministic, peak under 1. Writes out/verify/effects.jpg: three frames from the first use of each.',
+    detail: 'For each custom overlay and beat the film uses (or the names given): a known layer, frames identical in any drawing order, and it draws something; for each custom sound: finite, deterministic, peak under 1, and not mostly rumble below 20 Hz. Writes out/verify/effects.jpg: three frames from the first use of each.',
     options: { out: OUT } },
 };
 
@@ -609,6 +725,7 @@ export async function main(argv, io = {}) {
     const problems = e?.problems ?? e?.errors ?? e?.issues;
     if (e?.name === 'ValidationError' && Array.isArray(problems)) {
       ctx.err.write(`cinecode ${cmd}: film.json has ${problems.length} problem${problems.length > 1 ? 's' : ''}:\n${problems.map(p => `  - ${typeof p === 'string' ? p : p.message ?? JSON.stringify(p)}`).join('\n')}\n`);
+      for (const w of e.warnings ?? []) ctx.err.write(`  warning: ${typeof w === 'string' ? w : w.message}\n`);
     } else if (e?.code === 'ERR_MODULE_NOT_FOUND' && /@napi-rs\/canvas/.test(String(e.message))) {
       ctx.err.write(`cinecode ${cmd}: the drawing library @napi-rs/canvas is not installed: run \`cinecode setup\`\n`);
     } else if (e instanceof CliError || e instanceof MissingModuleError) {

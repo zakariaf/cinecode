@@ -11,7 +11,8 @@ import { join } from 'node:path';
 import { loadFilm } from '../engine/film/load.mjs';
 import { compile } from '../engine/film/compile.mjs';
 import { frameInfo } from '../engine/film/frame.mjs';
-import { lintPlan, writeLintReport, RULES, LIMITS, silhouette, skyDiscs, blended } from '../engine/lint/lint.mjs';
+import { lintPlan, writeLintReport, RULES, LIMITS, FLIP_RULE, silhouette, skyDiscs, blended } from '../engine/lint/lint.mjs';
+import { loadPlan } from '../engine/render/film-source.mjs';
 import { createCanvas } from '@napi-rs/canvas';
 import { ZMAX } from '../engine/film/camera.mjs';
 
@@ -66,9 +67,10 @@ function perturb(plan, t0, t1, fn) {
 const mid = s => [s.t0 + 0.25 * (s.t1 - s.t0), s.t0 + 0.75 * (s.t1 - s.t0)];
 
 test('every rule of the DESIGN table exists with its severity, and every rule says how to fix it', () => {
-  assert.deepEqual(Object.keys(RULES).sort(), ['axis', 'caption-face', 'collision', 'continuity', 'cut-jump', 'edge-cut', 'floating', 'halo', 'in-water', 'inside-solid', 'offscreen-speaker', 'scale', 'subject-size', 'tangent', 'teleport', 'timing']);
-  for (const r of ['floating', 'inside-solid', 'in-water', 'teleport', 'offscreen-speaker', 'collision']) assert.equal(RULES[r].severity, 'error', r);
-  for (const r of ['subject-size', 'caption-face', 'cut-jump', 'axis', 'scale', 'timing', 'continuity', 'edge-cut', 'tangent', 'halo']) assert.equal(RULES[r].severity, 'warning', r);
+  // (flip is in the table once rules.mjs FLIP_RULE turns it on)
+  assert.deepEqual(Object.keys(RULES).sort(), ['axis', 'caption-face', 'collision', 'continuity', 'cut-jump', 'edge-cut', ...(FLIP_RULE ? ['flip'] : []), 'floating', 'halo', 'in-water', 'inside-solid', 'offscreen-speaker', 'plan', 'scale', 'subject-size', 'tangent', 'teleport', 'timing']);
+  for (const r of ['floating', 'inside-solid', 'in-water', 'teleport', 'offscreen-speaker', 'collision', ...(FLIP_RULE ? ['flip'] : [])]) assert.equal(RULES[r].severity, 'error', r);
+  for (const r of ['subject-size', 'caption-face', 'cut-jump', 'axis', 'scale', 'timing', 'continuity', 'edge-cut', 'tangent', 'halo', 'plan']) assert.equal(RULES[r].severity, 'warning', r);
   for (const [r, R] of Object.entries(RULES)) assert.ok(typeof R.fix === 'string' && R.fix.length > 20 && typeof R.catches === 'string', r);
 });
 
@@ -724,4 +726,94 @@ test('the test film has no errors and none of the physical warnings', async () =
   const bad = r.warnings.filter(i => ['collision', 'scale', 'cut-jump', 'axis', 'caption-face', 'timing'].includes(i.rule));
   assert.deepEqual(bad, [], bad.map(i => `${i.rule} ${i.shot} ${i.message}`).join('\n'));
   assert.ok(r.stats.samples > (plan.duration - 7) * 6, 'sampled every 1/6 s at least');
+});
+
+// ───────────── check and compiler warnings (rule "plan") ─────────────
+test('lint lists the warnings check and the compiler give as rule "plan": 76 Summers has exactly its three', async () => {
+  const { plan } = await loadPlan('films/seventy-six-summers');
+  const r = lintPlan(plan, { rules: ['plan'], shots: [] });
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.warnings.map(i => [i.rule, i.severity, i.shot]), [['plan', 'warning', '3.2'], ['plan', 'warning', '3.3'], ['plan', 'warning', '6.5']]);
+  assert.match(r.warnings[1].message, /^3\.3: the medium shot of pebble, frog shows frog at 11%/);
+  assert.match(r.warnings[2].message, /^shot 6\.5: custom beat "lantern-reveal"/);
+  const s = shotOf(plan, '3.3');
+  assert.ok(r.warnings[1].t > s.t0 && r.warnings[1].t < s.t1, 'on its shot (its tile shows it)');
+});
+
+test('a check warning is a "plan" warning on its shot; a shot\'s "lint" block may keep it', async () => {
+  const film = (lint) => ({ title: 'Typo', format: { width: 640, height: 360, fps: 24 }, cast: { hare: { rig: 'hare' } }, sets: { m: { kit: 'meadow' } },
+    scenes: [{ id: 'A', set: 'm', actors: { hare: { at: 'x:1500' } }, shots: [{ id: 'x1', beats: [{ wait: 1 }] }, { id: 'x2', hlod: 2, ...(lint ? { lint } : {}), beats: [{ wait: 1 }] }] }] });
+  const r = lintPlan(compile(await loadFilm(film())), { rules: ['plan'], shots: [] });
+  assert.equal(r.warnings.length, 1, JSON.stringify(r.warnings));
+  assert.equal(r.warnings[0].shot, 'x2'); assert.equal(r.warnings[0].message, 'scenes[0].shots[1].hlod: unknown field "hlod" on a shot; ignored (did you mean "hold"?) [scene A › shot x2]');
+  const k = lintPlan(compile(await loadFilm(film({ allow: ['plan'], note: 'on purpose' }))), { rules: ['plan'], shots: [] });
+  assert.deepEqual(k.warnings, []); assert.equal(k.kept.length, 1); assert.equal(k.kept[0].note, 'on purpose');
+});
+
+// ───────────── flip (off until rules.mjs FLIP_RULE) and a teleport scaled by the rig ─────────────
+// One hare turning on purpose (a turn squashes the drawing through a card), and a mouse and a hare standing.
+function turnFilm() {
+  return { title: 'Turn', format: { width: 640, height: 360, fps: 24, captions: 'none' }, cast: { hare: { rig: 'hare' }, tilly: { rig: 'mouse' } }, sets: { m: { kit: 'meadow' } },
+    scenes: [{ id: 'A', set: 'm', time: 'morning', actors: { hare: { at: 'x:1200', face: 'right' }, tilly: { at: 'x:1500', face: 'left' } },
+      shots: [{ id: 't1', camera: { size: 'wide', on: ['hare', 'tilly'] }, beats: [{ wait: 1 }, { do: 'turn', who: 'hare', face: 'left' }, { wait: 1.5 }] }] }] };
+}
+
+test('flip: a facing change with no turn squash on either side is an error (named in opts.rules while FLIP_RULE is off)', async () => {
+  const plan = compile(await loadFilm(turnFilm())), s = plan.shots[0];
+  assert.deepEqual(lintPlan(plan, { rules: ['flip'] }).errors, [], 'a turn squashes: no flip');
+  // the hare mirrored from 0.5 s on, with no squash: a flip there (its own turn later squashes, mirrored too)
+  const p = perturb(plan, s.t0 + 0.5, 1e9, a => (a.id === 'hare' ? { ...a, face: -a.face } : a));
+  const r = lintPlan(p, { rules: ['flip'] });
+  assert.equal(r.errors.length, 1, JSON.stringify(r.errors));
+  const [i] = r.errors, f = Math.ceil((s.t0 + 0.5) * 24 - 1e-9);
+  assert.deepEqual([i.rule, i.severity, i.shot, i.actor, i.frame], ['flip', 'error', 't1', 'hare', f]);
+  assert.match(i.message, /hare turns to face left between two frames at [\d.]+ s with no turn: its drawing mirrors in one frame/);
+  if (!FLIP_RULE) {
+    assert.ok(!('flip' in RULES), 'off: not in the rule table');
+    assert.deepEqual(issues(lintPlan(p)).filter(x => x.rule === 'flip'), [], 'off: not run by default');
+  }
+});
+
+test('teleport: a jump of half the rig\'s height is one even under 40 units (a mouse), not for a hare', async () => {
+  const plan = compile(await loadFilm(turnFilm())), s = plan.shots[0];
+  // both jump 20 rig units sideways at 0.5 s and stay there: 1.1 mouse heights, 0.2 hare heights
+  const p = perturb(plan, s.t0 + 0.5, 1e9, a => (a.id === 'tilly' || a.id === 'hare' ? { ...a, x: a.x + 20 * a.s } : a));
+  const r = lintPlan(p, { rules: ['teleport'] });
+  assert.deepEqual(r.errors.map(i => [i.rule, i.actor, i.shot]), [['teleport', 'tilly', 't1']]);
+  assert.match(r.errors[0].message, /tilly jumps \d+ px \(20 units\)/);
+  assert.deepEqual(lintPlan(plan, { rules: ['teleport'] }).errors, []);
+  // the mouse made three times as tall (as a "set" of its size does) before the jump: 20 units is under half its height
+  const big = perturb(p, s.t0 + 0.25, 1e9, a => (a.id === 'tilly' ? { ...a, st: { ...a.st, params: { ...a.st.params, size: 3 } } } : a));
+  assert.deepEqual(lintPlan(big, { rules: ['teleport'] }).errors, []);
+});
+
+// ───────────── a tangent a move carries through the edge ─────────────
+test('a tangent a move carries through the edge is none; one that comes to rest in the band still is', async () => {
+  const { plan } = await broken();
+  const s = shotOf(plan, 'a1'), t0 = s.t0 + 0.4, H = plan.H, T = LIMITS.tangent * H, z = s.cameraAt(t0).zoom, b3 = actorAt(plan, t0, 'tortoise').sil.box[3];
+  assert.ok(s.t1 - t0 > 2.6, 'room for the slide');
+  // the tortoise's feet from 1.5 T inside the bottom edge to g1 over 1.5 s, held there 1 s (then back where they were)
+  const slide = g1 => perturb(plan, t0, t0 + 2.5, (a, t) => {
+    if (a.id !== 'tortoise') return a;
+    const g = 1.5 * T + (g1 - 1.5 * T) * Math.min(1, (t - t0) / 1.5), dy = (H - g - b3) / z;
+    return { ...a, y: a.y + dy, key: a.key + dy };
+  });
+  const tan = p => lintPlan(p, { rules: ['tangent'], hints: false }).warnings.filter(i => i.shot === 'a1');
+  assert.deepEqual(tan(slide(-1.5 * T)), [], 'carried out through the edge');
+  const rest = tan(slide(0));
+  assert.equal(rest.length, 1, JSON.stringify(rest)); assert.equal(rest[0].actor, 'tortoise');
+  // into the band over 0.5 s, at rest there 1 s, then carried out through the edge over 0.5 s: still a tangent
+  const rested = perturb(plan, t0, t0 + 2.5, (a, t) => {
+    if (a.id !== 'tortoise') return a;
+    const u = t - t0, g = u < 0.5 ? 1.5 * T * (1 - u / 0.5) : u < 1.5 ? 0 : -1.5 * T * Math.min(1, (u - 1.5) / 0.5), dy = (H - g - b3) / z;
+    return { ...a, y: a.y + dy, key: a.key + dy };
+  });
+  const r2 = tan(rested);
+  assert.equal(r2.length, 1, JSON.stringify(r2)); assert.equal(r2[0].actor, 'tortoise');
+});
+
+test('solar-system: the moves through the edge in 4.2, 7.1 and 9.3 are no tangents', async () => {
+  const { plan } = await loadPlan('films/solar-system');
+  const r = lintPlan(plan, { rules: ['tangent'], shots: ['4.2', '7.1', '9.3'], hints: false });
+  assert.deepEqual([...r.warnings, ...r.kept].map(i => `${i.shot} ${i.message}`), []);
 });

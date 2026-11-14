@@ -48,14 +48,15 @@ function hopper(stride, h, duty) {
 const walk = hopper(G.walk.stride, 5, 0.55), run = hopper(G.run.stride, 14, 0.4);
 
 function paint(T, p0, F, o) {
-  const p = pitchPose(p0, F.pitch, { br: -0.13, hr: -0.12 }, { br: 0.07, hr: 0.1 });   // st.tilt: the front of the body tips up or down
+  const p = { ...pitchPose(p0, F.pitch, { br: -0.13, hr: -0.12 }, { br: 0.07, hr: 0.1 }) };   // st.tilt: the front of the body tips up or down
+  p.by -= F.breath * 0.35; p.br -= F.talk * 0.05;                     // breath lifts the body and head; talk tips the front up
   const { P, t } = o, R = roots(p), op = clamp(F.open), sm = F.smile;
   leg(T, R.H2, [p.h2x, p.h2y], { l1: 6.4, l2: 6.6, meta: 7, ma: p.ha, bend: 1, w: [3, 1.8, 1.3, 1.1], col: darken(P.skin, 0.8), paw: [1.6, 0.6], pawCol: darken(P.skin, 0.75), sh: SH, seed: 290, curl: 0, ink: 0.75 });
   leg(T, R.S2, [p.f2x, p.f2y], { l1: 3, l2: 3, meta: 0.8, ma: p.fa, bend: -1, w: [1.5, 1.1, 0.9, 0.9], col: darken(P.skin, 0.8), paw: [1.3, 0.55], pawCol: darken(P.skin, 0.75), sh: SH, seed: 292, curl: p.f2u, ink: 0.7 });
   T.save(); T.translate(R.B[0], R.B[1]); T.rotate(p.br);
-  // throat sac (behind the jaw), inflates with croak and breath
-  const sac = clamp(p.sac + F.breath * 0.08);
-  if (sac > 0.05) cel(T, ell(5.4, 3.6 + sac * 1.6, 2.8 + sac * 2.6, 1.6 + sac * 2.6, 296, 0.1), P.sac, SH * 0.5, 0.75, 296);
+  // throat sac (behind the jaw), inflates with croak and breath: it grows out from behind the jaw from nothing
+  const sac = clamp(p.sac + F.breath * 0.4);
+  if (sac > 0) cel(T, ell(5.4, 2.6 + sac * 2.6, sac * 5.4, sac * 4.2, 296, sac * 0.1), P.sac, SH * 0.5, 0.75, 296);
   // body with head at the front, wide mouth along the snout
   const hinge = [-1.6, -0.6], ja = op * 0.42, jr = q => { const d = rot([q[0] - hinge[0], q[1] - hinge[1]], ja); return [hinge[0] + d[0], hinge[1] + d[1]]; };
   if (op > 0.03) { const M = [hinge, [5, -0.9], [11.6, -1.2], jr([11, 0]), jr([4, 1.4])]; fillP(T, M, '#7a2a36'); fillP(T, ell(...jr([5, 1.2]), 4, 1.2, 297, 0.1), '#d77a8a'); }

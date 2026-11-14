@@ -26,6 +26,7 @@ Ground rules:
 - Deterministic: no `Math.random()` or `Date.now()` in film code; use `rng(seed)` from `cinecode/lib` with `api.seed`.
 - **Look at every image you render** with the Read tool. A film is done when the frames are good, not when the commands pass.
 - One checkpoint: after step 1, show the person the logline, cast (rig + voice), sets and length in a few lines and ask for a go-ahead or changes. **First check that someone can answer:** run `cinecode setup --check` and read its `session` row. If it says nobody can answer (`claude -p` or the SDK), or you are a subagent or part of a workflow, or they said "just make it", skip the checkpoint: decide yourself, work to the end, and list your choices in the report. Never end a run on a question nobody will read. After the checkpoint, work to the end without asking.
+- **2D or 3D.** cinecode draws a film one of two ways: 2D (the flat storybook picture this skill describes, with the full library of rigs and kits) or 3D (lit, with a camera that moves in depth; `"format": { "engine": "3d" }`, and its own, much smaller library). If the request says which, use it. If it doesn't, ask at the checkpoint, with what each would mean for this film (what 3D would have to build). When nobody can answer, use 2D. For a 3D film, `CINECODE/docs/scene3d.md` replaces this skill's rig, kit and staging references; story, lines, voices, captions, music, sound, review and the report stay as written here.
 
 ## 1. The story
 

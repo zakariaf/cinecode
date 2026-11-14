@@ -40,14 +40,15 @@ export function frameGrabber(plan, drawFrame, width = plan.W, height = plan.H) {
 
 /**
  * Encode frames [range[0], range[1]) of a frame source into `outPath` (H.264 in MP4).
- * Frame i is drawn at plan time i / fps.
+ * Frame i is drawn at plan time i / fps. A source that draws no canvas (a 3D film: engine/scene3d/source.mjs) gives
+ * `pixels(t)` instead of drawFrame: the finished frame's raw bytes at width × height, in pixelOrder(), or a promise of them.
  * onFrame(drawn) is called after each frame is handed to the encoder; onEncoded(encoded) as x264 reports progress
  * (it buffers ~50 frames of lookahead, so "drawn" runs ahead of "encoded"). An aborted `signal` stops it.
  * → { frames, ms }
  */
-export async function encodeRange({ plan, drawFrame, range, width = plan.W, height = plan.H, fps = plan.fps, outPath, encoder = {}, onFrame, onEncoded, signal }) {
+export async function encodeRange({ plan, drawFrame, pixels, range, width = plan.W, height = plan.H, fps = plan.fps, outPath, encoder = {}, onFrame, onEncoded, signal }) {
   if (width % 2 || height % 2) throw new Error(`video size must be even, got ${width}×${height}`);
-  const [a, b] = range, grab = frameGrabber(plan, drawFrame, width, height), start = performance.now();
+  const [a, b] = range, grab = pixels ? { pixels } : frameGrabber(plan, drawFrame, width, height), start = performance.now();
   const args = ['-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-progress', 'pipe:1', '-stats_period', '0.25',
     '-f', 'rawvideo', '-pix_fmt', pixelOrder(), '-s', `${width}x${height}`, '-framerate', String(fps), '-i', 'pipe:0',
     ...x264Args(fps, encoder), '-an', '-movflags', '+faststart', outPath];
@@ -71,7 +72,7 @@ export async function encodeRange({ plan, drawFrame, range, width = plan.W, heig
   try {
     for (let i = a; i < b && !failed; i++) {
       signal?.throwIfAborted();
-      if (!ff.stdin.write(grab.pixels(i / fps))) await drain();
+      if (!ff.stdin.write(await grab.pixels(i / fps))) await drain();
       onFrame?.(i - a + 1);
     }
   } catch (e) {

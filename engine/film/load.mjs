@@ -34,6 +34,17 @@ export class ValidationError extends Error {
   }
 }
 
+// The 3D engine's side of a film that asks for it ("format": { "engine": "3d" }): its rigs and kits by name, the flat
+// stand-ins the film is laid out on, and what it does not do yet (engine/scene3d/compile.mjs). Imported for such a
+// film only: it needs the optional package three.
+async function engine3d() {
+  try { return await import('../scene3d/compile.mjs'); }
+  catch (e) {
+    if (e?.code === 'ERR_MODULE_NOT_FOUND' && /package 'three'/.test(String(e.message))) throw new ValidationError([{ path: 'format.engine', message: 'format.engine: "3d" needs the optional packages three and webgpu, which are not installed: run `npm install` in cinecode\'s own folder' }]);
+    throw e;
+  }
+}
+
 const PKG_URL = new URL('../../package.json', import.meta.url).href;
 const ownSpecifier = s => s === 'cinecode' || s.startsWith('cinecode/');
 let hooked = false;
@@ -172,22 +183,25 @@ export async function loadFilm(src, opts = {}) {
   custom.files = custom.files.map(f => { const r = replaced.find(q => q.file === f); return r ? `${f} (replaces the built-in ${r.names.join(', ')})` : f; });
 
   // set instances (validation needs their anchors and sky names)
-  const kits = new Set(listKits()), sets = {};
+  // (a 3D film names the 3D engine's rigs and kits; it is laid out on their flat stand-ins)
+  const E3 = json?.format?.engine === '3d' ? await engine3d() : null, rigOf = E3 ? E3.rig2d : getRig, kitOf = E3 ? E3.kit2d : getKit;
+  const kits = new Set(E3 ? E3.kitNames() : listKits()), sets = {};
   if (json && typeof json.sets === 'object' && json.sets) {
     for (const [id, s] of Object.entries(json.sets)) {
       if (!s || typeof s.kit !== 'string' || !kits.has(s.kit)) continue;
-      try { sets[id] = getKit(s.kit)({ ...(s.params || {}) }); sets[id].lineart = json.format?.style === 'lineart'; }
+      try { sets[id] = kitOf(s.kit)({ ...(s.params || {}) }); sets[id].lineart = json.format?.style === 'lineart'; }
       catch (e) { problems.push({ path: `sets.${id}`, message: `sets.${id}: kit "${s.kit}" failed: ${e.message}` }); }
     }
   }
-  const v = validateFilm(json, { getRig, rigKinds: listRigs(), kits, sets, custom: custom.custom, overlays: custom.overlays, sounds: custom.sounds });
+  const v = validateFilm(json, { getRig: rigOf, rigKinds: E3 ? E3.rigNames() : listRigs(), ...(E3 && { rigs2d: listRigs(), kits2d: listKits(), do3: E3.verbNames() }), kits, sets, custom: custom.custom, overlays: custom.overlays, sounds: custom.sounds });
   problems.push(...v.problems);
+  if (E3) problems.push(...E3.unbuilt(json));
   if (problems.length) throw new ValidationError(problems, v.warnings);
 
   const rigs = {};
-  for (const [id, c] of Object.entries(json.cast || {})) rigs[id] = getRig(c.rig);
+  for (const [id, c] of Object.entries(json.cast || {})) rigs[id] = rigOf(c.rig);
   const film = { ...json, dir, slug: dir ? basename(dir) : (json.slug || 'film'), warnings: [...notes, ...v.warnings], custom };
-  Object.defineProperty(film, 'resolved', { value: { rigs, sets, kits: Object.fromEntries(Object.entries(json.sets).map(([id, s]) => [id, s.kit])) }, enumerable: false });
+  Object.defineProperty(film, 'resolved', { value: { rigs, sets, kits: Object.fromEntries(Object.entries(json.sets).map(([id, s]) => [id, s.kit])), ...(E3 && { timing: E3.createTiming }) }, enumerable: false });
   return film;
 }
 
