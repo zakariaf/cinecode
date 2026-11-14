@@ -1,0 +1,356 @@
+{
+  "title": "Scene Zero",
+  "logline": "A man walks in, a girl runs in and throws him a ball, and the cat on the sofa goes after it.",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "captions": "all",
+    "engine": "3d"
+  },
+  "titles": {
+    "open": {
+      "title": "Scene Zero",
+      "subtitle": "a cinecode 3D test film",
+      "dur": 2
+    },
+    "end": {
+      "lines": [
+        "The End",
+        "drawn entirely by code"
+      ],
+      "dur": 2
+    }
+  },
+  "cast": {
+    "man": {
+      "rig": "man",
+      "name": "Man"
+    },
+    "girl": {
+      "rig": "girl",
+      "name": "Girl"
+    },
+    "cat": {
+      "rig": "cat",
+      "name": "Cat"
+    },
+    "ball": {
+      "rig": "ball",
+      "name": "Ball"
+    }
+  },
+  "sets": {
+    "room": {
+      "kit": "room"
+    }
+  },
+  "scenes": [
+    {
+      "id": "s01",
+      "set": "room",
+      "time": "golden",
+      "music": {
+        "mood": "playful",
+        "intensity": 0.4
+      },
+      "ambience": "none",
+      "actors": {
+        "man": {
+          "offstage": "left"
+        },
+        "girl": {
+          "at": "x:2220,y:1350",
+          "face": "left"
+        },
+        "ball": {
+          "on": "girl"
+        },
+        "cat": {
+          "at": "sofa",
+          "face": "right",
+          "pose": "sit"
+        }
+      },
+      "shots": [
+        {
+          "id": "s01-01",
+          "camera": {
+            "size": "wide",
+            "on": [
+              "man",
+              "girl"
+            ]
+          },
+          "beats": [
+            {
+              "do": "enter",
+              "who": "man",
+              "from": "left",
+              "to": "rug_right",
+              "at": 0
+            },
+            {
+              "do": "look",
+              "who": "cat",
+              "to": "man",
+              "at": 0.4
+            },
+            {
+              "do": "run",
+              "who": "girl",
+              "to": "rug_left",
+              "face": "right",
+              "at": 1.6
+            },
+            {
+              "do": "look",
+              "who": "cat",
+              "to": "girl",
+              "with": "prev"
+            },
+            {
+              "do": "look",
+              "who": "man",
+              "to": "girl",
+              "with": "prev",
+              "after": 0.8
+            },
+            {
+              "do": "turn",
+              "who": "man",
+              "face": "left"
+            },
+            {
+              "do": "look",
+              "who": "girl",
+              "to": "man",
+              "with": "prev"
+            },
+            {
+              "do": "pose",
+              "who": "man",
+              "pose": "crouch"
+            },
+            {
+              "id": "throw",
+              "do": "hop",
+              "who": "ball",
+              "to": "x:2180,y:1060"
+            },
+            {
+              "do": "emote",
+              "who": "girl",
+              "expr": "happy",
+              "with": "throw",
+              "after": 0.1
+            },
+            {
+              "do": "look",
+              "who": "cat",
+              "to": "ball",
+              "with": "throw",
+              "after": 0.6
+            },
+            {
+              "do": "look",
+              "who": "man",
+              "to": "ball",
+              "with": "throw",
+              "after": 0.7
+            },
+            {
+              "sfx": "thud",
+              "with": "throw",
+              "after": 1.4,
+              "gain": 0.5,
+              "caption": "[the ball bounces]"
+            }
+          ]
+        },
+        {
+          "id": "s01-02",
+          "camera": {
+            "size": "full",
+            "on": [
+              "man",
+              "girl"
+            ],
+            "move": "push-in"
+          },
+          "beats": [
+            {
+              "do": "hop",
+              "who": "cat",
+              "to": "rug_front",
+              "at": 0
+            },
+            {
+              "do": "stand",
+              "who": "man",
+              "at": 0.1
+            },
+            {
+              "do": "look",
+              "who": "man",
+              "to": "girl",
+              "at": 0.3
+            },
+            {
+              "do": "gesture",
+              "who": "girl",
+              "name": "jump",
+              "at": 0.4
+            },
+            {
+              "do": "gesture",
+              "who": "girl",
+              "name": "clap",
+              "at": 0.5
+            },
+            {
+              "do": "gesture",
+              "who": "man",
+              "name": "wave",
+              "at": 0.8
+            },
+            {
+              "do": "emote",
+              "who": "man",
+              "expr": "happy",
+              "at": 0.8
+            },
+            {
+              "title": "Catch!",
+              "at": 0.9,
+              "dur": 1.8,
+              "place": "upper"
+            },
+            {
+              "do": "gesture",
+              "who": "girl",
+              "name": "jump",
+              "at": 1.6
+            },
+            {
+              "do": "run",
+              "who": "cat",
+              "to": "near:ball"
+            },
+            {
+              "do": "sit",
+              "who": "cat"
+            },
+            {
+              "sfx": "chime",
+              "with": "prev",
+              "gain": 0.4,
+              "caption": "[a bell rings]"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "s02",
+      "set": "room",
+      "time": "twilight",
+      "transition": "fade",
+      "music": {
+        "mood": "tender",
+        "intensity": 0.3
+      },
+      "ambience": "none",
+      "actors": {
+        "man": {
+          "at": "window",
+          "face": "right"
+        },
+        "cat": {
+          "at": "rug_front",
+          "face": "left",
+          "pose": "sit"
+        }
+      },
+      "shots": [
+        {
+          "id": "s02-01",
+          "camera": {
+            "size": "wide",
+            "on": [
+              "man",
+              "cat"
+            ]
+          },
+          "beats": [
+            {
+              "id": "home",
+              "do": "walk",
+              "who": "man",
+              "to": "sofa",
+              "at": 0
+            },
+            {
+              "do": "sit",
+              "who": "man"
+            },
+            {
+              "do": "look",
+              "who": "cat",
+              "to": "man",
+              "with": "home"
+            },
+            {
+              "do": "turn",
+              "who": "cat",
+              "face": "right",
+              "with": "home",
+              "after": 0.2
+            },
+            {
+              "do": "hop",
+              "who": "cat",
+              "to": "x:2080,y:855",
+              "at": 2.2
+            },
+            {
+              "do": "turn",
+              "who": "cat",
+              "face": "left"
+            },
+            {
+              "do": "sit",
+              "who": "cat"
+            }
+          ]
+        },
+        {
+          "id": "s02-02",
+          "camera": {
+            "size": "medium",
+            "on": "man"
+          },
+          "beats": [
+            {
+              "do": "look",
+              "who": "man",
+              "to": "cat",
+              "at": 0
+            },
+            {
+              "do": "emote",
+              "who": "man",
+              "expr": "happy",
+              "at": 0.3
+            },
+            {
+              "title": "Home.",
+              "at": 0.5,
+              "dur": 2
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

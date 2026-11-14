@@ -59,10 +59,11 @@ test('duckGain: look-ahead start, holds through word gaps, attack/release times'
 });
 
 test('limiter: nothing exceeds the ceiling and quiet material is untouched', () => {
-  const L = Float32Array.from({ length: SR }, (_, i) => (i > 24000 && i < 24100 ? 1.6 : 0.1) * Math.sin(i / 7)), R = Float32Array.from(L);
+  const L = Float32Array.from({ length: SR }, (_, i) => (i > 24000 && i < 24100 ? 1.6 : 0.1) * Math.sin(i / 7)), R = Float32Array.from(L), L0 = Float32Array.from(L);
   const o = limit(L, R, 0.89);
   assert.ok(peak(o.L) <= 0.89 + 1e-6);
-  assert.ok(Math.abs(o.L[1000] - L[1000]) < 1e-6, 'far from the peak the gain is 1');
+  assert.ok(Math.abs(o.L[1000] - L0[1000]) < 1e-6, 'far from the peak the gain is 1');
+  assert.ok(o.L === L && o.R === R, 'in place: no whole-film copy (plan 4.2)');
 });
 
 test('effects land at their time, panned', () => {
@@ -123,8 +124,12 @@ test('writeMaster: two-pass loudnorm call shape (mocked ffmpeg), temp file clean
       const json = calls.length === 1 ? measured : { ...measured, output_i: '-16.01', output_tp: '-1.80', normalization_type: 'linear' };
       return { status: 0, stderr: `ffmpeg noise\n[Parsed_loudnorm_0 @ 0x1]\n${JSON.stringify(json, null, 2)}\n` };
     };
-    const mix = mixFilm({ duration: 2, sfx: [{ t: 0.2, name: 'bell' }] }), out = join(dir, 'master.wav');
+    const mix = mixFilm({ duration: 2, sfx: [{ t: 0.2, name: 'bell' }] }), out = join(dir, 'master.wav'), L = mix.L, before = L[Math.round(0.3 * SR)];
     const info = writeMaster(out, mix, { run });
+    assert.ok(mix.L === L && L[Math.round(0.3 * SR)] !== before, 'the mix is scaled in place, not copied (plan 4.2)');
+    assert.equal(info.report, join(dir, 'mix-report.json'));
+    assert.deepEqual(JSON.parse(readFileSync(info.report, 'utf8')).lines, [], 'the line report is written next to the master');
+    rmSync(info.report);
     assert.equal(calls.length, 2);
     const [c1, a1] = calls[0], [, a2] = calls[1];
     assert.equal(c1, 'ffmpeg');
@@ -142,6 +147,63 @@ test('writeMaster: two-pass loudnorm call shape (mocked ffmpeg), temp file clean
     assert.equal(info.linear, true);
     assert.ok(Number.isFinite(info.preGainDb));
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the report gives each voiced line its speech-band margin over what plays under it (plan 4.1a)', () => {
+  const voices = new Map([['l1', { wav: speechy(2), dur: 2 }], ['l2', { wav: speechy(1), dur: 1 }]]);
+  const lines = [{ id: 'l1', who: 'narrator', narrator: true, t0: 1, t1: 3, text: 'one' }, { id: 'l2', who: 'narrator', narrator: true, t0: 5, t1: 6, text: 'two' }, { id: 'u', who: 'pip', t0: 6.5, t1: 7 }];
+  const sounds = { hiss: () => tone(1000, 1.9, 0.1), rumble: () => tone(60, 1.9, 0.1), late: () => tone(1000, 1, 0.1) };
+  const rep = sfx => {
+    const warn = console.warn; console.warn = () => {};
+    try { return mixFilm({ duration: 8, lines, sounds, sfx: [...sfx, { t: 3.5, name: 'late' }] }, { voices, sfxReverb: 0 }).report; } finally { console.warn = warn; }
+  };
+  const a = rep([{ t: 1, name: 'hiss' }]), b = rep([{ t: 1, name: 'hiss', gain: 0.5 }]), c = rep([{ t: 1, name: 'rumble' }]);
+  assert.deepEqual(a.lines.map(l => l.id), ['l1', 'l2'], 'unvoiced lines are left out');
+  assert.deepEqual(Object.keys(a.lines[0]), ['id', 'who', 'text', 't0', 't1', 'marginDb', 'speechDb', 'underDb']);
+  assert.ok(Math.abs(b.lines[0].marginDb - a.lines[0].marginDb - 6) < 0.2, `half the effect, 6 dB more margin: ${a.lines[0].marginDb} → ${b.lines[0].marginDb}`);
+  assert.ok(c.lines[0].marginDb > a.lines[0].marginDb + 20, `a rumble at the same level hardly counts (speech band): ${c.lines[0].marginDb}`);
+  assert.equal(a.lines[1].marginDb, null, 'nothing under the second line (the late effect ends before it)');
+  assert.equal(a.lines[1].underDb, null);
+  assert.ok(Math.abs(a.lines[0].speechDb - b.lines[0].speechDb) < 0.05, 'the dialogue level does not depend on the effect');
+  assert.deepEqual({ ...a.summary, minDb: undefined, medianDb: undefined }, { lines: 2, minDb: undefined, medianDb: undefined, low: a.lines[0].marginDb < 8 ? 1 : 0 });
+  assert.equal(a.lowDb, 8);
+});
+
+test('effects longer than 2 s dip under dialogue like the beds; short ones do not (plan 4.1b)', () => {
+  const voices = new Map([['l1', { wav: speechy(2), dur: 2 }]]), lines = [{ id: 'l1', who: 'narrator', narrator: true, t0: 3, t1: 5 }];
+  const sounds = { bed: () => tone(600, 7, 0.1), blip: () => tone(800, 1.9, 0.1), hum: () => tone(450, 7, 0.1) };
+  const mix = withLine => mixFilm({ duration: 8, lines: withLine ? lines : [], sounds, sfx: [{ t: 0, name: 'bed' }, { t: 3.05, name: 'blip' }, { t: 0, name: 'hum', params: { duck: false } }] }, { voices, sfxReverb: 0, bus: { ratio: 1 } });
+  const a = mix(true), b = mix(false);
+  const dip = db(level(a.L, 600, 3.4, 4.8) / level(a.L, 600, 1, 2.5));
+  assert.ok(dip < -2.5 && dip > -3.5, `the long effect dips ${dip.toFixed(1)} dB under the line (the beds' ${MIX_DEFAULTS.ambienceDuck} dB)`);
+  assert.ok(Math.abs(db(level(a.L, 600, 5.8, 6.8) / level(a.L, 600, 1, 2.5))) < 0.5, 'and comes back after it');
+  assert.ok(Math.abs(db(level(a.L, 800, 3.4, 4.8) / level(b.L, 800, 3.4, 4.8))) < 0.1, 'a short effect keeps its level');
+  assert.ok(Math.abs(db(level(a.L, 450, 3.4, 4.8) / level(b.L, 450, 3.4, 4.8))) < 0.1, 'a long hum keeps its level, with duck: false too');
+});
+
+test('the score stays dipped across a short gap between lines, and swells in a long one (plan 4.3)', () => {
+  const voices = new Map([['a', { wav: speechy(1.5), dur: 1.5 }], ['b', { wav: speechy(1.5), dur: 1.5 }], ['c', { wav: speechy(1.5), dur: 1.5 }]]);
+  const lines = [{ id: 'a', who: 'narrator', narrator: true, t0: 1, t1: 2.5 }, { id: 'b', who: 'narrator', narrator: true, t0: 3.5, t1: 5 }, { id: 'c', who: 'narrator', narrator: true, t0: 8, t1: 9.5 }];
+  const m = mixFilm({ duration: 12, lines }, { voices, music: music(12), sfxReverb: 0 });
+  const open = level(m.L, 200, 0.1, 0.6);
+  assert.ok(db(level(m.L, 200, 2.7, 3.3) / open) < -8, `1 s gap: still dipped (${db(level(m.L, 200, 2.7, 3.3) / open).toFixed(1)} dB)`);
+  assert.ok(db(level(m.L, 200, 6.2, 7.6) / open) > -1.5, `3 s gap: the score comes back (${db(level(m.L, 200, 6.2, 7.6) / open).toFixed(1)} dB)`);
+  assert.ok(db(level(m.L, 200, 10.6, 11.8) / open) > -1, 'after the last line it swells as before');
+  // takes start and end with a little quiet of their own (about 0.065 s each on 76 Summers'): 1.45 s between the lines'
+  // t1 and t0 is still bridged
+  const quiet = new Float32Array(Math.round(0.06 * SR)), take = Float32Array.from([...quiet, ...speechy(1.3), ...quiet]);
+  const v2 = new Map([['a', { wav: take, dur: 1.42 }], ['b', { wav: take, dur: 1.42 }]]);
+  const m2 = mixFilm({ duration: 7, lines: [{ id: 'a', who: 'narrator', narrator: true, t0: 1, t1: 2.42 }, { id: 'b', who: 'narrator', narrator: true, t0: 3.87, t1: 5.29 }] }, { voices: v2, music: music(7), sfxReverb: 0 });
+  const gap = db(level(m2.L, 200, 3.1, 3.5) / level(m2.L, 200, 0.1, 0.6));
+  assert.ok(gap < -8, `1.45 s between lines with quiet take ends: still dipped (${gap.toFixed(1)} dB)`);
+});
+
+test('a film\'s own sounds are high-passed: rumble below 20 Hz goes, the rest stays (plan 4.4)', () => {
+  const both = () => Float32Array.from({ length: 4 * SR }, (_, i) => 0.2 * Math.sin((2 * Math.PI * 10 * i) / SR) + 0.1 * Math.sin((2 * Math.PI * 1000 * i) / SR));
+  const m = mixFilm({ duration: 5, sounds: { rumble: both }, sfx: [{ t: 0.5, name: 'rumble' }] }, { sfxReverb: 0, bus: { ratio: 1 } });
+  const lo = level(m.L, 10, 1.5, 3.5), hi = level(m.L, 1000, 1.5, 3.5);
+  assert.ok(db(lo / hi) < 6 - 12, `10 Hz against 1 kHz: ${db(lo / hi).toFixed(1)} dB (6 dB in the sound)`);
+  assert.ok(Math.abs(db(hi / (0.1 * Math.SQRT1_2))) < 0.5, `1 kHz kept (${db(hi / (0.1 * Math.SQRT1_2)).toFixed(2)} dB)`);
 });
 
 test('parseLoudnorm reads the last JSON block', () => {

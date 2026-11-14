@@ -43,6 +43,7 @@ export const AMBIENCES = ['meadow-day', 'meadow-night', 'forest-day', 'forest-ni
 export const GRADES = ['memory', 'dream', 'none'];
 export const CAPTION_MODES = ['dialogue', 'all', 'none'];
 export const STYLES = ['painted', 'lineart'];
+export const ENGINES = ['2d', '3d'];   // the picture: flat (the default) or the 3D engine (engine/scene3d)
 export const MOVE_DO = ['walk', 'run', 'hop', 'fly'];
 export const POSTURE_DO = ['sit', 'stand', 'lie', 'sleep', 'wake'];
 // the actions whose "z" (or an anchor's) changes an actor's depth (DESIGN §10)
@@ -50,18 +51,72 @@ export const DEPTH_DO = [...MOVE_DO, 'enter', 'exit', 'place', 'set'];
 export const DO = [...MOVE_DO, 'enter', 'exit', 'pose', 'gesture', 'look', 'turn', 'emote', ...POSTURE_DO, 'custom', 'place', 'fade', 'set', 'blink'];
 const KINDS = ['say', 'do', 'sfx', 'fx', 'music', 'wait', 'title', 'mark'];
 const COMMON = ['id', 'with', 'after', 'at', 'note', 'comment', 'touch', 'contact'];
+// The fields each part of film.json takes (what the compiler reads; docs/storyboard.md): any other is a warning, with
+// the known field nearest it when it looks like a typo. "note" and "comment" are free text anywhere. A 3D film also
+// takes KEYS3 (docs/scene3d.md; engine/scene3d/compile.mjs reads them).
+const FREE = ['note', 'comment'];
+const KEYS = {
+  film: ['title', 'logline', 'format', 'titles', 'score', 'voices', 'cast', 'sets', 'scenes', 'seed', 'slug'],
+  format: ['width', 'height', 'fps', 'captions', 'style', 'engine'],
+  titles: ['open', 'end'], 'titles.open': ['title', 'subtitle', 'dur'], 'titles.end': ['lines', 'dur'],
+  score: ['key', 'motif'], voice: ['voice', 'tone'], cast: ['rig', 'name', 'voice', 'params', 'scale'], set: ['kit', 'params'],
+  scene: ['id', 'set', 'time', 'grade', 'transition', 'music', 'ambience', 'fx', 'overlays', 'rim', 'actors', 'shots'],
+  actor: ['at', 'face', 'pose', 'expr', 'height', 'z', 'on', 'offstage'],
+  shot: ['id', 'camera', 'beats', 'hold', 'dur', 'time', 'grade', 'gradeTo', 'music', 'fadeIn', 'fadeOut', 'lint'],
+  camera: ['size', 'on', 'move', 'angle', 'zoom', 'focus', 'offset', 'dof', 'z', 'zTo', 'to', 'toOn', 'zoomTo', 'moveAt', 'moveDur'],
+};
+const KEYS3 = { set: ['area'], camera: ['area', 'turn'] };
 const BEAT_KEYS = {
-  say: ['say', 'text', 'tone', 'expr', 'vo', 'voice', 'dur', 'caption', 'to', 'tts', 'trimEnd'],
+  say: ['say', 'text', 'tone', 'expr', 'vo', 'tts', 'trimEnd'],
   sfx: ['sfx', 'gain', 'pan', 'params', 'seed', 'caption', 'dur', 'who', 'on', 'hold'],
   fx: ['fx', 'dur', 'on', 'who', 'size', 'n', 'dir', 'color'],
-  music: ['music', 'mood', 'intensity', 'sting', 'name', 'key', ...MUSIC_EXTRAS],
+  music: ['music', 'mood', 'intensity', 'sting', 'name', ...MUSIC_EXTRAS],
   wait: ['wait'],
   title: ['title', 'sub', 'subtitle', 'dur', 'place'],
   mark: ['mark'],
-  do: ['do', 'who', 'to', 'from', 'speed', 'gait', 'pose', 'dur', 'expr', 'name', 'face', 'params', 'run', 'look', 'end', 'over', 'height', 'alpha', 'wade', 'depth', 'fly', 'z'],
+  // any action (each of these is checked where it belongs below); the rest by action: DO_KEYS
+  do: ['do', 'who', 'z', 'height', 'fly', 'wade', 'depth'],
 };
-// fields only one action takes (on top of BEAT_KEYS.do)
-const DO_KEYS = { look: ['tilt'] };
+// the fields each action takes (on top of BEAT_KEYS.do); a custom beat takes any
+const MOVE_KEYS = ['to', 'speed', 'gait', 'pose', 'end', 'face'];
+const DO_KEYS = {
+  walk: MOVE_KEYS, run: MOVE_KEYS, hop: MOVE_KEYS, fly: MOVE_KEYS, enter: [...MOVE_KEYS, 'from', 'run'], exit: [...MOVE_KEYS, 'run'],
+  place: ['to', 'face', 'pose'], pose: ['pose', 'dur', 'expr'], gesture: ['name', 'to'], look: ['to', 'tilt'], turn: ['face'], emote: ['expr'],
+  wake: ['pose'], fade: ['to', 'dur'], set: ['params', 'pose', 'expr', 'dur'],
+  // (a 3D film's own actions)
+  drive: [...MOVE_KEYS, 'arrive', 'dur'], roll: [...MOVE_KEYS, 'from', 'dur'], open: ['to', 'dur', 'speed'], close: ['to', 'dur', 'speed'],
+};
+// " (did you mean …?)" with a known field k likely misspells: one it begins ("sub": "subtitle"), else the nearest one
+// at most half k's length of edits away (a swap of two neighbours counting as one edit)
+function didYouMean(k, known) {
+  const begun = k.length >= 3 && known.find(w => w.toLowerCase().startsWith(k.toLowerCase()));
+  if (begun) return ` (did you mean "${begun}"?)`;
+  const d = (a, b) => {
+    const D = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+    for (let j = 1; j <= b.length; j++) D[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+      D[i][j] = Math.min(D[i - 1][j] + 1, D[i][j - 1] + 1, D[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) D[i][j] = Math.min(D[i][j], D[i - 2][j - 2] + 1);
+    }
+    return D[a.length][b.length];
+  };
+  let best = null, bd = Infinity;
+  for (const w of known) { const n = d(k.toLowerCase(), w.toLowerCase()); if (n < bd) { bd = n; best = w; } }
+  return best && bd <= Math.floor(k.length / 2) ? ` (did you mean "${best}"?)` : '';
+}
+// Where a path inside a shot is, as people find it in film.json: by the scene's and the shot's ids and the beat's number
+// and what it does, "scenes[0].shots[1].beats[2].who" → { where: "scene s1 › shot b › beat 3 (do: walk pip)" } (a
+// problem's or warning's own field: its message stays "<path>: …"). {} for any other path.
+function readable(film, path) {
+  const m = /^scenes\[(\d+)\]\.shots\[(\d+)\](?:\.beats\[(\d+)\])?/.exec(path);
+  if (!m) return {};
+  const sc = film.scenes[m[1]], sh = sc.shots[m[2]], id = (o, k) => (isObj(o) && isStr(o.id) ? o.id : k), out = [`scene ${id(sc, `scenes[${m[1]}]`)}`, `shot ${id(sh, `shots[${m[2]}]`)}`];
+  if (m[3] !== undefined) {
+    const b = sh.beats[m[3]], k = isObj(b) ? KINDS.find(x => b[x] !== undefined) : undefined, v = k && b[k];
+    out.push(`beat ${+m[3] + 1}${k ? ` (${k}${k !== 'title' && (isStr(v) || isNum(v)) ? `: ${v}` : ''}${k === 'do' && isStr(b.who) ? ` ${b.who}` : ''})` : ''}`);
+  }
+  return { where: out.join(' › ') };
+}
 // a rig that flies (a fly gait): it can hover ("height")
 const canFly = R => !!(R?.flies && R.gaits?.fly);
 const HEIGHT_UNITS = 'must be a positive number of units above the place (at the set\'s scale: a mouse is about 18 tall, a human child 141)';
@@ -83,24 +138,35 @@ const faceOK = v => v === 'left' || v === 'right' || v === 1 || v === -1;
 
 export function validateFilm(film, ctx) {
   const problems = [], warnings = [];
-  const P = (path, message) => problems.push({ path, message: `${path}: ${message}` });
-  const Wn = (path, message) => warnings.push({ path, message: `${path}: ${message}` });
+  // (each names a place in a shot by ids too: readable())
+  const P = (path, message) => problems.push({ path, message: `${path}: ${message}`, ...readable(film, path) });
+  const Wn = (path, message) => warnings.push({ path, message: `${path}: ${message}`, ...readable(film, path) });
   if (!isObj(film)) { P('film', 'must be a JSON object'); return { problems, warnings }; }
+  // a warning for each field of o that its part of film.json (KEYS[part]) doesn't take
+  const fields = (o, part, p, what) => {
+    if (!isObj(o)) return;
+    const known = [...KEYS[part], ...((ctx.do3 && KEYS3[part]) || [])];
+    for (const k of Object.keys(o)) if (!known.includes(k) && !FREE.includes(k)) Wn(p ? `${p}.${k}` : k, `unknown field "${k}" ${what}; ignored${didYouMean(k, known)}`);
+  };
 
   // ── top level ──
+  fields(film, 'film', '', 'at the top level');
   if (!isStr(film.title)) Wn('title', 'missing title (used on the opening card and sheets)');
   const fmt = film.format ?? {};
   if (film.format !== undefined && !isObj(film.format)) P('format', 'must be an object { width, height, fps, captions, style }');
   else {
+    fields(film.format, 'format', 'format', 'in format');
     for (const k of ['width', 'height']) if (fmt[k] !== undefined && !(Number.isInteger(fmt[k]) && fmt[k] >= 16 && fmt[k] <= 8192 && fmt[k] % 2 === 0)) P(`format.${k}`, `must be an even integer between 16 and 8192 (got ${JSON.stringify(fmt[k])})`);
     if (fmt.fps !== undefined && !(Number.isInteger(fmt.fps) && fmt.fps >= 1 && fmt.fps <= 120)) P('format.fps', `must be an integer 1..120 (got ${JSON.stringify(fmt.fps)})`);
     if (fmt.captions !== undefined && !CAPTION_MODES.includes(fmt.captions)) P('format.captions', `must be one of ${CAPTION_MODES.join(' | ')} (got ${JSON.stringify(fmt.captions)})`);
     if (fmt.style !== undefined && !STYLES.includes(fmt.style)) P('format.style', `must be one of ${STYLES.join(' | ')} (got ${JSON.stringify(fmt.style)})`);
+    if (fmt.engine !== undefined && !ENGINES.includes(fmt.engine)) P('format.engine', `must be one of ${ENGINES.join(' | ')} (got ${JSON.stringify(fmt.engine)})`);
   }
   if (film.titles !== undefined) {
     if (!isObj(film.titles)) P('titles', 'must be an object { open, end }');
     else {
       const o = film.titles.open, e = film.titles.end;
+      fields(film.titles, 'titles', 'titles', 'in titles'); fields(o, 'titles.open', 'titles.open', 'on the opening card'); fields(e, 'titles.end', 'titles.end', 'on the end card');
       if (o !== undefined && o !== null) {
         if (!isObj(o)) P('titles.open', 'must be an object { title, subtitle, dur }');
         else { if (o.dur !== undefined && !(isNum(o.dur) && o.dur > 0)) P('titles.open.dur', 'must be a positive number of seconds'); if (o.title !== undefined && typeof o.title !== 'string') P('titles.open.title', 'must be a string'); }
@@ -115,6 +181,7 @@ export function validateFilm(film, ctx) {
   if (film.voices !== undefined && !isObj(film.voices)) P('voices', 'must be an object { id: { voice, tone } }');
   for (const [id, v] of Object.entries(voices)) {
     if (!isObj(v)) { P(`voices.${id}`, 'must be an object { voice, tone }'); continue; }
+    fields(v, 'voice', `voices.${id}`, 'on a voice');
     if (!isStr(v.voice)) P(`voices.${id}.voice`, 'a prebuilt voice name is required (e.g. "Puck", "Sulafat")');
     if (v.tone !== undefined && typeof v.tone !== 'string') P(`voices.${id}.tone`, 'must be a string');
   }
@@ -124,8 +191,9 @@ export function validateFilm(film, ctx) {
   for (const [id, c] of Object.entries(cast)) {
     if (id === 'narrator') P(`cast.${id}`, '"narrator" is reserved for the narrator voice');
     if (!isObj(c)) { P(`cast.${id}`, 'must be an object { rig, name, voice, params }'); continue; }
+    fields(c, 'cast', `cast.${id}`, 'on a cast member');
     if (!isStr(c.rig)) P(`cast.${id}.rig`, 'a rig kind is required');
-    else { const r = ctx.getRig(c.rig); if (!r) P(`cast.${id}.rig`, `unknown rig "${c.rig}" (known: ${ctx.rigKinds.join(', ')})`); else rigOf[id] = r; }
+    else { const r = ctx.getRig(c.rig); if (!r) P(`cast.${id}.rig`, ctx.rigs2d?.includes(c.rig) ? `rig "${c.rig}" has no 3D version yet (3D rigs: ${ctx.rigKinds.join(', ')})` : `unknown rig "${c.rig}" (known: ${ctx.rigKinds.join(', ')})`); else rigOf[id] = r; }
     if (c.voice !== undefined && !(isStr(c.voice) && voices[c.voice])) P(`cast.${id}.voice`, `"${c.voice}" is not defined in voices (have: ${Object.keys(voices).join(', ') || 'none'})`);
     if (c.params !== undefined && !isObj(c.params)) P(`cast.${id}.params`, 'must be an object');
     if (c.scale !== undefined && !(isNum(c.scale) && c.scale > 0.1 && c.scale < 10)) P(`cast.${id}.scale`, 'must be a number between 0.1 and 10');
@@ -134,14 +202,16 @@ export function validateFilm(film, ctx) {
   if (!isObj(film.sets) || !Object.keys(sets).length) P('sets', 'at least one set is required: { id: { kit, params } }');
   for (const [id, s] of Object.entries(sets)) {
     if (!isObj(s)) { P(`sets.${id}`, 'must be an object { kit, params }'); continue; }
+    fields(s, 'set', `sets.${id}`, 'on a set');
     if (!isStr(s.kit)) P(`sets.${id}.kit`, 'a kit name is required');
-    else if (!ctx.kits.has(s.kit)) P(`sets.${id}.kit`, `unknown set kit "${s.kit}" (have: ${[...ctx.kits].sort().join(', ')})`);
+    else if (!ctx.kits.has(s.kit)) P(`sets.${id}.kit`, ctx.kits2d?.includes(s.kit) ? `kit "${s.kit}" has no 3D version yet (3D kits: ${[...ctx.kits].sort().join(', ')})` : `unknown set kit "${s.kit}" (have: ${[...ctx.kits].sort().join(', ')})`);
     if (s.params !== undefined && !isObj(s.params)) P(`sets.${id}.params`, 'must be an object');
   }
   if (film.score !== undefined) {
     const sc = film.score;
     if (!isObj(sc)) P('score', 'must be an object { "key": "C", "motif": "G4:1 E4:0.5 …" }');
     else {
+      fields(sc, 'score', 'score', 'in the score');
       if (sc.key !== undefined && !(typeof sc.key === 'string' && /^\s*[A-Ga-g][#b]?/.test(sc.key))) P('score.key', `must be a key name such as "C", "Eb" or "F#m" (got ${JSON.stringify(sc.key)})`);
       if (sc.motif !== undefined) {
         const toks = typeof sc.motif === 'string' ? sc.motif.trim().split(/\s+/).filter(Boolean) : null;
@@ -176,6 +246,7 @@ export function validateFilm(film, ctx) {
   film.scenes.forEach((sc, si) => {
     const sp = `scenes[${si}]`;
     if (!isObj(sc)) { P(sp, 'must be an object'); return; }
+    fields(sc, 'scene', sp, 'on a scene');
     if (!isStr(sc.id)) P(`${sp}.id`, 'a scene id is required');
     else if (sceneIds.has(sc.id)) P(`${sp}.id`, `duplicate scene id "${sc.id}"`); else sceneIds.add(sc.id);
     const S = ctx.sets[sc.set];
@@ -235,10 +306,13 @@ export function validateFilm(film, ctx) {
     const present = new Set(), riding = new Map(), hovering = new Set();
     if (sc.actors !== undefined && !isObj(sc.actors)) P(`${sp}.actors`, 'must be an object { castId: { at, face, pose } }');
     const sceneActors = isObj(sc.actors) ? sc.actors : {};
+    // (and everyone the scene has placed so far: its actors, offstage ones too, and those entered; they stay placed when gone)
+    const been = new Set(Object.keys(sceneActors));
     for (const [id, a] of Object.entries(sceneActors)) {
       const ap = `${sp}.actors.${id}`;
       if (!cast[id]) { P(ap, `"${id}" is not in the cast (have: ${Object.keys(cast).join(', ') || 'none'})`); continue; }
       if (!isObj(a)) { P(ap, 'must be an object { at, face, pose } or { offstage }'); continue; }
+      fields(a, 'actor', ap, 'on a scene actor');
       if (a.offstage !== undefined) { if (!['left', 'right'].includes(a.offstage)) P(`${ap}.offstage`, 'must be "left" or "right"'); }
       else if (a.on !== undefined) {
         present.add(id);
@@ -251,8 +325,9 @@ export function validateFilm(film, ctx) {
         else riding.set(id, a.on);
       }
       else { present.add(id); if (a.at === undefined) P(`${ap}.at`, 'a starting place is required (an anchor, "x:1500", "x:1500,y:1060"), "on": "<actor>" to ride, or use { "offstage": "left" }'); }
-      if (a.at !== undefined) checkTarget(a.at, `${ap}.at`, { anchors, cast, S, P, allowSide: false });
-      if (a.face !== undefined && !faceOK(a.face)) P(`${ap}.face`, 'must be "left" or "right"');
+      if (a.at !== undefined) checkTarget(a.at, `${ap}.at`, { anchors, cast, S, P, allowSide: false, rig: rigOf[id] });
+      // (a 3D film's actor may start facing a place: engine/scene3d/compile.mjs unbuilt checks it)
+      if (a.face !== undefined && !faceOK(a.face) && !(ctx.do3 && isStr(a.face))) P(`${ap}.face`, 'must be "left" or "right"');
       if (a.pose !== undefined && rigOf[id] && !rigPose(rigOf[id], a.pose)) P(`${ap}.pose`, `rig "${rigOf[id].kind}" has no pose "${a.pose}" (poses: ${poseNames(rigOf[id]).join(', ')})`);
       if (a.expr !== undefined && rigOf[id] && !(rigOf[id].expressions || []).includes(a.expr)) Wn(`${ap}.expr`, `rig "${rigOf[id].kind}" has no expression "${a.expr}"`);
       // depth: world px off the stage (positive: farther from the lens); a rider has its carrier's
@@ -271,11 +346,13 @@ export function validateFilm(film, ctx) {
     sc.shots.forEach((sh, hi) => {
       const hp = `${sp}.shots[${hi}]`;
       if (!isObj(sh)) { P(hp, 'must be an object'); return; }
+      fields(sh, 'shot', hp, 'on a shot');
       if (!isStr(sh.id)) P(`${hp}.id`, 'a shot id is required');
       else if (shotIds.has(sh.id)) P(`${hp}.id`, `duplicate shot id "${sh.id}"`); else shotIds.add(sh.id);
       const cam = sh.camera;
       if (cam !== undefined && !isObj(cam)) P(`${hp}.camera`, 'must be an object { size, on, move, angle }');
       else if (cam) {
+        fields(cam, 'camera', `${hp}.camera`, 'on a camera');
         if (cam.size !== undefined && !SIZES.includes(cam.size)) P(`${hp}.camera.size`, `must be one of ${SIZES.join(', ')} (got ${JSON.stringify(cam.size)})`);
         if (cam.move !== undefined && !MOVES.includes(cam.move)) P(`${hp}.camera.move`, `must be one of ${MOVES.join(', ')} (got ${JSON.stringify(cam.move)})`);
         if (cam.angle !== undefined && !ANGLES.includes(cam.angle)) P(`${hp}.camera.angle`, `must be one of ${ANGLES.join(', ')}`);
@@ -332,15 +409,17 @@ export function validateFilm(film, ctx) {
       if (sh.dur !== undefined && !(isNum(sh.dur) && sh.dur > 0)) P(`${hp}.dur`, 'must be a positive number of seconds');
       if (sh.beats !== undefined && !Array.isArray(sh.beats)) { P(`${hp}.beats`, 'must be an array'); return; }
       if (!(sh.beats || []).length && sh.dur === undefined) Wn(`${hp}.beats`, 'no beats and no dur: the shot lasts only its hold');
-      const ids = new Set();
+      // (who is in the scene at some time in the shot: on stage as it starts, or brought in by its beats)
+      const ids = new Set(), inShot = new Set(present);
       (sh.beats || []).forEach((b, bi) => {
         const bp = `${hp}.beats[${bi}]`;
+        for (const id of present) inShot.add(id);
         if (!isObj(b)) { P(bp, 'must be an object'); return; }
         const kinds = KINDS.filter(k => b[k] !== undefined);
         if (kinds.length !== 1) { P(bp, kinds.length ? `has several beat kinds (${kinds.join(', ')}); use one per beat` : `unknown beat: expected one of ${KINDS.map(k => `"${k}"`).join(', ')}`); return; }
         const kind = kinds[0];
-        if (b.id !== undefined) { if (!isStr(b.id)) P(`${bp}.id`, 'must be a string'); else ids.add(b.id); }
         if (b.with !== undefined && !(b.with === 'prev' || (isStr(b.with) && ids.has(b.with)))) P(`${bp}.with`, `must be "prev" or the id of an earlier beat in this shot (got ${JSON.stringify(b.with)})`);
+        if (b.id !== undefined) { if (!isStr(b.id)) P(`${bp}.id`, 'must be a string'); else ids.add(b.id); }
         if (b.after !== undefined && !(isNum(b.after) && b.after >= 0)) P(`${bp}.after`, 'must be a number of seconds ≥ 0');
         const atIsTime = !(kind === 'fx' || (kind === 'do' && ['look', 'place'].includes(b.do)) || kind === 'sfx');
         for (const k of ['touch', 'contact']) if (b[k] !== undefined) {
@@ -350,8 +429,8 @@ export function validateFilm(film, ctx) {
         }
         if (b.at !== undefined && atIsTime && !(isNum(b.at) && b.at >= 0)) P(`${bp}.at`, 'must be a time in seconds from the shot start');
         if (b.at !== undefined && !atIsTime && !(isStr(b.at) || (isNum(b.at) && b.at >= 0))) P(`${bp}.at`, 'must be a time in seconds, or a place (actor or anchor)');
-        const known = new Set([...COMMON, ...BEAT_KEYS[kind], ...(kind === 'do' ? DO_KEYS[b.do] || [] : [])]);
-        for (const k of Object.keys(b)) if (!known.has(k) && !(kind === 'do' && b.do === 'custom')) Wn(`${bp}.${k}`, `unknown field "${k}" for a ${kind === 'do' ? `"${b.do}"` : kind} beat; ignored`);
+        const known = [...COMMON, ...BEAT_KEYS[kind], ...(kind === 'do' ? DO_KEYS[b.do] || [] : [])];
+        for (const k of Object.keys(b)) if (!known.includes(k) && !(kind === 'do' && b.do === 'custom')) Wn(`${bp}.${k}`, `unknown field "${k}" for a ${kind === 'do' ? `"${b.do}"` : kind} beat; ignored${didYouMean(k, known)}`);
         const whoOK = (who, p, need = true) => {
           if (who === undefined) { if (need) P(p, 'who is required'); return false; }
           if (!cast[who]) { P(p, `"${who}" is not in the cast`); return false; }
@@ -380,10 +459,15 @@ export function validateFilm(film, ctx) {
           if (b.gain !== undefined && !(isNum(b.gain) && b.gain >= 0)) P(`${bp}.gain`, 'must be a number ≥ 0');
           if (b.pan !== undefined && !(isNum(b.pan) && b.pan >= -1 && b.pan <= 1)) P(`${bp}.pan`, 'must be a number in -1..1');
           if (b.hold !== undefined && typeof b.hold !== 'boolean') P(`${bp}.hold`, 'must be true or false (false: the next beat and the shot don\'t wait for it)');
+          // a sound may come from an actor waiting offstage or gone (it pans to that side); one the scene never placed
+          // is not placed (a warning: it plays at its pan)
+          const where = b.on ?? b.who ?? (typeof b.at === 'string' ? b.at : undefined), wp = `${bp}.${b.on !== undefined ? 'on' : b.who !== undefined ? 'who' : 'at'}`;
+          if (where !== undefined && cast[where] && !anchors.has(where) && !been.has(where)) Wn(wp, `"${where}" is not in scene ${sc.id} here (not one of its actors, and nothing has brought it in), so nothing places the sound: it plays at its "pan" (centre by default)`);
+          else if (where !== undefined) checkTarget(where, wp, { anchors, cast, S, P, allowSide: false, actorsOK: true });
         } else if (kind === 'fx') {
           if (!FX.includes(b.fx)) P(`${bp}.fx`, `unknown effect "${b.fx}" (one of ${FX.join(', ')})`);
           const where = b.on ?? b.who ?? (typeof b.at === 'string' ? b.at : undefined);
-          if (where !== undefined) checkTarget(where, `${bp}.${b.on !== undefined ? 'on' : b.who !== undefined ? 'who' : 'at'}`, { anchors, cast, S, P, allowSide: false, actorsOK: true });
+          if (where !== undefined) checkTarget(where, `${bp}.${b.on !== undefined ? 'on' : b.who !== undefined ? 'who' : 'at'}`, { anchors, cast, S, P, allowSide: false, actorsOK: true, present });
           if (b.dur !== undefined && !(isNum(b.dur) && b.dur > 0)) P(`${bp}.dur`, 'must be a positive number of seconds');
         } else if (kind === 'music') {
           checkMusic(['sting', 'cue', true].includes(b.music) ? undefined : b.music, `${bp}.music`, P, false, b);
@@ -393,7 +477,8 @@ export function validateFilm(film, ctx) {
           if (b.place !== undefined && b.place !== null && b.place !== 'auto' && !TITLE_PLACES[b.place] && !(isNum(b.place) && b.place > 0 && b.place < 1)) P(`${bp}.place`, `must be "auto", one of ${Object.keys(TITLE_PLACES).join(', ')}, or a fraction of the frame height (0..1) for the title line`);
         } else if (kind === 'do') {
           const d = b.do, R = rigOf[b.who];
-          if (!DO.includes(d)) { P(`${bp}.do`, `unknown action "${d}" (one of ${DO.join(', ')})`); return; }
+          // (a 3D film has actions of its own: engine/scene3d/compile.mjs verbNames)
+          if (!(DO.includes(d) || ctx.do3?.includes(d))) { P(`${bp}.do`, `unknown action "${d}" (one of ${(ctx.do3 ?? DO).join(', ')})`); return; }
           if (d === 'custom') {
             if (!isStr(b.name)) P(`${bp}.name`, 'the name of a function exported by custom.mjs is required');
             else if (!ctx.custom[b.name]) Wn(`${bp}.name`, `custom.mjs has no "${b.name}" (have: ${Object.keys(ctx.custom).join(', ') || 'no custom.mjs'}); the beat only takes time`);
@@ -407,14 +492,14 @@ export function validateFilm(film, ctx) {
             if (b.who === undefined) P(`${bp}.who`, 'who is required');
             else if (!cast[b.who]) P(`${bp}.who`, `"${b.who}" is not in the cast`);
             else if (present.has(b.who)) P(`${bp}.who`, `"${b.who}" is already in the scene; use walk, or start it with "offstage" in the scene's actors`);
-            else { present.add(b.who); riding.delete(b.who); for (const [r, c] of riding) if (c === b.who) present.add(r); }   // a carrier brings its riders back
-            if (b.from !== undefined) checkTarget(b.from, `${bp}.from`, { anchors, cast, S, P, allowSide: true });
-            if (b.to !== undefined) checkTarget(b.to, `${bp}.to`, { anchors, cast, S, P, allowSide: false, self: b.who });
-          } else if (!whoOK(b.who, `${bp}.who`)) return;
+            else { present.add(b.who); been.add(b.who); riding.delete(b.who); for (const [r, c] of riding) if (c === b.who) present.add(r); }   // a carrier brings its riders back
+            if (b.from !== undefined) checkTarget(b.from, `${bp}.from`, { anchors, cast, S, P, allowSide: true, present, rig: R });
+            if (b.to !== undefined) checkTarget(b.to, `${bp}.to`, { anchors, cast, S, P, allowSide: false, self: b.who, present, rig: R });
+          } else if (!whoOK(b.who, `${bp}.who`, d !== 'open' && d !== 'close')) return;   // (3D: a door swings by itself)
           const ride = { present, riding, allowOn: d === 'hop' || d === 'place' };
-          if (MOVE_DO.includes(d)) {
+          if (MOVE_DO.includes(d) || d === 'drive' || d === 'roll') {
             if (b.to === undefined) P(`${bp}.to`, 'a destination is required');
-            else checkTarget(b.to, `${bp}.to`, { anchors, cast, S, P, allowSide: false, self: b.who, ride });
+            else checkTarget(b.to, `${bp}.to`, { anchors, cast, S, P, allowSide: false, self: b.who, ride, present, rig: R });
             if (d === 'fly' && R && !R.flies) P(`${bp}.do`, `rig "${R.kind}" cannot fly`);
           }
           // hovering: "height" ends a fly / enter / place in the air, that many units above the place (fliers only);
@@ -442,7 +527,7 @@ export function validateFilm(film, ctx) {
           }
           if (b.wade !== undefined) { if (typeof b.wade !== 'boolean') P(`${bp}.wade`, 'must be true or false'); else if (d !== 'walk' && d !== 'run') P(`${bp}.wade`, 'only a walk or run can wade'); }
           if (b.depth !== undefined) { if (!(isNum(b.depth) && b.depth > 0)) P(`${bp}.depth`, 'must be a positive number of rig units (how deep the actor sinks)'); else if (!b.wade) Wn(`${bp}.depth`, 'only used with "wade": true'); }
-          if (d === 'exit') { if (b.to === undefined) P(`${bp}.to`, 'where to: "left", "right" or a place'); else checkTarget(b.to, `${bp}.to`, { anchors, cast, S, P, allowSide: true, self: b.who }); present.delete(b.who); for (const [r, c] of riding) if (c === b.who) present.delete(r); }   // riders leave with their carrier
+          if (d === 'exit') { if (b.to === undefined) P(`${bp}.to`, 'where to: "left", "right" or a place'); else checkTarget(b.to, `${bp}.to`, { anchors, cast, S, P, allowSide: true, self: b.who, present, rig: R }); present.delete(b.who); for (const [r, c] of riding) if (c === b.who) present.delete(r); }   // riders leave with their carrier
           if (b.speed !== undefined && !(isNum(b.speed) && b.speed > 0 && b.speed <= 8)) P(`${bp}.speed`, 'must be a speed multiplier between 0 and 8 (1 = the rig\'s natural pace)');
           if (b.gait !== undefined && R && !R.gaits?.[b.gait]) P(`${bp}.gait`, `rig "${R.kind}" has no gait "${b.gait}" (gaits: ${Object.keys(R.gaits || {}).join(', ')})`);
           if ((d === 'pose' || ((MOVE_DO.includes(d) || d === 'place' || d === 'set' || d === 'enter') && b.pose !== undefined)) && R) {
@@ -469,7 +554,7 @@ export function validateFilm(film, ctx) {
             if (d === 'emote' && !isStr(b.expr)) P(`${bp}.expr`, 'an expression name is required');
             else if (b.expr !== undefined && !(R.expressions || []).includes(b.expr)) P(`${bp}.expr`, `rig "${R.kind}" has no expression "${b.expr}" (expressions: ${(R.expressions || []).join(', ')})`);
           }
-          if (d === 'place') { const at = b.to ?? (typeof b.at === 'string' ? b.at : undefined); if (at === undefined) P(`${bp}.to`, 'where to place the actor is required'); else checkTarget(at, `${bp}.${b.to !== undefined ? 'to' : 'at'}`, { anchors, cast, S, P, allowSide: false, self: b.who, ride }); }
+          if (d === 'place') { const at = b.to ?? (typeof b.at === 'string' ? b.at : undefined); if (at === undefined) P(`${bp}.to`, 'where to place the actor is required'); else checkTarget(at, `${bp}.${b.to !== undefined ? 'to' : 'at'}`, { anchors, cast, S, P, allowSide: false, self: b.who, ride, present, rig: R }); }
           // riding state after this beat
           if (b.who !== undefined && (d === 'hop' || d === 'place' || d === 'fly')) { const T = parseTarget(b.to ?? b.at); if (T.kind === 'on' && d !== 'fly' && cast[T.who] && T.who !== b.who) riding.set(b.who, T.who); else riding.delete(b.who); }
           if (d === 'fade' && !(isNum(b.to) && b.to >= 0 && b.to <= 1)) P(`${bp}.to`, 'must be an opacity 0..1');
@@ -478,6 +563,12 @@ export function validateFilm(film, ctx) {
           if (b.face !== undefined && d !== 'turn' && !faceOK(b.face)) P(`${bp}.face`, 'must be "left" or "right"');
         }
       });
+      // a cast member the camera is on must be in the scene during the shot (on stage as it starts, or brought in)
+      for (const id of present) inShot.add(id);
+      if (isObj(cam)) for (const k of ['on', 'toOn']) {
+        const list = typeof cam[k] === 'string' ? [cam[k]] : cam[k];
+        if (Array.isArray(list)) list.forEach((n, i) => { if (cast[n] && !anchors.has(n) && !inShot.has(n)) Wn(`${hp}.camera.${k}[${i}]`, `"${n}" is not in scene ${sc.id} during this shot (not on stage as it starts, and nothing brings it in), so the camera cannot frame it: it frames the others, or the whole view; "enter" it first, or frame someone who is there`); });
+      }
     });
   });
   // each shot's "lint": { "allow": [warning rules], "note" } (engine/lint/rules.mjs: lint reads it too)
@@ -516,7 +607,9 @@ function checkMusic(m, p, P, sceneLevel, beat = {}) {
   if (!sceneLevel) checkExtras(beat, p.replace(/\.music$/, ''), P);   // extras may also sit on the beat itself
 }
 
-function checkTarget(v, p, { anchors, cast, S, P, allowSide, actorsOK = false, self, ride = null }) {
+// present: the actors in the scene at this beat (an actor named or gone beside must be one); rig: the mover's, which
+// cannot be put on a perch when it can neither perch nor fly
+function checkTarget(v, p, { anchors, cast, S, P, allowSide, actorsOK = false, self, ride = null, present = null, rig = null }) {
   const T = parseTarget(v);
   if (T.kind === 'bad') { P(p, `not a place: ${JSON.stringify(v)} (use an anchor name, "x:1500", "x:1500,y:1060", "near:<actor>", "left-of:<actor>", "right-of:<actor>" or, for hop / place, "on:<actor>")`); return; }
   if (T.kind === 'on') {
@@ -532,11 +625,13 @@ function checkTarget(v, p, { anchors, cast, S, P, allowSide, actorsOK = false, s
   if (['near', 'left-of', 'right-of', 'behind', 'front-of'].includes(T.kind)) {
     if (!cast[T.who]) P(p, `"${T.who}" is not in the cast`);
     else if (T.who === self) P(p, 'an actor cannot move relative to itself');
+    else if (present && !present.has(T.who)) P(p, `"${T.who}" is not in this scene here (not on stage, or it has left): there is no one to go beside`);
     return;
   }
   if (T.kind === 'name') {
-    if (anchors.has(T.name)) return;
-    if (actorsOK && cast[T.name]) return;
+    if (anchors.has(T.name) && rig && !rig.perch && !rig.flies && S?.anchor(T.name).type === 'perch') P(p, `"${T.name}" is a perch, and rig "${rig.kind}" can neither perch nor fly: send it to a ground place`);
+    if (anchors.has(T.name) || !S) return;   // (no set: its kit is unknown, and says so)
+    if (actorsOK && cast[T.name]) { if (present && !present.has(T.name)) P(p, `"${T.name}" is not in this scene here (not on stage, or it has left)`); return; }
     P(p, `set "${S?.id ?? '?'}" has no anchor "${T.name}" (anchors: ${[...anchors].join(', ')})`);
     return;
   }

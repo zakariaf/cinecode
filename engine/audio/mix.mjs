@@ -1,8 +1,14 @@
 // The final mix: dialogue, sound effects, ambience beds and a ducked music score → stereo 48 kHz,
 // then mastering to −16 LUFS integrated / −1.5 dBTP with ffmpeg's two-pass loudnorm.
 //
-// mixFilm(plan, { voices, music, sfxGain, sounds, … }) → { L, R }
-// writeMaster(path, mix, { lufs, tp, … }) → { path, lufs, truePeak, preGainDb, measured, result, linear }
+// mixFilm(plan, { voices, music, sfxGain, sounds, … }) → { L, R, report }
+// writeMaster(path, mix, { lufs, tp, … }) → { path, lufs, truePeak, preGainDb, measured, result, linear, report }
+//
+// The report (mix-report.json, written by writeMaster next to the master) gives each voiced line's speech-band margin:
+// the dialogue over everything else under it (effects, ambience, the ducked music), 300 Hz–4 kHz, before the bus
+// compressor. { version: 1, band: [300, 4000], lowDb: 8, lines: [{ id, who, text, t0, t1, marginDb, speechDb, underDb }],
+// summary: { lines, minDb, medianDb, low } }. Levels in dB (RMS over the line, both channels); marginDb and underDb are
+// null when nothing plays under the line; low counts the lines under lowDb. Unvoiced lines are left out.
 //
 // Effects come from sfx.mjs, or from the film's own `custom.mjs` sounds (compile copies them to plan.sounds;
 // opts.sounds is a fallback): ({ seed, dur, params }) → Float32Array, 48 kHz mono. An event's `dur` and `params` reach
@@ -10,11 +16,16 @@
 // its own cut (voiceFor): two lines with the same words share a voice entry but may have different trimEnds. A hum is a
 // voice: the score ducks under it as under dialogue (params.duck: false to opt out, true to duck under any effect).
 import { spawnSync } from 'node:child_process';
-import { unlinkSync } from 'node:fs';
+import { unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { readWav, resample, writeWav, SAMPLE_RATE as SR } from './wav.mjs';
 import { makeSfx, ambience, loudness, truePeak, reverb, filt, hashStr } from './sfx.mjs';
 import { voiceFor } from './voice.mjs';
+
+// Changes from the 2D sound audit (plan P4), each on by default. Set one to false to hear the mix without it.
+const DIP_LONG_SFX = true;            // effects longer than 2 s dip under dialogue as the ambience beds do (ambienceDuck)
+const BRIDGE_LINE_GAPS = true;        // the score stays dipped across a gap of under about 1.5 s between lines (duck.bridge)
+const HIGHPASS_CUSTOM_SOUNDS = true;  // a film's own sounds (custom.mjs) lose their rumble below about 22 Hz
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const db = g => Math.pow(10, g / 20);
@@ -27,7 +38,8 @@ export const MIX_DEFAULTS = {
   sfxReverb: 0.12,    // send from effects into a short outdoor reverb, so they sit in the same air as the beds
   ambienceGain: 1,
   ambienceFade: 1,    // seconds; beds cross-fade with equal power
-  duck: { depth: -10, attack: 0.15, release: 0.4, threshold: -42, hold: 0.25, lookahead: 0.1 },
+  // bridge: silence in s; a take's own quiet ends add about 0.15 s to the gap between lines (t1 to the next t0)
+  duck: { depth: -10, attack: 0.15, release: 0.4, threshold: -42, hold: 0.25, lookahead: 0.1, bridge: BRIDGE_LINE_GAPS ? 1.65 : 0 },
   ambienceDuck: -3,   // beds dip a little under dialogue too
   dialoguePan: 0.3,   // max pan for on-screen speakers (0 = always centre)
   bus: { threshold: -18, ratio: 2, knee: 8, attack: 0.015, release: 0.25 },
@@ -87,16 +99,19 @@ export function linePan(plan, line, maxPan = MIX_DEFAULTS.dialoguePan) {
 /**
  * Sidechain gain for ducking, computed from the dialogue itself (no realtime constraint, so it can look ahead).
  * Speech is detected per 10 ms block (RMS above threshold dBFS), held across word gaps, started `lookahead`
- * early, and the gain glides in dB: `attack` / `release` are the times to cover 90 % of the move.
+ * early, and the gain glides in dB: `attack` / `release` are the times to cover 90 % of the move. A silence shorter
+ * than `bridge` s between two stretches of speech counts as speech, so the score does not swell between close lines.
  * Returns { gain: Float32Array (linear), db: Float32Array (dB ≤ 0) }.
  */
-export function duckGain(dia, { depth = -10, attack = 0.15, release = 0.4, threshold = -42, hold = 0.25, lookahead = 0.1 } = {}) {
+export function duckGain(dia, { depth = -10, attack = 0.15, release = 0.4, threshold = -42, hold = 0.25, lookahead = 0.1, bridge = 0 } = {}) {
   const n = dia.length, B = 480, nb = Math.ceil(n / B), on = new Uint8Array(nb), act = new Uint8Array(nb);
   for (let b = 0; b < nb; b++) {
     let s = 0; const e = Math.min(n, (b + 1) * B);
     for (let i = b * B; i < e; i++) s += dia[i] * dia[i];
     on[b] = 10 * Math.log10(s / Math.max(1, e - b * B) + 1e-20) > threshold ? 1 : 0;
   }
+  const gb = Math.round((bridge * SR) / B);
+  for (let b = 0, last = -1; gb > 0 && b < nb; b++) if (on[b]) { if (last >= 0 && b - last - 1 < gb) on.fill(1, last + 1, b); last = b; }
   const hb = Math.round((hold * SR) / B), lb = Math.round((lookahead * SR) / B);
   for (let b = 0; b < nb; b++) if (on[b]) for (let k = Math.max(0, b - lb); k <= Math.min(nb - 1, b + hb); k++) act[k] = 1;
   const kA = 1 - Math.exp(-2.303 / (attack * SR)), kR = 1 - Math.exp(-2.303 / (release * SR));
@@ -126,7 +141,7 @@ export function busCompress(L, R, { threshold = -18, ratio = 2, knee = 8, attack
 }
 /**
  * Look-ahead peak limiter. The gain reaches its target before each peak (sliding minimum + ramp), never after,
- * so no sample exceeds `ceiling` (linear). Returns new { L, R }.
+ * so no sample exceeds `ceiling` (linear). In place (no whole-film copy); returns { L, R }.
  */
 export function limit(L, R, ceiling, { lookahead = 0.005, release = 0.08 } = {}) {
   const n = L.length, la = Math.max(1, Math.round(lookahead * SR)), need = new Float32Array(n);
@@ -143,14 +158,13 @@ export function limit(L, R, ceiling, { lookahead = 0.005, release = 0.08 } = {})
   const kr = 1 - Math.exp(-1 / (release * SR));
   let g = 1;
   for (let i = 0; i < n; i++) { g = h[i] < g ? h[i] : g + (h[i] - g) * kr; h[i] = g; }
-  const out = { L: new Float32Array(n), R: new Float32Array(n) };
   let sum = 0;
   for (let i = 0; i < n; i++) {
     sum += h[i]; if (i > la) sum -= h[i - la - 1];
     const gg = Math.min(h[i], sum / Math.min(i + 1, la + 1));
-    out.L[i] = L[i] * gg; out.R[i] = R[i] * gg;
+    L[i] *= gg; R[i] *= gg;
   }
-  return out;
+  return { L, R };
 }
 
 // ───────────────────────────── the mix ─────────────────────────────
@@ -176,6 +190,7 @@ function customSound(fn, name, seed, dur, params) {
   const y = fn({ seed, dur, params });
   if (!y || typeof y.length !== 'number' || (!ArrayBuffer.isView(y) && !Array.isArray(y))) throw new Error(`custom sound "${name}" must return a Float32Array (48 kHz mono)`);
   const x = Float32Array.from(y, v => (Number.isFinite(v) ? v : 0));
+  if (HIGHPASS_CUSTOM_SOUNDS) filt(x, 'hp', 22, 0.7); // sub-20 Hz rumble only costs headroom (a rain bed's wind)
   const a = Math.min(x.length >> 1, 96), b = Math.min(x.length >> 1, 240); // 2 ms in, 5 ms out: no clicks at the edges
   for (let i = 0; i < a; i++) x[i] *= i / a;
   for (let i = 0; i < b; i++) x[x.length - 1 - i] *= i / b;
@@ -193,7 +208,22 @@ export function mixFilm(plan, opts = {}) {
   const o = { ...MIX_DEFAULTS, ...opts, duck: { ...MIX_DEFAULTS.duck, ...(opts.duck || {}) }, bus: { ...MIX_DEFAULTS.bus, ...(opts.bus || {}) } };
   const voices = o.voices instanceof Map ? o.voices : new Map(Object.entries(o.voices || {}));
   const N = Math.max(1, Math.round((plan.duration || 0) * SR));
-  const dia = stereo(N), fx = stereo(N), send = stereo(N), amb = stereo(N), mus = stereo(N), diaMono = new Float32Array(N);
+  // Memory: a long film's buses are large (a 30-minute stereo bus is 0.7 GB), so the music is read where it is, not
+  // copied, each bus is dropped once it is used, and the sum, compressor and limiter work in place in the dialogue bus.
+
+  // music: normalized as it is summed (mus[c][i] · gMus, rounded as a stored buffer would be)
+  let mus = null, gMus = null;
+  if (o.music?.L) {
+    const n = Math.min(N, o.music.L.length);
+    mus = n === N ? [o.music.L.subarray(0, N), o.music.R.subarray(0, N)] : [new Float32Array(N), new Float32Array(N)];
+    if (n < N) { mus[0].set(o.music.L.subarray(0, n)); mus[1].set(o.music.R.subarray(0, n)); }
+    const lu = o.musicLufs == null ? NaN : loudness(mus);
+    if (Number.isFinite(lu)) gMus = db(o.musicLufs - lu);
+  }
+  const musAt = (c, i) => (!mus ? 0 : gMus == null ? mus[c][i] : Math.fround(mus[c][i] * gMus));
+
+  const dia = stereo(N);
+  let fx = stereo(N), send = stereo(N), amb, diaMono = new Float32Array(N);
 
   // dialogue: high-passed, each line normalized, placed at its time with a slight pan by screen position
   const unvoiced = (plan.lines || []).filter(l => !voiceFor(voices, l));
@@ -209,7 +239,7 @@ export function mixFilm(plan, opts = {}) {
   }
 
   // effects: synthesized per event (seeded by name, time and owner so editing one event leaves the others alone)
-  const sounds = { ...(o.sounds || {}), ...(plan.sounds || {}) };
+  const sounds = { ...(o.sounds || {}), ...(plan.sounds || {}) }, long = [];
   for (const e of plan.sfx || []) {
     if (!e || !e.name || !Number.isFinite(e.t)) continue;
     let x;
@@ -221,6 +251,11 @@ export function mixFilm(plan, opts = {}) {
     for (let i = 0; i < x.length; i++) if (!Number.isFinite(x[i])) { x[i] = 0; bad++; }
     if (bad) warnOnce(`nan:${e.name}`, `sfx "${e.name}" made ${bad} non-finite samples (silenced)`);
     const g = (e.gain ?? 1) * o.sfxGain;
+    if (DIP_LONG_SFX && x.length > 2 * SR && !(VOCAL_SFX.has(e.name) || params.duck)) { // rain, wind, a thunder roll: a bed (not a hum)
+      place(send, x, e.t, e.pan ?? 0, g * o.sfxReverb);
+      long.push([x, e.t, e.pan ?? 0, g]);
+      continue;
+    }
     place(fx, x, e.t, e.pan ?? 0, g, send, o.sfxReverb);
     if (params.duck ?? VOCAL_SFX.has(e.name)) { // a sung or hummed voice: the music makes room for it too
       const i0 = Math.round(e.t * SR);
@@ -231,8 +266,10 @@ export function mixFilm(plan, opts = {}) {
     const wet = reverb(send.L, send.R, { room: 0.55, damp: 0.5 });
     for (let i = 0; i < N; i++) { fx.L[i] += wet.L[i]; fx.R[i] += wet.R[i]; }
   }
+  send = null;
 
   // ambience: continuous beds with equal-power fades that overlap across a change of bed
+  amb = stereo(N);
   const F = o.ambienceFade, dur = N / SR;
   for (const s of mergeBeds(plan.ambience)) {
     const a0 = Math.max(0, s.t0 - F / 2), a1 = Math.min(dur, s.t1 + F / 2);
@@ -245,25 +282,53 @@ export function mixFilm(plan, opts = {}) {
       amb.L[i0 + i] += bed.L[i] * g; amb.R[i0 + i] += bed.R[i] * g;
     }
   }
+  for (const [x, t, pan, g] of long) place(amb, x, t, pan, g); // long effects dip with the beds
 
-  // music: normalized, then ducked under the dialogue
-  if (o.music?.L) {
-    const n = Math.min(N, o.music.L.length);
-    for (let i = 0; i < n; i++) { mus.L[i] = o.music.L[i]; mus.R[i] = o.music.R[i]; }
-    const lu = o.musicLufs == null ? NaN : loudness([mus.L, mus.R]);
-    if (Number.isFinite(lu)) { const g = db(o.musicLufs - lu); for (let i = 0; i < N; i++) { mus.L[i] *= g; mus.R[i] *= g; } }
-  }
-  const duck = duckGain(diaMono, o.duck), ka = o.duck.depth ? o.ambienceDuck / o.duck.depth : 0;
-  const L = new Float32Array(N), R = new Float32Array(N);
+  // the music ducks under the dialogue, the beds a little
+  let duck = duckGain(diaMono, o.duck);
+  diaMono = null;
+  const ka = o.duck.depth ? o.ambienceDuck / o.duck.depth : 0;
+  const report = lineReport(plan, voices, dia, (c, i) => (c ? fx.R : fx.L)[i] + (c ? amb.R : amb.L)[i] * (ka ? db(duck.db[i & ~15] * ka) : 1) + musAt(c, i) * duck.gain[i]);
+  const { L, R } = dia;   // the sum goes into the dialogue bus
   let ga = 1;
   for (let i = 0; i < N; i++) {
     if ((i & 15) === 0) ga = ka ? db(duck.db[i] * ka) : 1; // the beds' gentler dip (the curve moves slowly)
     const gm = duck.gain[i];
-    L[i] = dia.L[i] + fx.L[i] + amb.L[i] * ga + mus.L[i] * gm;
-    R[i] = dia.R[i] + fx.R[i] + amb.R[i] * ga + mus.R[i] * gm;
+    L[i] = L[i] + fx.L[i] + amb.L[i] * ga + musAt(0, i) * gm;
+    R[i] = R[i] + fx.R[i] + amb.R[i] * ga + musAt(1, i) * gm;
   }
+  fx = amb = duck = mus = null;
   busCompress(L, R, o.bus);
-  return limit(L, R, db(o.ceiling));
+  return { ...limit(L, R, db(o.ceiling)), report };
+}
+
+/** A line's speech-band margin under this many dB is flagged in the report. */
+const MARGIN_LOW_DB = 8;
+/**
+ * The mix report (see the header): each voiced line's dialogue (dia) against everything under it (rest(c, i), the
+ * other buses as they are summed), in the speech band, over the line. Only the lines' own stretches are filtered.
+ */
+function lineReport(plan, voices, dia, rest) {
+  const N = dia.L.length, r1 = v => Math.round(v * 10) / 10, dB = e => 10 * Math.log10(e + 1e-20), lines = [];
+  for (const line of plan.lines || []) {
+    if (!voiceFor(voices, line)) continue;
+    const a = clamp(Math.round(line.t0 * SR), 0, N), b = clamp(Math.round(line.t1 * SR), 0, N), p = Math.max(0, a - 2400); // 50 ms to settle the filters
+    if (b <= a) continue;
+    const band = fill => {
+      let e = 0;
+      for (const c of [0, 1]) {
+        const x = new Float32Array(b - p);
+        for (let i = p; i < b; i++) x[i - p] = fill(c, i);
+        filt(filt(x, 'hp', 300, 0.7), 'lp', 4000, 0.7);
+        for (let i = a - p; i < x.length; i++) e += x[i] * x[i];
+      }
+      return e / (2 * (b - a));
+    };
+    const sd = band((c, i) => (c ? dia.R[i] : dia.L[i])), su = band(rest);
+    lines.push({ id: line.id, who: line.who, text: line.text, t0: r1(line.t0), t1: r1(line.t1), marginDb: su > 0 ? r1(dB(sd) - dB(su)) : null, speechDb: r1(dB(sd)), underDb: su > 0 ? r1(dB(su)) : null });
+  }
+  const m = lines.map(l => l.marginDb).filter(v => v != null).sort((x, y) => x - y);
+  return { version: 1, band: [300, 4000], lowDb: MARGIN_LOW_DB, lines, summary: { lines: lines.length, minDb: m[0] ?? null, medianDb: m.length ? m[m.length >> 1] : null, low: m.filter(v => v < MARGIN_LOW_DB).length } };
 }
 
 // ───────────────────────────── mastering ─────────────────────────────
@@ -284,11 +349,16 @@ export function parseLoudnorm(stderr) {
  * Master the mix: a JS pre-gain to the target and a true-peak limiter (so loudnorm's second pass can stay a pure,
  * linear gain instead of falling back to its dynamic mode), a temp 24-bit WAV, then ffmpeg loudnorm two-pass
  * to `lufs` integrated / `tp` dBTP, written as 48 kHz 24-bit PCM. `run(cmd, args)` can be injected for tests.
- * Synchronous (spawnSync); returns { path, lufs, truePeak, preGainDb, measured, result, linear }.
+ * The mix's own buffers are scaled and limited in place (no whole-film copies), so it is used up. Its report, if
+ * it has one (mixFilm's), is written to mix-report.json in the master's folder.
+ * Synchronous (spawnSync); returns { path, lufs, truePeak, preGainDb, measured, result, linear, report (its path) }.
  */
 export function writeMaster(path, mix, { lufs = -16, tp = -1.5, ffmpeg = 'ffmpeg', run = defaultRun, keepTemp = false } = {}) {
+  const report = mix.report ? join(dirname(path), 'mix-report.json') : null;
+  if (report) writeFileSync(report, JSON.stringify(mix.report, null, 1) + '\n');
   const lu = loudness([mix.L, mix.R]), pre = Number.isFinite(lu) ? lufs - lu : 0, g = db(pre);
-  let L = Float32Array.from(mix.L, v => v * g), R = Float32Array.from(mix.R, v => v * g);
+  let { L, R } = mix;
+  for (let i = 0; i < L.length; i++) { L[i] *= g; R[i] *= g; }
   const goal = db(tp - 0.3);
   let ceil = db(tp - 0.6);
   for (let k = 0; k < 4; k++) {
@@ -306,7 +376,7 @@ export function writeMaster(path, mix, { lufs = -16, tp = -1.5, ffmpeg = 'ffmpeg
     const m = parseLoudnorm(r1.stderr);
     if (!Number.isFinite(+m.input_i)) { // silence: nothing to normalize
       run(ffmpeg, ['-y', '-hide_banner', '-nostats', '-i', tmp, '-ar', String(SR), '-c:a', 'pcm_s24le', path]);
-      return { path, lufs: -Infinity, truePeak: -Infinity, preGainDb: pre, measured: m, result: null, linear: true };
+      return { path, lufs: -Infinity, truePeak: -Infinity, preGainDb: pre, measured: m, result: null, linear: true, report };
     }
     // loudnorm's first pass can mis-measure the integrated level (by ~1 LU on short programmes, its 3 s window);
     // the exact BS.1770 reading of the same file is used instead, the other first-pass values are kept
@@ -316,7 +386,7 @@ export function writeMaster(path, mix, { lufs = -16, tp = -1.5, ffmpeg = 'ffmpeg
     const af = `loudnorm=${base}:LRA=${lra}:measured_I=${mI}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true:print_format=json`;
     const r2 = run(ffmpeg, ['-y', '-hide_banner', '-nostats', '-i', tmp, '-af', af, '-ar', String(SR), '-c:a', 'pcm_s24le', path]);
     const out = parseLoudnorm(r2.stderr);
-    return { path, lufs: +out.output_i, truePeak: +out.output_tp, preGainDb: pre, measured: { ...m, exact_i: exact }, result: out, linear: out.normalization_type === 'linear' };
+    return { path, lufs: +out.output_i, truePeak: +out.output_tp, preGainDb: pre, measured: { ...m, exact_i: exact }, result: out, linear: out.normalization_type === 'linear', report };
   } finally {
     if (!keepTemp) try { unlinkSync(tmp); } catch {}
   }

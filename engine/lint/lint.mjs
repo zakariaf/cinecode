@@ -19,8 +19,9 @@
 //
 // The film is sampled on real frame times (every `step` seconds, every beat and line boundary, and the first and
 // last frame of each shot). Each sample reads frameInfo() (screen boxes, heads, contacts, captions) and the set
-// instance (walk region, water, stones, solid footprints, anchors, perspective). Teleports are checked on every
-// frame. Consecutive hits of the same rule, actor and shot merge into one issue spanning t0–t1, reported at its
+// instance (walk region, water, stones, solid footprints, anchors, perspective). Teleports (and flips, once
+// rules.mjs FLIP_RULE is on) are checked on every frame. The warnings check and the compiler gave the film are listed
+// as rule "plan". Consecutive hits of the same rule, actor and shot merge into one issue spanning t0–t1, reported at its
 // worst moment `t`; a framing fault (edge-cut, tangent, halo) is an issue only when it is held edgeHold seconds in one
 // stretch. Its message ends with a fix that was tried: the film recompiled with the camera change or the staging,
 // and the shot linted again, must lose the fault and gain no other framing fault (else the message says so).
@@ -51,16 +52,17 @@ import { ValidationError } from '../film/load.mjs';
 import { regionOf, SIZE_SPEC, ZMAX, LOOSER } from '../film/camera.mjs';
 import { profile, rigSizes, probe, parseTarget } from '../film/util.mjs';
 import { SKY_STYLE, SKY_TIMES, SKY_W, SKY_H } from '../paint/sky.mjs';
-import { RULES, allowProblems } from './rules.mjs';
+import { RULES, allowProblems, FLIP_RULE } from './rules.mjs';
 
-export { RULES, allowProblems };
+export { RULES, allowProblems, FLIP_RULE };
 
 export const LIMITS = {
   minVisible: 0.6,        // offscreen-speaker
   minShot: 1.2,           // timing: seconds
   maxCps: 20,             // timing: caption characters per second
   scaleTol: 0.15,         // scale
-  teleport: 40,           // rig units per frame at 24 fps
+  teleport: 40,           // rig units per frame at 24 fps, at most,
+  teleportRig: 0.5,       //   and at most this many of the rig's heights (a mouse: 8.75 units)
   captionFace: 0.2,       // caption-face: overlap of the caption and the face zone (fraction of the smaller)
   cutZoom: 1.2,           // cut-jump: zoom ratio below which two framings are "the same size"
   cutShift: 0.15,         // cut-jump: centre shift (fraction of the frame) below which they are "the same place"
@@ -447,6 +449,7 @@ class Linter {
     this.cutJumps();
     this.continuity();
     this.timing();
+    this.planWarnings();
     return this.finish(performance.now() - t0);
   }
   // The per-frame rules on every sample of every shot (of opts.shots).
@@ -480,7 +483,7 @@ class Linter {
     const { S, cam, shot } = c, W = this.W, H = this.H;
     for (const a of c.actors) {
       if (a.vis <= 0.02 || a.alpha < 0.05) continue;           // not on screen: nothing to see
-      const st = a.st, R = st.R, aloft = !!a.airborne, moving = MOVES.has(st.action), k = a.scale || 1;
+      const st = a.st, R = st.R, aloft = !!a.airborne, moving = MOVES.has(st.action) || !!st.settling, k = a.scale || 1;  // settling: landing from the last stride
       const where = pt(a.x, a.y), mark = { kind: 'point', point: a.contact.screen, label: a.mode };
       const wading = !!(a.wade ?? st.wade), wet = !!S.inWater?.(a.x, a.y);
       const cid = a.mode === 'mount' ? a.carrier ?? st.carrier : null, carrier = cid ? c.states.get(cid) : null;
@@ -1112,10 +1115,14 @@ class Linter {
     }
   }
 
-  // ── teleport: every frame of every shot ──
+  // ── teleport and flip: every frame of every shot ──
+  // teleport: a jump over the limit (LIMITS.teleport rig units, or teleportRig of the rig's height when that is less),
+  // its speed changing as much. flip: the drawing mirrored from one frame to the next with no turn squash on either
+  // side, while it is in the picture (off unless rules.mjs FLIP_RULE, or opts.rules names it).
   teleports() {
-    if (!this.on('teleport')) return;
-    const fps = this.fps, thr = LIMITS.teleport * 24 / fps, W = this.W, H = this.H, plan = this.plan;
+    const flips = this.only ? this.only.has('flip') : FLIP_RULE;
+    if (!this.on('teleport') && !flips) return;
+    const fps = this.fps, W = this.W, H = this.H, plan = this.plan, height = new Map();
     for (const shot of plan.shots || []) {
       const f0 = Math.round(shot.t0 * fps), f1 = Math.round(shot.t1 * fps) - 1, prev = new Map();
       for (let f = f0; f <= f1; f++) {
@@ -1123,9 +1130,19 @@ class Linter {
         for (const a of plan.actorsAt(t)) {
           if (!a.visible || a.mode === 'off' || !(a.alpha > 0.05)) continue;
           seen.add(a.id);
-          const p = { x: a.x, y: a.y - (a.st?.lift || 0) * a.s, s: a.s, f };
+          const p = { x: a.x, y: a.y - (a.st?.lift || 0) * a.s, s: a.s, f, face: a.face, squash: a.squash };
           const q = prev.get(a.id); prev.set(a.id, { ...p, v: q && q.f === f - 1 ? [p.x - q.x, p.y - q.y] : [0, 0] });
           if (!q || q.f !== f - 1) continue;
+          if (flips && p.face !== q.face && p.squash === 1 && q.squash === 1) {
+            const fa = frameInfo(plan, t).actors.find(b => b.id === a.id), b = fa?.screenBox;
+            if (b && b[2] > 0 && b[0] < W && b[3] > 0 && b[1] < H) this.issue({ rule: 'flip', severity: 'error', shot: shot.id, scene: shot.scene, actor: a.id, t, t0: t - 1 / fps, t1: t, metric: 1,
+              message: `${a.id} turns to face ${p.face > 0 ? 'right' : 'left'} between two frames at ${sec(t)} with no turn: its drawing mirrors in one frame`, box: b, marks: [{ kind: 'box', box: b, label: a.id }] });
+          }
+          if (!this.on('teleport')) continue;
+          // (the rig's height with its params of the moment: a "set" beat may resize it)
+          const hk = a.id + JSON.stringify(a.st?.params || {});
+          if (!height.has(hk)) height.set(hk, rigSizes(a.R, a.st?.params || {}).height);
+          const thr = Math.min(LIMITS.teleport, LIMITS.teleportRig * height.get(hk) || Infinity) * 24 / fps;
           const dx = p.x - q.x, dy = p.y - q.y, d = Math.hypot(dx, dy) / q.s, jerk = Math.hypot(dx - q.v[0], dy - q.v[1]) / q.s;
           if (d <= thr || jerk <= thr) continue;
           const sp = toScreen(cam, W, H, p.x, p.y), sq = toScreen(cam, W, H, q.x, q.y), m = 0.1 * W;
@@ -1248,11 +1265,51 @@ class Linter {
     }
   }
 
+  // ── plan: the warnings check (film.warnings) and the compiler (plan.warnings) give the storyboard, each on the shot
+  // (or scene) it names, else at the film's start ──
+  planWarnings() {
+    if (!this.on('plan')) return;
+    const plan = this.plan, film = plan.film, shots = plan.shots || [];
+    for (const w of [...(film?.warnings || []), ...(plan.warnings || [])]) {
+      const message = typeof w === 'string' ? w : `${w.message}${w.where ? ` [${w.where}]` : ''}`, ix = /^scenes\[(\d+)\]\.shots\[(\d+)\]/.exec(w.path ?? '');
+      const id = ix ? film.scenes[ix[1]]?.shots?.[ix[2]]?.id : /^(?:shot )?([^\s:]+):/.exec(message)?.[1];
+      const s = shots.find(x => x.id === id) ?? (plan.scenes || []).find(x => x.id === id);
+      this.issue({ rule: 'plan', shot: s?.scene !== undefined ? s.id : null, scene: s ? s.scene ?? s.id : null, t: s ? (s.t0 + s.t1) / 2 : 0, t0: s?.t0 ?? 0, t1: s?.t1 ?? 0, message });
+    }
+  }
+
+  // A tangent that a move carries through the edge: before it, the outline was last clear of the band on one side, and
+  // after it, it is next past the band on the other (it ends by leaving the band on the far side). One that comes to
+  // rest in the band (the camera and the actor still for edgeHold s in the run, even when a move later carries it
+  // out), or goes back the way it came, stays a tangent.
+  through(r) {
+    if (r.rule !== 'tangent') return false;
+    const plan = this.plan, fps = this.fps, shot = plan.shots.find(s => s.id === r.shot), T = LIMITS.tangent * this.H;
+    const at = f => { const t = f / fps, c = shot.cameraAt(t), st = plan.actorsAt(t).find(x => x.id === r.actor); return st ? [c.cx, c.cy, c.zoom, st.x, st.y, st.s] : []; };
+    for (let f = Math.round(r.t0 * fps) + 1, still = 0, q = at(f - 1); f <= Math.round(r.t1 * fps); f++) {
+      const p = at(f);
+      still = p.length && p.every((v, i) => Math.abs(v - q[i]) < 1e-6) ? still + 1 : 0;
+      if (still / fps >= LIMITS.edgeHold - 1e-6) return false;
+      q = p;
+    }
+    // the side of the band the outline is on at frame f: 1 clear inside the frame, -1 past the edge, 0 in the band
+    const side = f => {
+      const t = f / fps, info = frameInfo(plan, t), st = plan.actorsAt(t).find(x => x.id === r.actor), a = info.actors.find(x => x.id === r.actor);
+      if (info.shot !== shot.id || !info.camera || !st || !a) return 0;
+      const sil = silhouette(plan, info, a, st), g = sil.box ? sil.edges[r.worst.variant] : NaN;
+      return g > T ? 1 : g < -T ? -1 : 0;
+    };
+    const next = fs => { for (const f of fs) { const v = side(f); if (v) return v; } return 0; };
+    const fs = this.framesFor(shot), f0 = Math.round(r.t0 * fps), f1 = Math.round(r.t1 * fps), a = next(fs.filter(f => f < f0).reverse());
+    return a !== 0 && next(fs.filter(f => f > f1)) === -a;
+  }
+
   finish(ms) {
-    // framing faults that pass in a moment (a move sweeping through, a figure turning) are not issues; a warning its
-    // shot allows ("lint": { "allow": [rule], "note" }) is kept, with the note and no fix tried
+    // framing faults that pass in a moment (a move sweeping through, a figure turning) are not issues, nor a tangent a
+    // move carries through the edge; a warning its shot allows ("lint": { "allow": [rule], "note" }) is kept, with the
+    // note and no fix tried
     const kept = new Set();
-    const out = this.runs.filter(held).map(r => {
+    const out = this.runs.filter(r => held(r) && !this.through(r)).map(r => {
       const w = r.worst, span = r.t1 - r.t0 > 1e-6 && r.n > 1;
       const t = w.t ?? r.t0, L = r.shot != null ? this.srec.get(r.shot)?.def?.lint : null;
       const keep = r.severity === 'warning' && Array.isArray(L?.allow) && L.allow.includes(r.rule);

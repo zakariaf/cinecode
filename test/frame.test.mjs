@@ -69,6 +69,57 @@ test('depth of field keeps sharp the subjects a pull-out ends on (toOn), even on
   assert.ok(diff('hare') < 1.5, `the hare is sharp (${diff('hare').toFixed(2)})`);
 });
 
+test('api.dof: overlays and custom beats are told the blur the frame gives what lies behind its subjects', async () => {
+  const W = 640, H = 360, mk = (dof, on = ['hare']) => film([{ id: 's1', set: 'm', time: 'morning', actors: { hare: { at: 'x:1240,y:1062' } },
+    shots: [{ id: 'a', dur: 3, camera: { size: 'close', on, dof } }] }], { W, H, sets: { m: { kit: 'meadow' } } });
+  const seen = async (f, t = 1.5) => {
+    const plan = compile(await loadFilm(f)), got = [];
+    plan.overlays = ['sky', 'world', 'grade'].map(layer => ({ scene: 's1', layer, def: { draw: (ctx, api) => got.push(api.dof) } }));
+    drawFrame(createCanvas(W, H).getContext('2d'), plan, t);
+    return { got, zoom: frameInfo(plan, t).camera.zoom };
+  };
+  const soft = await seen(mk(true));
+  assert.equal(soft.got.length, 3, 'every layer is told');
+  const want = Math.max(5, Math.min(14, Math.max(0, (soft.zoom - 2.2) * 1.6))) * H / 1080;
+  assert.ok(soft.got.every(d => Math.abs(d - want) < 1e-9), `the frame's blur, the same on every layer (${soft.got} vs ${want})`);
+  assert.deepEqual((await seen(mk(false))).got, [0, 0, 0], 'no depth of field: 0');
+  // (the camera on a place, no figure: the frame makes no blur pass, so neither does the overlay)
+  assert.deepEqual((await seen(mk(true, ['pond_edge']))).got, [0, 0, 0], 'no subject on stage: 0');
+});
+
+// ───────────── filtered draws ─────────────
+// Every filtered drawImage of the frame that changes less than the whole canvas is clipped to about the box it changes:
+// Skia's cost for a filtered draw follows the area of the canvas drawn into (rim light, a figure in a prop's shade).
+test('filtered draws are clipped to the box they change, not the whole canvas', async () => {
+  const W = 640, H = 360, plan = compile(await loadFilm(film([{ id: 's1', set: 'w', time: 'afternoon',
+    rim: { dir: 'upper-left', strength: 0.8 },
+    actors: { hare: { at: 'x:1320,y:1026' }, tortoise: { at: 'x:1500' } }, shots: [{ id: 'a', dur: 3, camera: { size: 'medium', on: ['hare', 'tortoise'] } }] }],
+  { W, H, sets: { w: { kit: 'wayside' } } })));
+  const proto = Object.getPrototypeOf(createCanvas(1, 1).getContext('2d')), orig = {}, S = new WeakMap(), draws = [];
+  const st = c => { if (!S.has(c)) S.set(c, { path: null, clip: null, stack: [] }); return S.get(c); };
+  const map = (c, x, y) => { const m = c.getTransform(); return [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f]; };
+  const spy = {
+    beginPath() { st(this).path = []; }, moveTo() { st(this).path = 'other'; },
+    rect(x, y, w, h) { const s = st(this); if (Array.isArray(s.path)) s.path.push([...map(this, x, y), ...map(this, x + w, y + h)]); },
+    clip() { const s = st(this); s.clip = Array.isArray(s.path) && s.path.length === 1 ? s.path[0] : 'other'; },
+    save() { const s = st(this); s.stack.push(s.clip); }, restore() { const s = st(this); s.clip = s.stack.pop() ?? null; },
+    drawImage(...A) {
+      if (!this.filter || this.filter === 'none' || A.length !== 9) return;
+      const [x0, y0] = map(this, A[5], A[6]), [x1, y1] = map(this, A[5] + A[7], A[6] + A[8]);
+      if ((x1 - x0) * (y1 - y0) < 0.9 * this.canvas.width * this.canvas.height) draws.push({ filter: this.filter, dest: [x0, y0, x1, y1], clip: st(this).clip });
+    },
+  };
+  for (const k of Object.keys(spy)) { orig[k] = proto[k]; proto[k] = function (...a) { spy[k].apply(this, a); return orig[k].apply(this, a); }; }
+  try { drawFrame(createCanvas(W, H).getContext('2d'), plan, 1.5); } finally { Object.assign(proto, orig); }
+  assert.ok(draws.filter(d => /blur/.test(d.filter)).length >= 4, `the rim light's blurs are seen (${draws.length} filtered draws)`);
+  assert.ok(draws.some(d => /brightness/.test(d.filter)), 'and the hare in the tree\'s shade');
+  for (const d of draws) {
+    const c = d.clip, pad = 30;
+    assert.ok(Array.isArray(c) && c[0] >= d.dest[0] - pad && c[1] >= d.dest[1] - pad && c[2] <= d.dest[2] + pad && c[3] <= d.dest[3] + pad,
+      `${d.filter} into [${d.dest.map(Math.round)}] is clipped to about that box (clip: ${Array.isArray(c) ? c.map(Math.round) : c})`);
+  }
+});
+
 // ───────────── movement dust ─────────────
 // A stand-in set whose back is one flat colour (a dirt path everywhere).
 const flatSet = rgb => ({ surfaceAt: () => 'dirt', drawBack: x => { x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.fillStyle = `rgb(${rgb})`; x.fillRect(0, 0, x.canvas.width, x.canvas.height); x.restore(); } });

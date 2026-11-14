@@ -452,3 +452,25 @@ test('a gap after a cue (compile\'s music: "none") cuts the score like an explic
   assert.equal(tail, 0, 'silent in the gap');
   assert.ok(rmsAt(x, 12.5, 14) > -45, 'the next cue plays');
 });
+
+test('the last cue lands as a short end card comes up, rings over it and fades out with the picture (plan 4.5)', () => {
+  // kite's ending: a motif statement too long to land as the card comes up lands 2.2 s before the end instead
+  const kite = { score: { key: 'G', motif: 'G4:0.5 B4:0.5 D5:1 G5:2' }, music: [{ t0: 0, t1: 24.5, mood: 'tender', intensity: 0.3 }, { t0: 24.5, t1: 32, mood: 'tender', intensity: 0.35, motif: 4, motifVoice: 'music-box' }] };
+  for (const [mood, dur, card, film] of [['tender', 20, 2.5], ['wonder', 24, 2], ['playful', 18, 2.5], ['night', 26, 3], ['triumph', 22, 2.5], ['sad', 30, 5], ['motif', 32, 2.5, kite]]) {
+    const x = scoreFilm({ duration: dur, cards: [{ kind: 'end', t0: dur - card, t1: dur }], music: [{ t0: 0, t1: dur, mood, intensity: 0.4 }], ...film }, { seed: 3 });
+    const mid = rmsAt(x, dur - 8, dur - 5), fade = rmsAt(x, dur - 1.4, dur - 1), last = rmsAt(x, dur - 0.1, dur);
+    assert.ok(fade > mid - 8, `${mood}: still sounding as the fade to black starts (${fade.toFixed(1)} dB, cue ${mid.toFixed(1)} dB)`);
+    assert.ok(last < fade - 12, `${mood}: faded out by the end (${last.toFixed(1)} dB)`);
+    assert.ok(worstClick(x.L.subarray((dur - 3) * SR)) < 15, `${mood}: click-free ending`);
+    // the final chord (the biggest rise of the 50 ms level from 1 s before the card) is struck as the card comes up, or
+    // 2.2 s before the end for a shorter card, and nothing is struck in the picture's fade to black (the last 1.2 s)
+    const rise = t => rmsAt(x, t + 0.05, t + 0.1) - rmsAt(x, t, t + 0.05);
+    let at = null, best = -Infinity, inFade = -Infinity;
+    for (let t = dur - card - 1; t + 0.1 <= dur + 1e-9; t += 0.05) { const r = rise(t); if (r > best) { best = r; at = dur - t - 0.05; } if (t >= dur - 1.3) inFade = Math.max(inFade, r); }
+    assert.ok(inFade < 3, `${mood}: nothing struck in the fade to black (+${inFade.toFixed(1)} dB)`);
+    if (mood !== 'sad') assert.ok(at >= Math.min(card, 2.2) - 0.1, `${mood}: final chord struck ${at.toFixed(2)} s before the end, card ${card} s`);   // a 30 s sad cue is one swell chord: nothing lands
+  }
+  // without an end card the final chord still lands ~3 s before the end and dies away (no fade-out added)
+  const y = scoreFilm({ duration: 24, music: [{ t0: 0, t1: 24, mood: 'wonder', intensity: 0.4 }] }, { seed: 3 });
+  assert.ok(rmsAt(y, 22.6, 23) < rmsAt(y, 16, 19) - 15);
+});

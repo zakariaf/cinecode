@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, cpSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, cpSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadImage } from '@napi-rs/canvas';
+import { loadImage, createCanvas } from '@napi-rs/canvas';
 import { srtTime, wrapText, toSrt, subtitleCues } from '../engine/render/srt.mjs';
-import { splitRanges, frameCount, renderVideo, verifyVideo, lockOutput } from '../engine/render/video.mjs';
+import { gridRanges, segmentFrames, frameCount, renderVideo, verifyVideo, lockOutput } from '../engine/render/video.mjs';
 import { ffmpeg, hasFfmpeg, probe, run, FFPROBE } from '../engine/render/ffmpeg.mjs';
 import { frameGrabber, pixelOrder } from '../engine/render/encode.mjs';
 import { createSource, decodeFrameNumber } from '../engine/render/testcard.mjs';
@@ -30,6 +31,7 @@ async function decodeFrames(path, W = 64, H = 36) {
   return nums;
 }
 const seq = (a, b) => Array.from({ length: b - a }, (_, i) => a + i);
+const sha = p => createHash('sha256').update(readFileSync(p)).digest('hex');
 
 // ───────────── subtitles ─────────────
 
@@ -70,15 +72,12 @@ test('subtitleCues prefers captions, falls back to lines, sorts, shifts and clip
 
 // ───────────── frame ranges ─────────────
 
-test('splitRanges covers the range contiguously with balanced parts', () => {
-  assert.deepEqual(splitRanges([0, 48], 2), [[0, 24], [24, 48]]);
-  const r = splitRanges([10, 1000], 7);
-  assert.equal(r.length, 7); assert.equal(r[0][0], 10); assert.equal(r.at(-1)[1], 1000);
-  for (let i = 1; i < r.length; i++) assert.equal(r[i][0], r[i - 1][1]);
-  const sizes = r.map(([a, b]) => b - a); assert.ok(Math.max(...sizes) - Math.min(...sizes) <= 1);
-  assert.equal(splitRanges([0, 30], 8, 12).length, 2, 'minFrames caps the number of segments');
-  assert.deepEqual(splitRanges([0, 3], 10), [[0, 1], [1, 2], [2, 3]]);
-  assert.deepEqual(splitRanges([5, 5], 4), []);
+test('gridRanges cuts a range on the grid counted from frame 0, whatever the range', () => {
+  assert.deepEqual(gridRanges([0, 100], 48), [[0, 48], [48, 96], [96, 100]]);
+  assert.deepEqual(gridRanges([50, 150], 48), [[50, 96], [96, 144], [144, 150]]);
+  assert.deepEqual(gridRanges([48, 96], 48), [[48, 96]]);
+  assert.deepEqual(gridRanges([5, 5], 48), []);
+  assert.equal(segmentFrames(24), 96, 'a segment is two keyframe intervals: 4 s'); assert.equal(segmentFrames(12), 48);
   assert.equal(frameCount({ duration: 2.01, fps: 24 }), 48);
 });
 
@@ -107,22 +106,22 @@ test('renderVideo in-process: exact frame count, duration and frame order', { sk
 });
 
 test('renderVideo with 2 workers: segments concat without duplicated or missing frames; audio + subtitles muxed', { skip: !FF && 'ffmpeg not installed' }, async () => {
-  const src = createSource({ duration: 2 });
+  const src = createSource({ duration: 5 });
   const tone = Float32Array.from({ length: Math.round(48000 * 2.4) }, (_, i) => 0.2 * Math.sin((2 * Math.PI * 440 * i) / 48000));
   writeWav(join(OUT, 'tone.wav'), [tone, tone], 48000);
   const events = [];
-  const r = await renderVideo({ ...src, workerModule: CARD, workerArgs: { duration: 2 }, outPath: join(OUT, 'two.mp4'), jobs: 2,
+  const r = await renderVideo({ ...src, workerModule: CARD, workerArgs: { duration: 5 }, outPath: join(OUT, 'two.mp4'), jobs: 2,
     audio: join(OUT, 'tone.wav'), captions: src.plan.captions, onProgress: p => events.push(p) });
-  assert.equal(r.segments, 2);
-  assert.equal(r.probe.video.frames, 48);
-  assert.ok(Math.abs(r.probe.duration - 2) <= 1 / 24, `duration ${r.probe.duration}`);
+  assert.equal(r.segments, 2); assert.equal(r.jobs, 2);
+  assert.equal(r.probe.video.frames, 120);
+  assert.ok(Math.abs(r.probe.duration - 5) <= 1 / 24, `duration ${r.probe.duration}`);
   assert.equal(r.probe.audio.codec, 'aac'); assert.equal(r.probe.audio.sampleRate, 48000); assert.equal(r.probe.audio.channels, 2);
-  assert.ok(Math.abs(r.probe.audio.duration - 2) < 0.06, `audio ${r.probe.audio.duration}`);
+  assert.ok(Math.abs(r.probe.audio.duration - 5) < 0.06, `audio ${r.probe.audio.duration}`);
   assert.equal(r.probe.subtitles, 1);
-  assert.deepEqual(await decodeFrames(r.path), seq(0, 48));
+  assert.deepEqual(await decodeFrames(r.path), seq(0, 120));
   const frames = events.filter(e => e.phase === 'frames');
-  assert.ok(frames.length > 0 && frames.at(-1).done === 48, 'progress reaches the total');
-  assert.ok(frames.every(e => e.done <= e.drawn && e.drawn <= 48));
+  assert.ok(frames.length > 0 && frames.at(-1).done === 120, 'progress reaches the total');
+  assert.ok(frames.every(e => e.done <= e.drawn && e.drawn <= 120));
   assert.deepEqual([...new Set(events.map(e => e.phase))], ['frames', 'join', 'mux', 'verify']);
   // soft subtitles survive the mux with the right text
   const { stdout } = await ffmpeg(['-i', r.path, '-map', '0:s:0', '-f', 'srt', 'pipe:1']);
@@ -130,15 +129,49 @@ test('renderVideo with 2 workers: segments concat without duplicated or missing 
 });
 
 test('renderVideo: three workers, a sub-range, and half-size output', { skip: !FF && 'ffmpeg not installed' }, async () => {
-  const src = createSource({ duration: 3, width: 128, height: 72 });
-  const r = await renderVideo({ ...src, workerModule: CARD, workerArgs: { duration: 3, width: 128, height: 72 }, outPath: join(OUT, 'three.mp4'),
-    jobs: 3, range: [6, 66], width: 64, height: 36 });
-  assert.equal(r.segments, 2, '60 frames at ≥ 24 per segment → 2 segments');
-  assert.equal(r.probe.video.frames, 60); assert.equal(r.probe.video.width, 64);
-  assert.deepEqual(await decodeFrames(r.path), seq(6, 66));
-  const r3 = await renderVideo({ ...src, workerModule: CARD, workerArgs: { duration: 3, width: 128, height: 72 }, outPath: join(OUT, 'three-b.mp4'), jobs: 3 });
-  assert.equal(r3.segments, 3);
-  assert.deepEqual(await decodeFrames(r3.path, 128, 72), seq(0, 72));
+  const src = createSource({ duration: 5, width: 128, height: 72 });
+  const r = await renderVideo({ ...src, workerModule: CARD, workerArgs: { duration: 5, width: 128, height: 72 }, outPath: join(OUT, 'three.mp4'),
+    jobs: 3, range: [6, 106], width: 64, height: 36 });
+  assert.equal(r.segments, 2, 'frames 6–105 on the 96-frame grid → [6, 96) and [96, 106)');
+  assert.equal(r.probe.video.frames, 100); assert.equal(r.probe.video.width, 64);
+  assert.deepEqual(await decodeFrames(r.path), seq(6, 106));
+  const r3 = await renderVideo({ ...src, workerModule: CARD, workerArgs: { duration: 5, width: 128, height: 72 }, outPath: join(OUT, 'three-b.mp4'), jobs: 3 });
+  assert.equal(r3.segments, 2);
+  assert.deepEqual(await decodeFrames(r3.path, 128, 72), seq(0, 120));
+});
+
+test('renderVideo with resume: a render stopped part way goes on from its whole segments and gives the same bytes', { skip: !FF && 'ffmpeg not installed' }, async () => {
+  const src = createSource({ duration: 10 }), args = { ...src, workerModule: CARD, workerArgs: { duration: 10 }, jobs: 2, resume: 'film v1' };
+  const whole = await renderVideo({ ...args, outPath: join(OUT, 'resume-a.mp4') });
+  assert.equal(whole.segments, 3, '240 frames → segments of 96, 96 and 48');
+  assert.ok(!existsSync(join(OUT, '.resume-a.mp4.parts')), 'segment folder removed once done');
+  // stopped as soon as its first segment is whole: that segment is kept
+  const out = join(OUT, 'resume-b.mp4'), seg0 = join(OUT, '.resume-b.mp4.parts', 'seg-0-96.mp4'), stop = new AbortController();
+  await assert.rejects(renderVideo({ ...args, outPath: out, signal: stop.signal, onProgress: () => { if (existsSync(seg0)) stop.abort(new Error('stopped')); } }), /stopped/);
+  assert.ok(existsSync(seg0) && !existsSync(out));
+  const events = [];
+  await renderVideo({ ...args, outPath: out, onProgress: p => events.push(p) });
+  assert.ok(events.filter(e => e.phase === 'frames').every(e => e.done >= 96), 'the kept segment is not drawn again');
+  assert.equal(sha(out), sha(whole.path));
+  assert.deepEqual(await decodeFrames(out), seq(0, 240));
+  // another key (the film changed) draws everything again
+  const again = [];
+  await renderVideo({ ...args, resume: 'film v2', outPath: join(OUT, 'resume-c.mp4'), keep: true });
+  await renderVideo({ ...args, resume: 'film v3', outPath: join(OUT, 'resume-c.mp4'), onProgress: p => again.push(p) });
+  assert.equal(again.find(e => e.phase === 'frames').done < 96, true, 'segments of another key are not kept');
+});
+
+test('renderVideo: the same bytes in one process and with 2 or 3 workers; a range on the grid is the whole render\'s segments', { skip: !FF && 'ffmpeg not installed' }, async () => {
+  const src = createSource({ duration: 12, width: 128, height: 72 }), args = { ...src, workerModule: CARD, workerArgs: { duration: 12, width: 128, height: 72 } };
+  const one = await renderVideo({ ...args, jobs: 1, outPath: join(OUT, 'j1.mp4') });
+  const two = await renderVideo({ ...args, jobs: 2, outPath: join(OUT, 'j2.mp4') });
+  const three = await renderVideo({ ...args, jobs: 3, outPath: join(OUT, 'j3.mp4') });
+  assert.equal(one.jobs, 1); assert.equal(two.jobs, 2); assert.equal(three.jobs, 3);
+  assert.equal(sha(two.path), sha(one.path)); assert.equal(sha(three.path), sha(one.path));
+  // frames 96–191 rendered on their own: the very packets of the whole render's frames 96–191
+  const part = await renderVideo({ ...args, jobs: 2, range: [96, 192], outPath: join(OUT, 'j-part.mp4') });
+  const packets = async p => (await ffmpeg(['-i', p, '-map', '0:v:0', '-c', 'copy', '-f', 'framemd5', 'pipe:1'])).stdout.toString().split('\n').filter(l => /^0,/.test(l)).map(l => l.split(',').at(-1).trim());
+  assert.deepEqual(await packets(part.path), (await packets(one.path)).slice(96, 192));
 });
 
 test('renderVideo: colours survive the RGB → BT.709 → RGB round trip and are tagged', { skip: !FF && 'ffmpeg not installed' }, async () => {
@@ -156,11 +189,11 @@ test('renderVideo: colours survive the RGB → BT.709 → RGB round trip and are
 });
 
 test('renderVideo: a failing worker rejects with its error, cleans up, and keeps the previous output', { skip: !FF && 'ffmpeg not installed' }, async () => {
-  const src = createSource({ duration: 2 });
+  const src = createSource({ duration: 5 });
   writeFileSync(join(OUT, 'fail.mp4'), 'previous render');
   await assert.rejects(
-    renderVideo({ ...src, workerModule: CARD, workerArgs: { duration: 2, failAt: 30 }, outPath: join(OUT, 'fail.mp4'), jobs: 2 }),
-    /worker 1 \(frames 24–47\): test card: failing at frame 30/);
+    renderVideo({ ...src, workerModule: CARD, workerArgs: { duration: 5, failAt: 100 }, outPath: join(OUT, 'fail.mp4'), jobs: 2 }),
+    /worker [01] \(frames 96–119\): test card: failing at frame 100/);
   assert.ok(!existsSync(join(OUT, '.fail.mp4.parts')));
   assert.equal(readFileSync(join(OUT, 'fail.mp4'), 'utf8'), 'previous render');
 });
@@ -222,6 +255,26 @@ test('contactSheet writes a JPEG with the layout\'s dimensions', async () => {
   const r2 = await contactSheet({ plan, drawFrame, outPath: join(OUT, 'sheet-t.jpg'), times: [0.5, 1.5], cols: 4, tileW: 240 });
   assert.equal(r2.items.length, 2);
   assert.equal(r2.width, sheetLayout({ n: 2, cols: 4, tileW: 240, W: 320, H: 180 }).width, 'columns shrink to the number of stills');
+});
+
+test('sheet: stills under the title and end cards are labelled as the cards; a long title does not run into the stats', async () => {
+  const { plan, drawFrame } = createSource({ width: 320, height: 180, duration: 2, shots: 2 });
+  const carded = { ...plan, cards: [{ kind: 'open', t0: 0, t1: 0.5 }, { kind: 'end', t0: 1.5, t1: 2 }] };
+  assert.deepEqual(sheetItems(carded, [0.1, 1, 1.9]).map(i => i.shot.id), ['title card', 'tc-02', 'end card']);
+  // the header's ink: the title and the stats are apart, side by side (a blank of at least 20 columns) or one under the
+  // other (blank rows between them); the rule under them is left out
+  for (const [title, cols] of [['The Very Long Title of a Film About a Hare and a Tortoise', 1], ['Seventy-Six Summers', 1], ['Seventy-Six Summers', 3]]) {
+    const outPath = join(OUT, `sheet-title-${cols}-${title.length}.jpg`);
+    const r = await contactSheet({ plan, drawFrame, outPath, cols, tileW: 480, times: [0.5, 1, 1.5], title });
+    const L = sheetLayout({ n: 3, cols, tileW: 480, W: 320, H: 180 }), img = await loadImage(readFileSync(r.path));
+    const c = createCanvas(img.width, img.height), x = c.getContext('2d'); x.drawImage(img, 0, 0);
+    const w = img.width - 2 * L.margin, h = L.header - 4, d = x.getImageData(L.margin, L.margin, w, h).data;
+    const ink = (i, y) => { const p = (y * w + i) * 4; return d[p] + d[p + 1] + d[p + 2] < 3 * 180; };
+    const rows = [...Array(h).keys()].filter(y => { let n = 0; for (let i = 0; i < w; i++) n += ink(i, y); return n > 0 && n < 0.9 * w; });
+    const columns = [...Array(w).keys()].filter(i => rows.some(y => ink(i, y)));
+    const widest = list => Math.max(0, ...list.slice(1).map((v, k) => v - list[k] - 1));
+    assert.ok(widest(columns) >= 20 || widest(rows) >= 3, `${title} (${cols} columns): blank columns ${widest(columns)}, blank rows ${widest(rows)}`);
+  }
 });
 
 // ───────────── CLI ─────────────
@@ -308,6 +361,50 @@ test('cli: a missing film fails with exit 1; voice without a key fails clearly',
   assert.equal(await main(['nope'], { out: sink, err: sink, signals: false }), 2);
 });
 
+// ───────────── the CLI on a small film of the real engine ─────────────
+
+// a hare walking with a misspelled field ("speeed"), placed on a perch its rig cannot use
+const probeFilm = (edit = j => j) => edit({ title: 'Probe', format: { width: 1920, height: 1080, fps: 24, captions: 'dialogue' },
+  voices: { hare: { voice: 'Puck' } }, cast: { hare: { rig: 'hare', voice: 'hare' } }, sets: { meadow: { kit: 'meadow' } },
+  scenes: [{ id: 's1', set: 'meadow', actors: { hare: { at: 'low_branch' } }, shots: [{ id: 'a', beats: [{ do: 'walk', who: 'hare', to: 'x:1500', speeed: 2 }] }] }] });
+function probeDir(name, film, custom = null) {
+  const dir = join(OUT, 'probe', name); rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'film.json'), JSON.stringify(film));
+  if (custom) writeFileSync(join(dir, 'custom.mjs'), custom);
+  return dir;
+}
+
+test('check and plan print the film\'s and the plan\'s warnings; --strict fails on them', () => {
+  const dir = probeDir('warn', probeFilm()), env = { GEMINI_API_KEY: '' };
+  const typo = /warning:? +scenes\[0\]\.shots\[0\]\.beats\[0\]\.speeed: unknown field "speeed"/, perch = /hare.*perch "low_branch".*cannot perch|"low_branch" is a perch, and rig "hare" can neither perch/;
+  const c = cli(['check', dir], ROOT, env), co = c.stdout + c.stderr;
+  assert.match(co, typo); assert.match(co, perch);
+  const p = cli(['plan', dir], ROOT, env), po = p.stdout + p.stderr;
+  assert.match(po, typo); assert.match(po, perch);
+  // only the typo (on a meadow anchor): valid, unless --strict
+  const plain = probeDir('strict', probeFilm(j => { j.scenes[0].actors.hare.at = 'meadow_centre'; return j; }));
+  const pp = cli(['plan', plain], ROOT, env), ppo = pp.stdout + pp.stderr;
+  assert.ok(ppo.search(typo) >= 0 && ppo.search(typo) < ppo.search(/^shot +set +size/m), 'the warnings come before the shot table');
+  const ok = cli(['check', plain], ROOT, env);
+  assert.equal(ok.status, 0, ok.stderr); assert.match(ok.stdout, /valid/); assert.match(ok.stdout, typo);
+  const strict = cli(['check', plain, '--strict'], ROOT, env);
+  assert.equal(strict.status, 1); assert.match(strict.stderr, /1 warning \(--strict makes them errors\)/);
+  // a failed check says its warnings too
+  const bad = cli(['check', probeDir('bad', probeFilm(j => { j.cast.hare.rig = 'dragon'; return j; }))], ROOT, env);
+  assert.equal(bad.status, 1); assert.match(bad.stderr, /cast\.hare\.rig/); assert.match(bad.stderr, /warning: scenes\[0\]\.shots\[0\]\.beats\[0\]\.speeed: unknown field/);
+});
+
+test('verify-effect fails a film-made sound that is mostly rumble below 20 Hz, or silent', () => {
+  const tone = (hz, k) => `({ dur = 1.5 }) => Float32Array.from({ length: Math.round(48000 * dur) }, (_, i) => 0.3 * Math.exp(-${k} * i / 48000) * Math.sin(2 * Math.PI * ${hz} * i / 48000))`;
+  const dir = probeDir('rumble', probeFilm(j => { j.scenes[0].actors.hare.at = 'meadow_centre'; return j; }), `export const sounds = { rumble: ${tone(8, 0)}, bell: ${tone(880, 3)}, hush: () => new Float32Array(48000) };\n`);
+  const r = cli(['verify-effect', dir, '-o', join(OUT, 'probe', 'rumble.jpg')], ROOT, { GEMINI_API_KEY: '' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /FAIL +sound rumble +below 20 Hz it is only 0\.\d dB under its whole band/);
+  assert.match(r.stdout, /ok +sound bell .*below 20 Hz \d+ dB under/);
+  assert.match(r.stdout, /FAIL +sound hush +it is silent/);
+  assert.match(r.stderr, /2 checks failed \(sound rumble, sound hush\)/);
+});
+
 // ───────────── end to end: the CLI against stand-in engine modules ─────────────
 // The film, voice, music, mix and lint modules belong to other parts of the engine. To test the commands' wiring
 // on their own, copy the CLI and render modules into a scratch tree and put small stand-ins beside them.
@@ -335,7 +432,8 @@ export function compile(film, { voices } = {}) {
     shots.push({ id: sh.id, scene: sc.id, t0, t1: t, size: sh.camera?.size, set: { id: sc.set } });
   }
   return { W, H, fps, duration: t, title: film.title, scenes: film.scenes.map(s => ({ id: s.id, set: s.set })), shots, lines,
-    captions: lines.map(l => ({ t0: l.t0, t1: l.t1, text: l.text, style: l.narrator ? 'narration' : 'dialogue' })), sfx: [], ambience: [], music: [], actorsAt: () => [] };
+    captions: lines.map(l => ({ t0: l.t0, t1: l.t1, text: l.text, style: l.narrator ? 'narration' : 'dialogue' })), sfx: [], ambience: [], music: [], actorsAt: () => [],
+    warnings: [1, 2, 3, 4].map(i => 'stand-in warning ' + i) };
 }`,
   'engine/film/frame.mjs': `export { drawFrame } from '../render/testcard.mjs';`,
   'engine/audio/voice.mjs': `
@@ -406,6 +504,10 @@ test('cli end to end: voice → plan → render (2 jobs) → sheet → lint → 
   const r = cmd(['render', 'films/demo', '--jobs=2'], { GEMINI_API_KEY: '' });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /voices\s+3 cached/); assert.match(r.stdout, /render done in/);
+  // the warnings: their count and the first three
+  assert.match(r.stdout, /warnings +4, the first 3 below/); assert.match(r.stdout, /warning +stand-in warning 3/); assert.doesNotMatch(r.stdout, /stand-in warning 4/);
+  assert.match(r.stdout, /^music .*music\.wav \(/m); assert.match(r.stdout, /^mix .*\(master/m);
+  assert.match(readFileSync(join(out, 'demo.mp4'), 'latin1'), /subme=8 /, 'a whole film is encoded "slow"');
   const info = await probe(join(out, 'demo.mp4'));
   const { compile } = await import(join(root, 'engine/film/compile.mjs'));
   const { loadFilm } = await import(join(root, 'engine/film/load.mjs'));
@@ -433,9 +535,29 @@ test('cli end to end: voice → plan → render (2 jobs) → sheet → lint → 
   assert.equal(ai.video.width, 32); assert.equal(ai.video.fps, 12); assert.ok(ai.audio);
   assert.equal(ai.video.frames, Math.round(plan.duration * 12));
 
-  const part = cmd(['render', 'films/demo', '--from=1', '--to=2', '-j', '1']);
+  // a part: widened to whole 4 s segments, encoded "medium" (unless --preset says), and the music and mix are kept
+  const mix0 = sha(join(out, 'mix.wav')), music0 = sha(join(out, 'music.wav'));
+  const part = cmd(['render', 'films/demo', '--from=1.1', '--to=1.6', '-j', '1']);
   assert.equal(part.status, 0, part.stderr);
-  assert.deepEqual(await decodeFrames(join(out, 'demo-1s.mp4')), seq(24, 48));
+  assert.match(part.stdout, /range +0:00\.0 → 0:04\.0/);
+  assert.match(part.stdout, /mix\.wav and .*music\.wav are up to date/); assert.doesNotMatch(part.stdout, /^music .*music\.wav \(|\(master/m);
+  assert.deepEqual(await decodeFrames(join(out, 'demo-0s.mp4')), seq(0, Math.min(96, info.video.frames)));
+  assert.match(readFileSync(join(out, 'demo-0s.mp4'), 'latin1'), /subme=7 /, 'a part is encoded "medium"');
+  const slow = cmd(['render', 'films/demo', '--from=2', '--to=3', '--preset=slow', '-o', 'films/demo/out/slow-part.mp4']);
+  assert.equal(slow.status, 0, slow.stderr); assert.match(readFileSync(join(out, 'slow-part.mp4'), 'latin1'), /subme=8 /);
+  // the film's files or the engine's sound code changed: the music and the mix are made again, the same bytes
+  for (const f of [join(root, 'films', 'demo', 'film.json'), join(root, 'engine', 'audio', 'mix.mjs')]) {
+    const t = new Date(Date.now() + 5000); utimesSync(f, t, t);
+    const again = cmd(['render', 'films/demo', '--from=2', '--to=3']);
+    assert.equal(again.status, 0, again.stderr);
+    assert.match(again.stdout, /^music .*music\.wav \(/m); assert.match(again.stdout, /^mix .*\(master/m);
+    assert.equal(sha(join(out, 'mix.wav')), mix0); assert.equal(sha(join(out, 'music.wav')), music0);
+  }
+  // `mix` makes the same bytes and marks them as made for these files: render keeps them
+  const m = cmd(['mix', 'films/demo']);
+  assert.equal(m.status, 0, m.stderr); assert.equal(sha(join(out, 'mix.wav')), mix0);
+  const after = cmd(['render', 'films/demo', '--from=2', '--to=3']);
+  assert.match(after.stdout, /are up to date/);
 
   writeFileSync(join(root, 'films', 'demo', 'film.json'), JSON.stringify({ title: 'Broken', format: { width: 64, height: 36, fps: 24 }, scenes: [] }));
   const bad = cmd(['check', 'films/demo']);

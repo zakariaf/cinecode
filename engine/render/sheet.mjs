@@ -10,11 +10,13 @@ const PAPER = '#f1e8d6', INK = '#2a2130', MUTED = '#7a6c74', SERIF = 'Georgia, "
 const shotAt = (plan, t) => plan.shots?.find(s => t >= s.t0 && t < s.t1) ?? plan.shots?.[plan.shots.length - 1] ?? null;
 const textAt = (list, t) => (list || []).find(c => t >= c.t0 && t < c.t1)?.text ?? '';
 
-/** The stills to draw: the middle frame of every shot, or the given times. → [{ t, shot, caption }] */
+/** The stills to draw: the middle frame of every shot, or the given times. → [{ t, shot, caption }]. A still under the
+ * opening or end card is labelled as the card. */
 export function sheetItems(plan, times = null) {
   const snap = t => Math.min(Math.max(0, Math.floor(t * plan.fps) / plan.fps), Math.max(0, plan.duration - 1 / plan.fps));
   const ts = times?.length ? times.map(snap) : (plan.shots || []).map(s => snap((s.t0 + s.t1) / 2));
-  return ts.map(t => ({ t, shot: shotAt(plan, t), caption: textAt(plan.captions, t) || textAt(plan.lines, t) }));
+  const cardAt = t => plan.cards?.find(c => t >= c.t0 && t < c.t1);
+  return ts.map(t => { const c = cardAt(t); return { t, shot: c ? { id: c.kind === 'open' ? 'title card' : 'end card', t0: c.t0, t1: c.t1 } : shotAt(plan, t), caption: textAt(plan.captions, t) || textAt(plan.lines, t) }; });
 }
 
 /** Grid geometry. Everything scales with the tile width (480 px = 1×). */
@@ -47,9 +49,10 @@ function fitLines(ctx, text, maxW, maxLines) {
 /**
  * Draw a contact sheet JPEG.
  *   plan, drawFrame, outPath, times (seconds; default: middle of each shot), cols = 4, tileW = 480, quality = 88, title, onProgress(i, n)
+ *   canvasAt(t) → the frame at t as a canvas, or a promise of it: in place of drawFrame, for a source that draws no canvas (a 3D film)
  * → { path, width, height, items }
  */
-export async function contactSheet({ plan, drawFrame, outPath, times = null, cols = 4, tileW = 480, quality = 88, title = plan.title, onProgress }) {
+export async function contactSheet({ plan, drawFrame, canvasAt, outPath, times = null, cols = 4, tileW = 480, quality = 88, title = plan.title, onProgress }) {
   const items = sheetItems(plan, times);
   if (!items.length) throw new Error('contact sheet: nothing to draw (no shots and no times)');
   const L = sheetLayout({ n: items.length, cols, tileW, W: plan.W, H: plan.H }), u = L.u;
@@ -66,22 +69,28 @@ export async function contactSheet({ plan, drawFrame, outPath, times = null, col
   x.putImageData(grain, 0, 0);
   x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
 
-  // header
-  x.textBaseline = 'alphabetic'; x.fillStyle = INK; x.textAlign = 'left';
-  x.font = `bold ${Math.round(30 * u)}px ${SERIF}`;
-  x.fillText(title || 'Untitled', L.margin, L.margin + Math.round(34 * u));
-  x.font = `${Math.round(16 * u)}px ${SERIF}`; x.fillStyle = MUTED; x.textAlign = 'right';
+  // header: the title, and the stats on its right; where they would meet (a sheet of a still or two), the stats go
+  // under the title. A title wider than the sheet is cut short.
   const shots = plan.shots?.length ?? 0;
   const count = times?.length ? `${items.length} stills · ${shots} shots` : `${shots} shots`;
-  x.fillText(`${count} · ${clock(plan.duration)} · ${plan.W}×${plan.H} @ ${plan.fps} fps`, L.width - L.margin, L.margin + Math.round(34 * u));
+  const stats = `${count} · ${clock(plan.duration)} · ${plan.W}×${plan.H} @ ${plan.fps} fps`, room = L.width - 2 * L.margin;
+  x.textBaseline = 'alphabetic'; x.textAlign = 'left';
+  x.font = `${Math.round(16 * u)}px ${SERIF}`;
+  const statsW = x.measureText(stats).width;
+  x.font = `bold ${Math.round(30 * u)}px ${SERIF}`; x.fillStyle = INK;
+  const under = x.measureText(title || 'Untitled').width + L.gap + statsW > room;
+  x.fillText(fitLines(x, title || 'Untitled', room, 1)[0], L.margin, L.margin + Math.round((under ? 30 : 34) * u));
+  x.font = `${Math.round((under ? 14 : 16) * u)}px ${SERIF}`; x.fillStyle = MUTED; x.textAlign = under ? 'left' : 'right';
+  x.fillText(fitLines(x, stats, room, 1)[0], under ? L.margin : L.width - L.margin, L.margin + Math.round((under ? 52 : 34) * u));
+  const ruleY = L.margin + Math.round((under ? 60 : 50) * u);
   x.strokeStyle = INK; x.globalAlpha = 0.35; x.lineWidth = Math.max(1, u);
-  x.beginPath(); x.moveTo(L.margin, L.margin + Math.round(50 * u)); x.lineTo(L.width - L.margin, L.margin + Math.round(50 * u)); x.stroke();
+  x.beginPath(); x.moveTo(L.margin, ruleY); x.lineTo(L.width - L.margin, ruleY); x.stroke();
   x.globalAlpha = 1;
 
-  const grab = frameGrabber(plan, drawFrame);
+  const grab = canvasAt ? { draw: canvasAt } : frameGrabber(plan, drawFrame);
   for (const [i, it] of items.entries()) {
     const { x: cx, y: cy } = L.cell(i);
-    const frame = grab.draw(it.t);
+    const frame = await grab.draw(it.t);
     // soft shadow, the still, a thin ink frame
     x.save(); x.shadowColor = 'rgba(42,33,48,0.28)'; x.shadowBlur = 10 * u; x.shadowOffsetY = 3 * u;
     x.fillStyle = INK; x.fillRect(cx, cy, L.tileW, L.tileH); x.restore();
@@ -103,6 +112,7 @@ export async function contactSheet({ plan, drawFrame, outPath, times = null, col
       fitLines(x, `“${it.caption}”`, L.tileW, 2).forEach((line, k) => x.fillText(line, cx, ly + Math.round((22 + 19 * k) * u)));
     }
     onProgress?.(i + 1, items.length);
+    await new Promise(setImmediate);   // (lets the frame's own canvases be freed: without it a long film's sheet held 10 GB)
   }
 
 

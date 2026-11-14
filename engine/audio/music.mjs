@@ -372,8 +372,9 @@ function timeMap(beatSec, landing, meter, rit, { intro = 0, seed = 1, landAt = n
  * close to the mood tempo such that the final chord lands with ~3 s left to ring.
  * With a motif statement the intro is the statement's bars ('motif' = the statement then the final chord);
  * with a held pedal ('pedal') nothing lands: just enough bars at the given tempo to cover the cue.
+ * `landAt` (s) puts the final chord there instead (with a fixed tempo: the longest form that lands by then).
  */
-function chooseForm(dur, M, fixedTempo, { introBars = null, hold = false } = {}) {
+function chooseForm(dur, M, fixedTempo, { introBars = null, hold = false, landAt = null } = {}) {
   const meter = M.meter, base = fixedTempo || M.tempo, barSec = meter * 60 / base;
   if (hold) {
     const total = Math.max(introBars || 1, Math.ceil(dur / barSec) + 1);
@@ -397,12 +398,12 @@ function chooseForm(dur, M, fixedTempo, { introBars = null, hold = false } = {})
   const fallback = introBars != null ? { kind: 'motif', intro: introBars, P: 0, before: introBars, landing: introBars * meter, tempo: base }
     : { kind: 'swell', intro: 0, P: 0, before: 0, landing: 0, tempo: base };
   if (fixedTempo) {   // fixed tempo: the longest form whose final chord still has 2.2 s to ring
-    const fit = opts.filter(o => 60 / base * o.Q + 3 <= dur).sort((a, b) => b.landing - a.landing || a.intro - b.intro);
+    const fit = opts.filter(o => (landAt != null ? 60 / base * o.Q <= landAt : 60 / base * o.Q + 3 <= dur)).sort((a, b) => b.landing - a.landing || a.intro - b.intro);
     return fit.length ? { ...fit[0], tempo: base } : fallback;
   }
   let best = null;
   for (const o of opts) {
-    const avail = dur - ring;
+    const avail = landAt ?? dur - ring;
     if (avail <= 0) break;
     const T = o.Q > 0 ? 60 * o.Q / avail : base, f = T / base;
     if (f < 0.87 || f > 1.15) continue;
@@ -439,7 +440,7 @@ function midiToDeg(m, cs, tonicMidi) {
 }
 
 class Cue {
-  constructor({ dur, mood, intensity, key, tempo, seed, theme, themeSteps, motif, downbeat, cut }) {
+  constructor({ dur, mood, intensity, key, tempo, seed, theme, themeSteps, motif, downbeat, cut, landAt }) {
     this.M = MOODS[mood];
     if (!this.M) throw new Error(`unknown mood ${mood}`);
     this.mood = mood; this.dur = dur; this.seed = seed;
@@ -454,7 +455,7 @@ class Cue {
     this.cut = cut ?? null;                          // s: where the score will cut this cue (scoreFilm)
     this.motif = this.prepareMotif(motif, key);
     const mo = this.motif;
-    this.form = chooseForm(dur, this.M, tempo, mo ? { introBars: mo.R, hold: mo.hold } : {});
+    this.form = chooseForm(dur, this.M, tempo, mo ? { introBars: mo.R, hold: mo.hold, landAt } : { landAt });
     this.tempo = this.form.tempo;
     const rit = this.form.kind === 'pedal' ? 0 : this.M.rit;
     this.tm = timeMap(60 / this.tempo, this.form.landing, this.meter, rit, { intro: this.form.intro, seed: S.mixSeed(seed, mood, 'rubato'), landAt: this.form.landAt ?? null });
@@ -1214,11 +1215,12 @@ class Cue {
 
 /**
  * Compose a cue without rendering it: the form, bars (chords, sections, phrase positions), tempo and the note
- * events (inst, t, dur, midi, vel, beat). Same arguments as composeCue. Useful for tests, sheets and debugging.
+ * events (inst, t, dur, midi, vel, beat). Same arguments as composeCue, plus landAt (s: where the final chord lands
+ * instead of ~3 s before the end; scoreFilm's last cue under an end card). Useful for tests, sheets and debugging.
  */
-export function planCue({ dur, mood = 'pastoral', intensity = 0.5, key, tempo, seed = 1, theme, themeSteps, motif, downbeat, cut } = {}) {
+export function planCue({ dur, mood = 'pastoral', intensity = 0.5, key, tempo, seed = 1, theme, themeSteps, motif, downbeat, cut, landAt } = {}) {
   if (!(dur > 0)) throw new Error('composeCue: dur must be > 0');
-  const C = new Cue({ dur, mood, intensity, key, tempo, seed, theme, themeSteps, motif, downbeat, cut });
+  const C = new Cue({ dur, mood, intensity, key, tempo, seed, theme, themeSteps, motif, downbeat, cut, landAt });
   C.plan(); C.arrange();
   return C;
 }
@@ -1356,6 +1358,12 @@ const NONE_FADE = 0.3;   // music 'none' fades the score out over this (s)
 const OVERRUN = 6;       // a cue that will be cut is composed this much longer, so it is cut mid-flight (s)
 const HOLD_INTO = 1.2;   // a final chord is held this far into the statement that follows it (s), if it fits
 const CLASH_TAIL = 0.2;  // ... or, if it would clash, is gone this soon after the statement enters (s)
+// The film's last cue, when it plays under the end card, lands its final chord as the card comes up (or, for a card
+// shorter than 2.2 s or a cue that cannot reach the card's start in tempo, END_FADE + 1 s before the end), is
+// composed END_RING s past the film's end so the chord still sounds at the end (its notes release END_RING before the
+// composed end, see ringSec), and fades out with the picture's fade to black (END_FADE, as frame.mjs). Plan P4 4.5; false = the final chord lands ~3 s before the end.
+const LAND_ON_END_CARD = true;
+const END_RING = 2.3, END_FADE = 1.2;
 const FIFTHS = pc => mod(pc * 7, 12);
 const fifthsDist = (a, b) => { const d = mod(FIFTHS(a) - FIFTHS(b), 12); return Math.min(d, 12 - d); };
 const keyName = pc => Object.keys(NOTE_PC).find(n => NOTE_PC[n] === pc);
@@ -1381,7 +1389,8 @@ const clashes = (a, b) => a.some(p => !b.includes(p) && b.some(q => semis(p, q) 
  * t0; the outgoing cue lands its final chord just before and holds it 1.2 s into the statement if it fits the
  * statement's opening chord, and fades it out by t0 + 0.2 s if it would clash (a C-minor cue into a C-major
  * statement: Eb under E). Downbeat cues cut the previous cue at their t0, 'none' fades the score out over 0.3 s
- * and keeps it silent; stings land their accent exactly on t with the score dipped underneath.
+ * and keeps it silent; stings land their accent exactly on t with the score dipped underneath. A last cue that plays
+ * into the end card (plan.cards) rings to the film's end and fades out with the picture (LAND_ON_END_CARD).
  * → { L, R, cues: [{ t0, t1, mood, tonic, tempo, form, motif, downbeat, themeSteps }] } (cues: where each was
  * placed, for inspection; themeSteps: the diatonic steps its melodies were built on)
  */
@@ -1408,7 +1417,7 @@ export function scoreFilm(plan, { seed = 1 } = {}) {
     else merged.push({ ...c, pts: [[c.t0, I]] });
   }
   let prevTonic = null;
-  const jobs = [];
+  const jobs = [], endCard = (plan.cards || []).find(x => x.kind === 'end');
   for (let k = 0; k < merged.length; k++) {
     const c = merged[k], prev = merged[k - 1], next = merged[k + 1];
     const touchPrev = prev && c.t0 - prev.t1 < 0.3, touchNext = next && next.t0 - c.t1 < 0.3;
@@ -1418,7 +1427,7 @@ export function scoreFilm(plan, { seed = 1 } = {}) {
     if (touchPrev && !c.downbeat) { if (hasMotif) fin = 0.08; else { s0 = Math.max(0, c.t0 - XF / 2); fin = c.t0 - s0 > 0.01 ? 2 * (c.t0 - s0) : 0; } }
     // exit: cut by a downbeat or by silence, or overlap the next cue, or end on our own
     const none = silent.find(z => z.t0 > c.t0 + 0.05 && z.t0 < c.t1 + 0.3);
-    let s1 = c.t1, fout = 0, cut = null, over = 0, into = false;
+    let s1 = c.t1, fout = 0, cut = null, over = 0, into = false, landAt;
     if (touchNext && next.downbeat) { cut = next.t0; fout = CUT_FADE; }
     else if (none) { cut = none.t0; fout = NONE_FADE; }
     else if (touchNext && next.motif > 0 && motifNotes) {
@@ -1426,6 +1435,7 @@ export function scoreFilm(plan, { seed = 1 } = {}) {
       s1 = Math.min(dur, next.t0 + HOLD_INTO); fout = s1 - Math.max(c.t0, next.t0 - 0.3); over = next.t0 + 2.6 - s1; into = true;
     }
     else if (touchNext) { s1 = Math.min(dur, c.t1 + XF / 2); fout = s1 - Math.max(c.t0, c.t1 - XF / 2); over = 1.2; }   // final chord still held as the crossfade starts
+    else if (LAND_ON_END_CARD && !next && !c.hold && endCard && c.t0 < endCard.t0 && c.t1 >= dur - 0.05) { over = END_RING; fout = Math.min(END_FADE, c.t1 - c.t0); landAt = Math.min(endCard.t0, dur - END_FADE - 1) - s0; }
     if (cut != null) s1 = Math.min(dur, cut + fout);
     if (s1 - s0 < 0.05) continue;
     const keys = MOODS[c.mood].keys.map(keyPc);
@@ -1439,10 +1449,13 @@ export function scoreFilm(plan, { seed = 1 } = {}) {
       return v;
     };
     const motif = hasMotif ? { notes: motifNotes, n: c.motif === true ? motifNotes.length : c.motif, voice: c.motifVoice ?? DEFAULT_MOTIF_VOICE[c.mood], hold: !!c.hold } : null;
-    const C = planCue({
+    const args = {
       dur: s1 - s0 + (cut != null ? OVERRUN : over), mood: c.mood, intensity: pts.length > 1 ? iFn : pts[0][1], key: keyName(tonic), tempo: c.tempo,
-      seed: S.mixSeed(seed, k, c.mood), theme: seed, themeSteps, motif, downbeat: !!c.downbeat, cut: cut != null ? cut - s0 : null,
-    });
+      seed: S.mixSeed(seed, k, c.mood), theme: seed, themeSteps, motif, downbeat: !!c.downbeat, cut: cut != null ? cut - s0 : null, landAt,
+    };
+    let C = planCue(args);
+    // a motif statement too long to land as the card comes up lands by END_FADE + 1 s before the end instead, if it can
+    if (landAt != null && s0 + C.t(C.form.landing) > dur - END_FADE - 1 + 0.01) C = planCue({ ...args, landAt: dur - END_FADE - 1 - s0 });
     jobs[k] = { c, C, s0, s1, fin, fout, into, tonic, motif };
   }
   // every cue is planned before any is rendered, so a final chord held into a statement can be checked against the
