@@ -1,3 +1,5 @@
+<img src=".claude-plugin/icon.png" alt="cinecode icon: a clapperboard with &lt;/&gt; on it" width="96">
+
 # cinecode
 
 cinecode turns a storyboard written as JSON into a finished animated film: painted sets, animated characters, camera
