@@ -19,7 +19,8 @@ h2 { font-size: 2rem; margin: 0 0 0.6em; }
 /* header */
 .top { position: sticky; top: 0; z-index: 5; background: rgba(243, 234, 216, 0.92); backdrop-filter: blur(6px); border-bottom: 1px solid var(--rule); }
 .top .wrap { display: flex; align-items: center; justify-content: space-between; height: 56px; }
-.mark { font: italic 600 1.5rem var(--serif); color: var(--ink); text-decoration: none; }
+.mark { display: inline-flex; align-items: center; font: italic 600 1.5rem var(--serif); color: var(--ink); text-decoration: none; }
+.mark img { border-radius: 7px; margin-right: 10px; }
 .mark span { color: var(--accent); }
 .top nav { display: flex; gap: 20px; font: 600 0.9rem var(--sans); }
 .top nav a { color: var(--ink-2); text-decoration: none; }

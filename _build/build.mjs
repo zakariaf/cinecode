@@ -4,6 +4,7 @@
 // .jpg poster, .vtt subtitles) are added by hand; this script only lists them.
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { Marked } from 'marked';
 
 const SRC = path.resolve(process.argv[2] || '');
@@ -77,7 +78,7 @@ function render(md) {
 }
 
 const NAV = (root, here) => `<header class="top"><div class="wrap">
-  <a class="mark" href="${root}index.html">cine<span>code</span></a>
+  <a class="mark" href="${root}index.html"><img src="${root}icon-64.png" alt="" width="32" height="32">cine<span>code</span></a>
   <nav><a href="${root}index.html#films"${here === 'films' ? ' aria-current="page"' : ''}>Films</a><a href="${root}index.html#install">Install</a><a href="${root}docs/storyboard.html"${here === 'docs' ? ' aria-current="page"' : ''}>Docs</a><a href="${REPO}">GitHub</a></nav>
 </div></header>`;
 const FOOT = `<footer><div class="wrap"><p>cinecode is open source under the MIT licence · © 2026 Zakaria Fatahi · <a href="${REPO}">github.com/zakariaf/cinecode</a></p>
@@ -87,11 +88,15 @@ const page = ({ title, desc, root, body, here }) => `<!doctype html>
 <title>${esc(title)}</title><meta name="description" content="${esc(desc)}">
 <meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}">
 <meta property="og:image" content="https://zakaria.dev/cinecode/hero.jpg">
+<link rel="icon" type="image/png" sizes="64x64" href="${root}icon-64.png"><link rel="apple-touch-icon" href="${root}icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="${root}style.css"></head>
 <body>${NAV(root, here)}${body}${FOOT}</body></html>
 `;
+
+// ── icon: the plugin's own, resized with ffmpeg ──
+for (const n of [64, 180]) execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', path.join(SRC, '.claude-plugin/icon.png'), '-vf', `scale=${n}:${n}:flags=lanczos`, path.join(OUT, `icon-${n}.png`)]);
 
 // ── docs ──
 fs.mkdirSync(path.join(OUT, 'docs/images'), { recursive: true });

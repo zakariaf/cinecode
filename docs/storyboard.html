@@ -3,11 +3,12 @@
 <title>Storyboard · cinecode</title><meta name="description" content="cinecode docs: Storyboard">
 <meta property="og:title" content="Storyboard · cinecode"><meta property="og:description" content="cinecode docs: Storyboard">
 <meta property="og:image" content="https://zakaria.dev/cinecode/hero.jpg">
+<link rel="icon" type="image/png" sizes="64x64" href="../icon-64.png"><link rel="apple-touch-icon" href="../icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../style.css"></head>
 <body><header class="top"><div class="wrap">
-  <a class="mark" href="../index.html">cine<span>code</span></a>
+  <a class="mark" href="../index.html"><img src="../icon-64.png" alt="" width="32" height="32">cine<span>code</span></a>
   <nav><a href="../index.html#films">Films</a><a href="../index.html#install">Install</a><a href="../docs/storyboard.html" aria-current="page">Docs</a><a href="https://github.com/zakariaf/cinecode">GitHub</a></nav>
 </div></header><main class="docs wrap"><aside class="side"><p class="label">Docs</p><ul><li><a href="storyboard.html" aria-current="page">Storyboard</a></li><li><a href="cast.html">Cast and rigs</a></li><li><a href="sets.html">Sets</a></li><li><a href="effects.html">Effects</a></li><li><a href="sound.html">Voices, music and sound</a></li><li><a href="lint.html">Lint</a></li><li><a href="rendering.html">Rendering</a></li></ul>
 <p class="label">On this page</p><ul class="toc"><li><a href="#top-level">Top level</a></li><li><a href="#format-and-titles">Format and titles</a></li><li><a href="#voices-and-cast">Voices and cast</a></li><li><a href="#sets">Sets</a></li><li><a href="#score">Score</a></li><li><a href="#scenes">Scenes</a></li><li><a href="#places">Places</a></li><li><a href="#shots">Shots</a></li><li><a href="#camera">Camera</a></li><li><a href="#beats">Beats</a></li><li><a href="#timing-rules">Timing rules</a></li><li><a href="#say">say</a></li><li><a href="#do-actions">do: actions</a></li><li><a href="#sfx">sfx</a></li><li><a href="#fx">fx</a></li><li><a href="#music">music</a></li><li><a href="#title">title</a></li><li><a href="#mark">mark</a></li><li><a href="#wait">wait</a></li><li><a href="#captions">Captions</a></li><li><a href="#extensions-at-a-glance">Extensions at a glance</a></li><li><a href="#checking-a-storyboard">Checking a storyboard</a></li></ul></aside><article class="prose"><h1 id="the-storyboard-filmjson"><a class="anchor" href="#the-storyboard-filmjson" aria-hidden="true">#</a>The storyboard: film.json</h1>
@@ -43,7 +44,7 @@ validator is <code>engine/film/validate.mjs</code>; the compiler that turns it i
 <tr>
 <td><code>format</code></td>
 <td>no</td>
-<td><code>{ width, height, fps, captions }</code>, see below</td>
+<td><code>{ width, height, fps, captions, style }</code>, see below</td>
 </tr>
 <tr>
 <td><code>titles</code></td>
@@ -106,6 +107,11 @@ reported as warnings (see <a href="#checking-a-storyboard">checking</a>).</p>
 <td>integer, 1–120</td>
 </tr>
 <tr>
+<td><code>format.style</code></td>
+<td><code>&quot;painted&quot;</code></td>
+<td><code>painted</code> (the full painting: colour, light, shadows, grade) or <code>lineart</code>: a colouring-book page, black ink on white with no colour, fill or shade. See <a href="#line-art">line art</a>.</td>
+</tr>
+<tr>
 <td><code>format.captions</code></td>
 <td><code>&quot;dialogue&quot;</code></td>
 <td>which captions are burned into the picture: <code>dialogue</code> (cast lines only), <code>all</code> (also narration and sound captions), <code>none</code>. The <code>.srt</code> file and the soft subtitles in the MP4 always carry every caption.</td>
@@ -130,6 +136,26 @@ film&#39;s length (<code>plan</code>&#39;s total includes them, and the first sh
 is at full strength for <code>dur − 2.4</code> s. The end card dissolves in over 1 s, its first line inks in from 0.4 s to 1.3 s
 (a second line by 1.8 s) and it fades to black over its last 1.2 s: full strength for <code>dur − 2.5</code> s. A 2 s card never
 reaches full strength; 3 s is the shortest that reads (a short film), 4 s is comfortable.</p>
+<h3 id="line-art"><a class="anchor" href="#line-art" aria-hidden="true">#</a>Line art</h3>
+<p><code>&quot;format&quot;: { &quot;style&quot;: &quot;lineart&quot; }</code> draws the whole film as a colouring book: every character, prop and set in black
+outlines on white paper, title lettering outlined to colour in, the cards in black and white. Nothing else in the
+storyboard changes. Every line is drawn by one pen: whatever the painting inked (a tapered brush outline, a filled
+mark) is thinned to its centre and drawn again at an even width, so faces stay readable in a wide shot. How each part
+becomes lines:</p>
+<ul>
+<li><strong>Characters</strong> keep their own ink (outlines, eyes, brows, buttons, folds) and are white inside, so a figure hides
+the lines of whatever is behind it.</li>
+<li><strong>Sets</strong> keep their ink and gain an outline wherever two painted shapes meet without one (a hill against the sky);
+grass dabs, flower dots and texture are dropped. The sky is blank paper, at every time of day.</li>
+<li><strong>Close framings:</strong> a set layer drawn much larger than it was painted fades out (1.6× to 2.4× its painted size), so
+a close-up is the figures on a white page; props are redrawn for the close framing instead.</li>
+<li><strong>Light is off:</strong> no time-of-day grade, story grade (memory, dream), cast shadows, shade, rim light, haze or depth
+of field. <code>time</code> still sets the sounds and the ambience.</li>
+<li><strong>Effects</strong> (overlays, custom beats, rain, dust, fireflies) are painted on a sheet of their own and turned into
+lines too: what is painted solid is white with an outline, a wash or a glow leaves only its edges. An effect whose
+point is a colour or a darkening (a night wash, a sunset glow) has no line-art form: leave it out.</li>
+</ul>
+<p>Line art renders about twice as slowly as the painted film.</p>
 <h2 id="voices-and-cast"><a class="anchor" href="#voices-and-cast" aria-hidden="true">#</a>Voices and cast</h2>
 <pre><code class="language-json">&quot;voices&quot;: {
   &quot;narrator&quot;: { &quot;voice&quot;: &quot;Sulafat&quot;, &quot;tone&quot;: &quot;warm, gentle, unhurried&quot; },

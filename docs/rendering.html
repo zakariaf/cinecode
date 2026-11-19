@@ -3,11 +3,12 @@
 <title>Rendering · cinecode</title><meta name="description" content="cinecode docs: Rendering">
 <meta property="og:title" content="Rendering · cinecode"><meta property="og:description" content="cinecode docs: Rendering">
 <meta property="og:image" content="https://zakaria.dev/cinecode/hero.jpg">
+<link rel="icon" type="image/png" sizes="64x64" href="../icon-64.png"><link rel="apple-touch-icon" href="../icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../style.css"></head>
 <body><header class="top"><div class="wrap">
-  <a class="mark" href="../index.html">cine<span>code</span></a>
+  <a class="mark" href="../index.html"><img src="../icon-64.png" alt="" width="32" height="32">cine<span>code</span></a>
   <nav><a href="../index.html#films">Films</a><a href="../index.html#install">Install</a><a href="../docs/storyboard.html" aria-current="page">Docs</a><a href="https://github.com/zakariaf/cinecode">GitHub</a></nav>
 </div></header><main class="docs wrap"><aside class="side"><p class="label">Docs</p><ul><li><a href="storyboard.html">Storyboard</a></li><li><a href="cast.html">Cast and rigs</a></li><li><a href="sets.html">Sets</a></li><li><a href="effects.html">Effects</a></li><li><a href="sound.html">Voices, music and sound</a></li><li><a href="lint.html">Lint</a></li><li><a href="rendering.html" aria-current="page">Rendering</a></li></ul>
 <p class="label">On this page</p><ul class="toc"><li><a href="#commands">Commands</a></li><li><a href="#environment">Environment</a></li><li><a href="#performance">Performance</a></li></ul></aside><article class="prose"><h1 id="rendering-the-command-line"><a class="anchor" href="#rendering-the-command-line" aria-hidden="true">#</a>Rendering: the command line</h1>
@@ -277,7 +278,8 @@ before it replaces the output file.</li>
 </tr>
 </tbody></table></div>
 <p>Work in progress lives in a hidden <code>.&lt;name&gt;.mp4.parts/</code> folder next to the output and is removed at the end (kept with
-<code>--keep</code>). The burned-in captions follow <code>format.captions</code> (<code>dialogue</code> by default); the <code>.srt</code> and the subtitle track
+<code>--keep</code>). One render at a time writes to an output: a hidden <code>.&lt;name&gt;.mp4.lock</code> holds the render&#39;s process id, and a
+second render of the same file is refused while that process runs (a lock left by a crashed render is taken over). The burned-in captions follow <code>format.captions</code> (<code>dialogue</code> by default); the <code>.srt</code> and the subtitle track
 always hold all of them.</p>
 <h3 id="cast-sheet-and-set-sheet"><a class="anchor" href="#cast-sheet-and-set-sheet" aria-hidden="true">#</a>cast-sheet and set-sheet</h3>
 <pre><code class="language-sh">node bin/cinecode.mjs cast-sheet hare,tortoise -o out/two.jpg
