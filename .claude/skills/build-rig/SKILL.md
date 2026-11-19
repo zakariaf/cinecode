@@ -1,6 +1,6 @@
 ---
 name: build-rig
-description: Build a new cinecode rig (a character or a prop the camera frames: a wolf, a crow, a dragon, a kite, a strawberry, a lantern) when no built-in rig reads as it, and pass its gate (`cinecode verify-rig`). Use when a film needs a character or object the engine doesn't have, or when an adapted rig wouldn't read as the thing.
+description: "Build a new cinecode rig (a character or a prop the camera frames: a wolf, a crow, a dragon, a kite, a strawberry, a lantern) when no built-in rig reads as it, and pass its gate (`cinecode verify-rig`). Use when a film needs a character or object the engine doesn't have, or when an adapted rig wouldn't read as the thing."
 ---
 
 # Build a rig

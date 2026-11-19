@@ -1,6 +1,6 @@
 ---
 name: build-effect
-description: Build a new cinecode effect (an overlay, a custom beat or a sound: a storm, lightning, snow, a glow, a swarm, a spell, a comet, a rain bed, thunder) when the built-in fx don't have it, and pass its gate (`cinecode verify-effect`). Use when a film needs weather, light, particles, a drawn prop that follows an actor, or a sound the engine lacks.
+description: "Build a new cinecode effect (an overlay, a custom beat or a sound: a storm, lightning, snow, a glow, a swarm, a spell, a comet, a rain bed, thunder) when the built-in fx don't have it, and pass its gate (`cinecode verify-effect`). Use when a film needs weather, light, particles, a drawn prop that follows an actor, or a sound the engine lacks."
 ---
 
 # Build an effect

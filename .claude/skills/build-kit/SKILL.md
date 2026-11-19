@@ -1,6 +1,6 @@
 ---
 name: build-kit
-description: Build a new cinecode set kit (a place: a harbour, a cave, a beach, a city street, a snowy wood, a room) when no built-in kit can be the location, and pass its gate (`cinecode verify-kit`). Use when a film needs a location the engine doesn't have.
+description: "Build a new cinecode set kit (a place: a harbour, a cave, a beach, a city street, a snowy wood, a room) when no built-in kit can be the location, and pass its gate (`cinecode verify-kit`). Use when a film needs a location the engine doesn't have."
 ---
 
 # Build a set kit
